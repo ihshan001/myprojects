@@ -1,0 +1,374 @@
+"use client"
+
+import { useState } from "react"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
+import { FileText, Search, CheckCircle } from "lucide-react"
+import { processPrescriptionAction, completePrescriptionAction, cancelPrescriptionAction } from "@/lib/pharmacist-actions"
+import { useToast } from "@/hooks/use-toast"
+import { getPrescriptionStatusColor } from "@/lib/functions"
+import { Skeleton } from "@/components/ui/skeleton";
+
+const OrderCardSkeleton = () => (
+  <div className="p-4 border rounded-lg bg-white">
+    <div className="flex items-center justify-between mb-3">
+      <div>
+        <Skeleton className="h-5 w-40 mb-2" />
+        <Skeleton className="h-4 w-64" />
+        <Skeleton className="h-3 w-24 mt-1" />
+      </div>
+      <Skeleton className="h-6 w-24" />
+    </div>
+    <div className="space-y-2 mb-3">
+      <Skeleton className="h-4 w-32" />
+      <div className="text-sm bg-gray-50 p-2 rounded">
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-3 w-full mt-1" />
+      </div>
+      <div className="text-sm bg-gray-50 p-2 rounded">
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-3 w-full mt-1" />
+      </div>
+    </div>
+    <div className="flex space-x-2">
+      <Skeleton className="h-9 w-24" />
+      <Skeleton className="h-9 w-24" />
+    </div>
+  </div>
+);
+
+export const OrdersClientSkeleton = () => (
+  <div className="space-y-6">
+    <Card>
+      <CardHeader>
+        <div className="flex items-center space-x-2">
+          <Skeleton className="h-5 w-5" />
+          <Skeleton className="h-5 w-40" />
+        </div>
+        <Skeleton className="h-4 w-72 mt-1" />
+        <div className="relative mt-2">
+          <Skeleton className="h-10 w-full" />
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid w-full grid-cols-1 mb-16 md:grid-cols-4">
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+        </div>
+        <div className="space-y-4">
+          {[...Array(3)].map((_, i) => <OrderCardSkeleton key={i} />)}
+        </div>
+      </CardContent>
+    </Card>
+  </div>
+);
+
+interface PrescriptionItem {
+  id: string
+  drugName: string
+  dosage: string
+  frequency: string
+  duration: string
+  quantity?: number
+  unitPrice?: number
+  totalPrice?: number
+}
+
+interface Prescription {
+  id: string
+  patient: string
+  doctor: string
+  status: "PENDING" | "FILLED" | "CANCELLED"; // Use Prisma enum types
+  createdAt: string
+  items: PrescriptionItem[]
+  totalAmount?: number
+}
+
+interface OrdersClientProps {
+  prescriptions: Prescription[]
+}
+
+export default function OrdersClient({ prescriptions }: OrdersClientProps) {
+  const [searchTerm, setSearchTerm] = useState("")
+  const [activeTab, setActiveTab] = useState<"all" | "PENDING" | "FILLED" | "CANCELLED">("all") // Use Prisma enum types
+  const [isProcessingDialogOpen, setIsProcessingDialogOpen] = useState(false)
+  const [currentPrescription, setCurrentPrescription] = useState<Prescription | null>(null)
+  const [dispensedItems, setDispensedItems] = useState<
+    Array<{ itemId: string; drugName: string; quantityDispensed: number }>
+  >([])
+  const { toast } = useToast()
+
+  const filteredPrescriptions = prescriptions.filter(
+    (prescription) =>
+      (activeTab === "all" || prescription.status === activeTab) &&
+      (prescription.patient.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        prescription.doctor.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        prescription.id.toLowerCase().includes(searchTerm.toLowerCase())),
+  )
+
+  const handleStartProcessing = (prescription: Prescription) => {
+    setCurrentPrescription(prescription)
+    setDispensedItems(
+      prescription.items.map((item: any) => ({
+        itemId: item.id,
+        drugName: item.drugName,
+        quantityDispensed: item.quantity,
+      })),
+    )
+    setIsProcessingDialogOpen(true)
+  }
+
+  const handleProcessPrescription = async () => {
+    if (!currentPrescription) return
+
+    try {
+      const result = await processPrescriptionAction(currentPrescription.id, dispensedItems)
+
+      if (result.success) {
+        toast({
+          title: "Prescription processing started",
+          description: `Prescription for ${currentPrescription.patient} is now being processed.`,
+        })
+        setIsProcessingDialogOpen(false)
+      } else {
+        toast({
+          title: "Error processing prescription",
+          description: result.error || "An error occurred while processing the prescription.",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      toast({
+        title: "Error processing prescription",
+        description: "An unexpected error occurred.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleCompletePrescription = async (prescriptionId: string) => {
+    try {
+      const result = await completePrescriptionAction(prescriptionId)
+
+      if (result.success) {
+        toast({
+          title: "Prescription completed",
+          description: "The prescription has been marked as completed.",
+        })
+      } else {
+        toast({
+          title: "Error completing prescription",
+          description: result.error || "An error occurred while completing the prescription.",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      toast({
+        title: "Error completing prescription",
+        description: "An unexpected error occurred.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleCancelPrescription = async (prescriptionId: string) => {
+    try {
+      const result = await cancelPrescriptionAction(prescriptionId)
+
+      if (result.success) {
+        toast({
+          title: "Prescription cancelled",
+          description: "The prescription has been marked as cancelled.",
+        })
+      } else {
+        toast({
+          title: "Error cancelling prescription",
+          description: result.error || "An error occurred while cancelling the prescription.",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      toast({
+        title: "Error cancelling prescription",
+        description: "An unexpected error occurred.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const updateDispensedQuantity = (itemId: string, quantity: number) => {
+    setDispensedItems((prev) =>
+      prev.map((item) => (item.itemId === itemId ? { ...item, quantityDispensed: quantity } : item)),
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <FileText className="h-5 w-5 text-blue-600" />
+            <span>Prescription Orders</span>
+          </CardTitle>
+          <CardDescription>Manage and process prescription orders from doctors</CardDescription>
+          <div className="relative mt-2">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Input
+              placeholder="Search by patient, doctor, or prescription ID..."
+              className="pl-10"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "PENDING" | "FILLED" | "CANCELLED" | "all")} className="space-y-4">
+            <TabsList className="grid w-full grid-cols-1 mb-16 md:grid-cols-4">
+              <TabsTrigger value="all">All</TabsTrigger>
+              <TabsTrigger value="PENDING">Pending</TabsTrigger>
+              <TabsTrigger value="FILLED">Filled</TabsTrigger>
+              <TabsTrigger value="CANCELLED">Cancelled</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value={activeTab} className="space-y-4">
+              {filteredPrescriptions.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">No prescriptions found matching your criteria.</div>
+              ) : (
+                filteredPrescriptions.map((prescription) => (
+                  <div key={prescription.id} className="p-4 border rounded-lg bg-white">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h3 className="font-medium">Prescription #{prescription.id.slice(-8)}</h3>
+                        <p className="text-sm text-gray-600">
+                          Patient: {prescription.patient} | Doctor: {prescription.doctor}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          Created: {new Date(prescription.createdAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <Badge className={getPrescriptionStatusColor(prescription.status)}>{prescription.status}</Badge>
+                    </div>
+
+                    <div className="space-y-2 mb-3">
+                      <h4 className="text-sm font-medium">Medications:</h4>
+                      {prescription.items.map((item) => (
+                        <div key={item.id} className="text-sm bg-gray-50 p-2 rounded">
+                          <div className="flex justify-between">
+                            <span className="font-medium">{item.drugName}</span>
+                          </div>
+                          <div className="text-xs text-gray-600">
+                            {item.dosage} | {item.frequency} | {item.duration}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex space-x-2">
+                      {prescription.status === "PENDING" && (
+                        <>
+                          <Button size="sm" onClick={() => handleStartProcessing(prescription)}>
+                            Mark as Filled
+                          </Button>
+                          <Button size="sm" variant="destructive" onClick={() => handleCancelPrescription(prescription.id)}>
+                            Cancel
+                          </Button>
+                        </>
+                      )}
+                      {prescription.status === "FILLED" && (
+                        <>
+                          <Badge variant="outline" className="text-green-600 border-green-600">
+                            <CheckCircle className="h-3 w-3 mr-1" />
+                            Filled
+                          </Badge>
+                          <Button size="sm" variant="destructive" onClick={() => handleCancelPrescription(prescription.id)}>
+                            Cancel
+                          </Button>
+                        </>
+                      )}
+                      {prescription.status === "CANCELLED" && (
+                        <Badge variant="outline" className="text-red-600 border-red-600">
+                          Cancelled
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+
+      <Dialog open={isProcessingDialogOpen} onOpenChange={setIsProcessingDialogOpen}>
+        <DialogContent className="md:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Process Prescription</DialogTitle>
+            <DialogDescription>
+              Review and adjust quantities for prescription #{currentPrescription?.id.slice(-8)}
+            </DialogDescription>
+          </DialogHeader>
+          {currentPrescription && (
+            <div className="space-y-4 py-4">
+              <div className="text-sm">
+                <p>
+                  <strong>Patient:</strong> {currentPrescription.patient}
+                </p>
+                <p>
+                  <strong>Doctor:</strong> {currentPrescription.doctor}
+                </p>
+              </div>
+              <div className="space-y-3">
+                <h4 className="font-medium">Medications to Dispense:</h4>
+                {dispensedItems.map((item, index) => (
+                  <div key={item.itemId} className="flex items-center space-x-3 p-3 border rounded">
+                    <div className="flex-1">
+                      <div className="font-medium">{item.drugName}</div>
+                      <div className="text-sm text-gray-600">
+                        Prescribed: {currentPrescription.items[index]?.quantity} units
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Label htmlFor={`quantity-${item.itemId}`} className="text-sm">
+                        Dispense:
+                      </Label>
+                      <Input
+                        id={`quantity-${item.itemId}`}
+                        type="number"
+                        value={item.quantityDispensed}
+                        minLength={1}
+                        onChange={(e) => updateDispensedQuantity(item.itemId, Number.parseInt(e.target.value))}
+                        className="w-20"
+                        min="0"
+                        max={currentPrescription.items[index]?.quantity}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsProcessingDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleProcessPrescription}>Process & Update Inventory</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}

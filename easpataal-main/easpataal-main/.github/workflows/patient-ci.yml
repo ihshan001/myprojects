@@ -1,0 +1,49 @@
+name: CI/CD Pipeline - Patient
+
+on:
+  push:
+    paths:
+      - 'patient/**'
+  pull_request:
+    paths:
+      - 'patient/**'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./patient
+
+    strategy:
+      matrix:
+        node-version: [20.x]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "npm"
+          cache-dependency-path: patient/package-lock.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Type Check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build:ci
+
+      - name: Upload build status
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-status-patient
+          path: patient/build-status.txt
