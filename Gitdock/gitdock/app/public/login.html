@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GitDock — sign in</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔒</text></svg>">
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --line:#26303d; --fg:#e6edf3; --dim:#8b96a5;
+    --accent:#4c8dff; --bad:#f85149; --ok:#3fb950;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(1200px 600px at 50% -10%, #1b2430 0%, var(--bg) 60%);
+    color:var(--fg); font:15px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    display:flex; align-items:center; justify-content:center; padding:1.2rem;
+  }
+  .card{width:100%; max-width:380px; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:1.4rem; box-shadow:0 18px 50px rgba(0,0,0,.45)}
+  h1{margin:.1rem 0 .2rem; font-size:1.25rem; letter-spacing:-.01em}
+  .sub{color:var(--dim); font-size:.86rem; margin-bottom:1.1rem}
+  label{display:block; font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); margin:.8rem 0 .3rem}
+  input{
+    width:100%; padding:.62rem .7rem; border-radius:9px; border:1px solid var(--line);
+    background:#0d1117; color:var(--fg); font-size:1rem;
+  }
+  input:focus{outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(76,141,255,.16)}
+  button{
+    width:100%; margin-top:1.1rem; padding:.68rem; border:0; border-radius:9px; cursor:pointer;
+    background:var(--accent); color:#06121f; font-weight:650; font-size:1rem;
+  }
+  button[disabled]{opacity:.6; cursor:progress}
+  .msg{margin-top:.9rem; font-size:.86rem; min-height:1.2rem}
+  .msg.bad{color:var(--bad)} .msg.ok{color:var(--ok)}
+  .hint{margin-top:1.2rem; padding-top:.9rem; border-top:1px solid var(--line); color:var(--dim); font-size:.78rem}
+  code{background:#0d1117; border:1px solid var(--line); border-radius:5px; padding:.1rem .3rem; font-size:.76rem}
+</style>
+</head>
+<body>
+<form class="card" id="f" autocomplete="on">
+  <h1>GitDock</h1>
+  <div class="sub">Sign in to continue — this panel is limited to your team.</div>
+
+  <label for="u">User</label>
+  <input id="u" name="username" autocomplete="username" autocapitalize="none" autofocus>
+
+  <label for="p">Password</label>
+  <input id="p" name="password" type="password" autocomplete="current-password">
+
+  <button id="go" type="submit">Sign in</button>
+  <div class="msg" id="m"></div>
+
+  <div class="hint">
+    Lost the password? Run <code>node app/lib/auth.js passwd &lt;name&gt;</code> in the sandbox and it prints a new one.
+  </div>
+</form>
+
+<script>
+(function () {
+  var f = document.getElementById('f'), m = document.getElementById('m'), go = document.getElementById('go');
+
+  // where to go after signing in: ?next=/settings, default /
+  var next = '/';
+  try {
+    var q = new URLSearchParams(location.search).get('next');
+    if (q && q.charAt(0) === '/' && q.charAt(1) !== '/') next = q;
+  } catch (e) {}
+
+  function store(token) {
+    // localStorage is not available inside a sandboxed preview iframe — that is fine, the token
+    // then travels in the URL fragment, which the panel reads and keeps in memory.
+    try { localStorage.setItem('gitdock.session', token); } catch (e) {}
+  }
+
+  function fail(text) { m.className = 'msg bad'; m.textContent = text; }
+
+  f.addEventListener('submit', async function (ev) {
+    ev.preventDefault();
+    var name = document.getElementById('u').value.trim();
+    var pass = document.getElementById('p').value;
+    if (!name || !pass) return fail('Enter your user name and password.');
+    go.disabled = true; m.className = 'msg'; m.textContent = 'Checking…';
+    try {
+      var res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: name, password: pass }),
+      });
+      var data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data.ok) {
+        go.disabled = false;
+        return fail(data.error || ('Sign in failed (' + res.status + ')'));
+      }
+      store(data.token);
+      m.className = 'msg ok'; m.textContent = 'Welcome ' + (data.user && data.user.name ? data.user.name : '') + ' — opening…';
+      // The token goes in the QUERY, not the fragment: a fragment never reaches the server, so the
+      // panel document would be redirected back here in a loop inside the preview iframe. The panel
+      // reads it out of the URL, keeps it in memory, and sends it as a header from then on.
+      var sep = next.indexOf('?') >= 0 ? '&' : '?';
+      location.replace(next + sep + 't=' + encodeURIComponent(data.token));
+    } catch (e) {
+      go.disabled = false;
+      fail('Could not reach the panel: ' + e.message);
+    }
+  });
+})();
+</script>
+</body>
+</html>

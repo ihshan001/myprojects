@@ -1,0 +1,78 @@
+# Save as `gitdock.yaml` in your project root and commit it.
+# This file is the contract between your repo and the GitDock runner:
+# it declares what to install, what to run, which ports to expose,
+# which databases to provision, and which env keys to inject.
+# Everything here is optional — auto-detection fills the blanks.
+
+version: 1
+
+project:
+  name: acme-suite
+  runtime: php@8.3          # php@8.1|8.2|8.3|8.4 | node@20|22 | python@3.12 | static | docker
+  docroot: public           # auto-detected for Laravel; set explicitly if unusual
+
+install:                    # runs once per build, INSIDE the sandbox (never on the control plane)
+  - composer install --no-dev --optimize-autoloader
+  - npm ci && npm run build
+
+services:                   # each service gets its own port; `public: true` gets a URL
+  - id: website
+    path: .
+    type: laravel
+    start: php-fpm
+    port: 8000
+    public: true
+    healthcheck: { path: /up, expect: 200 }
+
+  - id: admin
+    path: apps/admin
+    type: node
+    start: node server.js
+    port: 3001
+    public: true
+
+  - id: api
+    path: apps/api
+    type: node
+    start: npm run start:prod
+    port: 3002
+    public: false           # internal only: reachable by other services, no public URL
+
+  - id: queue
+    type: worker
+    command: php artisan queue:work --tries=3 --max-time=3600
+
+  - id: scheduler
+    type: cron
+    schedule: "* * * * *"
+    command: php artisan schedule:run
+
+databases:
+  - id: main
+    engine: mysql@8         # mysql@8 | mariadb@11 | sqlite | postgres@16 | redis@7
+    import: ./db/schema.sql # optional first-boot import
+    export: { schedule: daily, keep: 7 }
+    inject: [DB_HOST, DB_PORT, DB_DATABASE, DB_USERNAME, DB_PASSWORD]
+
+  - id: cache
+    engine: redis@7
+
+env:
+  file: .env                # uploaded through the UI, encrypted at rest, never committed
+  requiredFrom: .env.example
+  defaults:
+    APP_ENV: local
+    APP_DEBUG: "true"
+  force:                    # applied at boot so proxy URLs don't break the app
+    APP_URL: "https://${PREVIEW_HOST}"
+    ASSET_URL: "https://${PREVIEW_HOST}"
+
+preview:
+  onPullRequest: true       # spin up a throwaway URL for every PR
+  ttlHours: 72              # auto-teardown
+  public: false             # shared links require a token
+
+resources:
+  cpu: 1
+  memory: 1024Mi            # hard cgroup cap
+  sleepAfterIdleMinutes: 15
