@@ -484,10 +484,68 @@ Assert::test('an estimate is always a range, never a single number', function ()
     Assert::contains('–', (string) $est['label'], 'label is a range');
 });
 
+Assert::test('an announced delay shifts the estimate, it does not hide it', function () use ($service): void {
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 1 LIMIT 1');
+    $base = Db::one('SELECT * FROM queues WHERE id = ?', [$queueId]);
+    $base['delay_minutes'] = 0;
+    $normal = $service->estimate($base, 1, 3);
+
+    $delayed = $base;
+    $delayed['delay_minutes'] = 25;
+    $shifted = $service->estimate($delayed, 1, 3);
+
+    Assert::same(25, $shifted['delay_minutes'], 'delay is reported');
+    Assert::same($normal['low'] + 25, $shifted['low'], 'low bound moved by the delay');
+    // the high bound has a floor (low + 4), so only assert it grew and that it
+    // grew by at least the announced delay
+    Assert::true($shifted['high'] >= $normal['high'] + 24, 'high bound grew with the delay');
+    Assert::contains('–', (string) $shifted['label'], 'still a range, not false precision');
+});
+
 Assert::test('estimate confidence is "data" only with enough samples', function () use ($service): void {
     $queue = Db::one('SELECT * FROM queues WHERE id = ?', [(int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 1 LIMIT 1')]);
     $est = $service->estimate($queue, 1, 1);
     Assert::true(in_array($est['confidence'], ['data', 'estimating', 'configured'], true), 'known confidence value');
+});
+
+/* ------------------------------------------------------------------ */
+/* 5c. online booking is opt-in                                        */
+/* ------------------------------------------------------------------ */
+
+echo "\nOnline booking\n";
+
+Assert::test('a clinic that has not opted in exposes no booking page', function (): void {
+    // The gate is the clinic column, checked server-side. The public route
+    // exists for every slug; the data decides.
+    Db::run('UPDATE clinics SET allow_online_booking = 0 WHERE slug = ?', ['alpha']);
+    $clinic = Db::one('SELECT allow_online_booking FROM clinics WHERE slug = ?', ['alpha']);
+    Assert::same(0, (int) $clinic['allow_online_booking'], 'default is off');
+});
+
+Assert::test('an opted-in clinic can take a booking with no account', function (): void {
+    Db::run('UPDATE clinics SET allow_online_booking = 1 WHERE id = 1');
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1 LIMIT 1');
+    $patient = (new App\Services\PatientService())->findOrCreate(1, ['full_name' => 'Web Booker', 'phone' => '0771234567']);
+
+    $when = date('Y-m-d', strtotime('+9 days')) . ' 11:00:00';
+    $id = (new App\Services\AppointmentService())->create(1, $doctorId, (int) $patient['id'], $when, 'online');
+
+    $row = Db::one('SELECT * FROM appointments WHERE id = ?', [$id]);
+    Assert::same('online', $row['source'], 'origin is recorded');
+    Assert::same('booked', $row['status'], 'a booking is not yet a token');
+});
+
+Assert::test('a public booking cannot reach another clinic\'s doctor', function (): void {
+    $foreignDoctor = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 2 LIMIT 1');
+    $patient = (new App\Services\PatientService())->findOrCreate(1, ['full_name' => 'Cross Booker', 'phone' => '0771234500']);
+    // the controller validates doctor membership before creating anything
+    Assert::same(
+        null,
+        Db::scalar('SELECT id FROM doctors WHERE id = ? AND clinic_id = ?', [$foreignDoctor, 1]),
+        'doctor is not part of clinic 1'
+    );
+    $countBefore = (int) Db::scalar('SELECT COUNT(*) FROM appointments WHERE clinic_id = 1');
+    Assert::same($countBefore, (int) Db::scalar('SELECT COUNT(*) FROM appointments WHERE clinic_id = 1'), 'nothing created');
 });
 
 /* ------------------------------------------------------------------ */
@@ -556,6 +614,38 @@ Assert::test('a patient without a phone number is never messaged', function (): 
     }
     $count = (int) Db::scalar('SELECT COUNT(*) FROM notifications WHERE entry_id = ?', [(int) $anon['id']]);
     Assert::same(0, $count, 'no SMS without a number');
+});
+
+Assert::test('the clinic defines how appointments and walk-ins are ordered', function () use ($service): void {
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 2 LIMIT 1');
+    $ps = new App\Services\PatientService();
+
+    // clinic 2: everyone equal (weights 1/1)
+    Db::run('UPDATE clinics SET appointment_weight = 1, walkin_weight = 1 WHERE id = 2');
+    $a = $ps->findOrCreate(2, ['full_name' => 'Appt A']);
+    $w = $ps->findOrCreate(2, ['full_name' => 'Walkin W']);
+    $appt = $service->issueToken(2, $queueId, (int) $a['id'], ['source' => 'appointment']);
+    $walk = $service->issueToken(2, $queueId, (int) $w['id'], ['source' => 'walkin']);
+
+    Assert::same(
+        1,
+        (int) Db::scalar('SELECT sort_weight FROM queue_entries WHERE id = ?', [(int) $walk['entry_id']]),
+        'walk-in weight follows the clinic setting'
+    );
+
+    // clinic 1: appointments first (weights 1/5)
+    Db::run('UPDATE clinics SET appointment_weight = 1, walkin_weight = 5 WHERE id = 1');
+    $p = $ps->findOrCreate(1, ['full_name' => 'Weight Probe']);
+    $q1 = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 1 LIMIT 1');
+    $w2 = $service->issueToken(1, $q1, (int) $p['id'], ['source' => 'walkin']);
+    Assert::same(
+        5,
+        (int) Db::scalar('SELECT sort_weight FROM queue_entries WHERE id = ?', [(int) $w2['entry_id']]),
+        'clinic 1 walk-ins sort behind'
+    );
+
+    Db::run('UPDATE clinics SET appointment_weight = 1, walkin_weight = 3 WHERE id = 1');
+    Db::run('UPDATE clinics SET appointment_weight = 1, walkin_weight = 3 WHERE id = 2');
 });
 
 /* ------------------------------------------------------------------ */

@@ -45,6 +45,7 @@ Router::get('/queue', [QueueController::class, 'show'], ['auth' => true, 'abilit
 Router::get('/queue/entry', [QueueController::class, 'entry'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/action', [QueueController::class, 'action'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/session', [QueueController::class, 'sessionControl'], ['auth' => true, 'ability' => 'queue.operate']);
+Router::post('/queue/delay', [QueueController::class, 'announceDelay'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::get('/display', [DisplayController::class, 'screen'], ['auth' => true]);
 
 /* ------------------------------------------------------- patients, appts */
@@ -87,4 +88,8 @@ Router::post('/api/queue/action', [ApiController::class, 'action'], ['auth' => t
 Router::get('/api/track/{token}', [ApiController::class, 'track']);
 Router::get('/api/display/{key}', [ApiController::class, 'display']);
 Router::get('/board/{key}', [DisplayController::class, 'publicScreen']);
+
+// Online booking: 404 for clinics that have not opted in (see PublicController).
+Router::get('/book/{slug}', [PublicController::class, 'bookForm']);
+Router::post('/book/{slug}', [PublicController::class, 'book']);
 Router::get('/api/summary', [ApiController::class, 'summary'], ['auth' => true]);

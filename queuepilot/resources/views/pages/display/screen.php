@@ -55,6 +55,11 @@ $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
       </div>
     </div>
 
+    <!-- delay / pause notices: public information, no patient detail -->
+    <div class="mb-4 hidden rounded-2xl border border-amber-400/40 bg-amber-400/10 px-5 py-3" data-tv-notices>
+      <p class="text-sm font-bold text-amber-200" data-tv-notices-text></p>
+    </div>
+
     <!-- queued -->
     <div class="flex flex-col rounded-3xl bg-white/[0.03] p-5">
       <div class="flex items-center justify-between">

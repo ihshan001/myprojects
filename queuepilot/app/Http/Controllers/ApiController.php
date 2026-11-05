@@ -265,7 +265,16 @@ final class ApiController
 
         $serving = null;
         $upcoming = [];
+        $delays = [];
         foreach ($queues as $q) {
+            // An announced delay is public information and belongs on the TV.
+            if ((int) ($q['delay_minutes'] ?? 0) > 0) {
+                $delays[] = [
+                    'queue' => (string) $q['name'],
+                    'minutes' => (int) $q['delay_minutes'],
+                    'note' => (string) ($q['delay_note'] ?? ''),
+                ];
+            }
             $now = Db::one(
                 "SELECT e.token_label, e.status, d.name AS doctor_name, r.name AS room_name
                    FROM queue_entries e
@@ -303,6 +312,11 @@ final class ApiController
             'ok' => true,
             'now_serving' => $serving,
             'upcoming' => array_slice($upcoming, 0, 6),
+            'delays' => $delays,
+            'paused' => array_values(array_map(
+                static fn (array $q): string => (string) $q['name'],
+                array_filter($queues, static fn (array $q): bool => ($q['status'] ?? '') === 'paused')
+            )),
             'stats' => [
                 'waiting' => (int) Db::scalar(
                     "SELECT COUNT(*) FROM queue_entries e JOIN queues q ON q.id = e.queue_id

@@ -199,6 +199,40 @@ final class QueueController
         back('/app');
     }
 
+    /**
+     * Announce a delay ("Dr Silva is 20 minutes behind").
+     *
+     * A delay is communication, not a state change: tokens keep flowing and
+     * the queue is not paused. It feeds three surfaces — the waiting-room
+     * screen, the patient's estimate, and the audit log.
+     */
+    public function announceDelay(): void
+    {
+        $clinicId = $this->guard();
+        $queueId = Request::int('queue_id');
+        $minutes = max(0, min(240, Request::int('delay_minutes')));
+        $note = mb_substr(Request::string('delay_note'), 0, 180);
+
+        $queue = Db::one('SELECT id, name FROM queues WHERE id = ? AND clinic_id = ?', [$queueId, $clinicId]);
+        if (!$queue) {
+            abort(404, 'Queue not found.');
+            return;
+        }
+
+        Db::run(
+            'UPDATE queues SET delay_minutes = ?, delay_note = ? WHERE id = ? AND clinic_id = ?',
+            [$minutes, $note !== '' ? $note : null, $queueId, $clinicId]
+        );
+        (new AuditService())->log($clinicId, 'queue.delay_announced', 'queue', $queueId, [
+            'minutes' => $minutes, 'note' => $note,
+        ]);
+
+        flash('success', $minutes === 0
+            ? 'Delay cleared — estimates back to normal.'
+            : sprintf('%s is now shown as %d minutes behind.', $queue['name'], $minutes));
+        back('/app');
+    }
+
     /** Open / pause / close a session for today. */
     public function sessionControl(): void
     {

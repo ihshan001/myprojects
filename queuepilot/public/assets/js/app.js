@@ -425,6 +425,23 @@
             <span class="text-sm text-slate-400">${u.room || ''}</span>
           </div>`).join('') || '<p class="text-slate-500">No one waiting</p>';
       }
+      // Announced delays and paused queues are the clinic talking to the room.
+      const noticeBox = $('[data-tv-notices]');
+      const noticeText = $('[data-tv-notices-text]');
+      if (noticeBox && noticeText) {
+        const parts = [];
+        (data.delays || []).forEach((d) => {
+          parts.push(`${d.queue}: about ${d.minutes} min behind${d.note ? ' — ' + d.note : ''}`);
+        });
+        (data.paused || []).forEach((q) => parts.push(`${q}: temporarily paused`));
+        if (parts.length) {
+          noticeText.textContent = parts.join('  ·  ');
+          noticeBox.classList.remove('hidden');
+        } else {
+          noticeBox.classList.add('hidden');
+        }
+      }
+
       const clinics = $('[data-tv-counts]');
       if (clinics) {
         clinics.textContent = `${data.stats?.waiting ?? 0} waiting · ${data.stats?.completed ?? 0} seen today`;

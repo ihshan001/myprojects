@@ -82,9 +82,17 @@ final class QueueService
 
             $priority = (int) ($opts['priority'] ?? 0);
             $source = (string) ($opts['source'] ?? 'walkin');
-            $weight = $source === 'appointment'
-                ? (int) ($opts['appointment_weight'] ?? 1)
-                : (int) ($opts['walkin_weight'] ?? 3);
+            // Ordering policy is clinic-defined (Settings -> queue policy) and
+            // lives on the clinic row. Callers may override per call; otherwise
+            // the clinic's own weights apply, so a clinic that treats walk-ins
+            // equally is not forced into our default 1-vs-3 ordering.
+            $clinicPolicy = Db::one(
+                'SELECT appointment_weight, walkin_weight FROM clinics WHERE id = ?',
+                [$clinicId]
+            ) ?: [];
+            $apptWeight = (int) ($opts['appointment_weight'] ?? $clinicPolicy['appointment_weight'] ?? 1);
+            $walkinWeight = (int) ($opts['walkin_weight'] ?? $clinicPolicy['walkin_weight'] ?? 3);
+            $weight = $source === 'appointment' ? $apptWeight : $walkinWeight;
 
             $token = Str::urlToken((int) Env::get('security.track_token_bytes', 24));
             $expires = date('Y-m-d H:i:s', time() + 60 * 60 * (int) Env::get('security.track_token_hours', 18));
@@ -441,11 +449,25 @@ final class QueueService
 
         $perPatient = $samples ?? $configured;
         $confidence = $completed >= $minConfidence ? 'data' : 'estimating';
-        $low = max(2, (int) round($ahead * $perPatient * 0.7));
-        $high = max($low + 4, (int) round($ahead * $perPatient * 1.4) + 3);
+
+        // A delay the clinic announced is a known fact, so it shifts the range
+        // rather than making the estimate fuzzier.
+        $delay = max(0, (int) ($queue['delay_minutes'] ?? 0));
+
+        $low = max(2, (int) round($ahead * $perPatient * 0.7)) + $delay;
+        $high = max($low + 4, (int) round($ahead * $perPatient * 1.4) + 3) + $delay;
 
         if ($ahead === 0) {
-            return ['low' => 0, 'high' => 8, 'label' => 'Next up', 'confidence' => $confidence];
+            if ($delay > 0) {
+                return [
+                    'low' => $delay,
+                    'high' => $delay + 8,
+                    'label' => sprintf('About %d min', $delay),
+                    'confidence' => $confidence,
+                    'delay_minutes' => $delay,
+                ];
+            }
+            return ['low' => 0, 'high' => 8, 'label' => 'Next up', 'confidence' => $confidence, 'delay_minutes' => 0];
         }
 
         return [
@@ -455,6 +477,7 @@ final class QueueService
                 ? sprintf('%d–%d min', $low, $high)
                 : sprintf('About %d–%d min', $low, $high),
             'confidence' => $confidence,
+            'delay_minutes' => $delay,
         ];
     }
 
@@ -488,7 +511,14 @@ final class QueueService
     public function publicSnapshot(array $entry): array
     {
         $position = $this->positionFor($entry, (int) $entry['clinic_id']);
-        $queue = ['doctor_id' => $entry['doctor_id'], 'avg_consult_minutes' => $entry['avg_consult_minutes']];
+
+        // Use the real queue row rather than a hand-built array: the estimate
+        // depends on columns (delay, weights) that a literal would silently
+        // drop, which is exactly how an announced delay went missing before.
+        $queue = $this->repo->queue((int) $entry['clinic_id'], (int) $entry['queue_id']) ?? [];
+        $queue['doctor_id'] = $entry['doctor_id'] ?? ($queue['doctor_id'] ?? null);
+        $queue['avg_consult_minutes'] = $entry['avg_consult_minutes'] ?? ($queue['avg_consult_minutes'] ?? 10);
+
         $estimate = $this->estimate($queue, (int) $entry['clinic_id'], max(0, $position - 1));
         $meta = QueueStateMachine::meta((string) $entry['status']);
 

@@ -159,6 +159,128 @@ final class PublicController
     }
 
     /** Public demo board so a visitor can see a real live queue. */
+    /**
+     * Public booking form — only when the clinic has opted in.
+     *
+     * A clinic that does not use online booking gets a 404, not an empty form.
+     * The clinic is addressed by its slug so a patient can be given a plain
+     * link; nothing about the clinic's plan or billing is exposed here.
+     */
+    public function bookForm(string $slug): void
+    {
+        $clinic = Db::one('SELECT * FROM clinics WHERE slug = ? AND is_active = 1', [$slug]);
+        if (!$clinic || (int) ($clinic['allow_online_booking'] ?? 0) !== 1) {
+            abort(404, 'This clinic does not take bookings online.');
+            return;
+        }
+
+        $doctors = Db::all(
+            'SELECT d.id, d.name, d.avg_consult_minutes, s.name AS specialty, r.name AS room_name
+               FROM doctors d
+               LEFT JOIN specialties s ON s.id = d.specialty_id
+               LEFT JOIN rooms r ON r.id = d.room_id
+              WHERE d.clinic_id = ? AND d.is_active = 1
+              ORDER BY d.name',
+            [(int) $clinic['id']]
+        );
+
+        view('book/form', [
+            'title' => 'Book an appointment · ' . $clinic['name'],
+            'clinicRecord' => $clinic,
+            'doctors' => $doctors,
+            'date' => Request::string('date', date('Y-m-d', strtotime('+1 day'))),
+            'error' => null,
+        ], false);
+    }
+
+    public function book(string $slug): void
+    {
+        $clinic = Db::one('SELECT * FROM clinics WHERE slug = ? AND is_active = 1', [$slug]);
+        if (!$clinic || (int) ($clinic['allow_online_booking'] ?? 0) !== 1) {
+            abort(404, 'This clinic does not take bookings online.');
+            return;
+        }
+        $clinicId = (int) $clinic['id'];
+
+        $doctorId = Request::int('doctor_id');
+        $name = trim(Request::string('full_name'));
+        $phone = trim(Request::string('phone'));
+        $date = Request::string('date');
+        $time = Request::string('time', '09:00');
+
+        $fail = function (string $message) use ($clinic, $slug, $date): void {
+            $doctors = Db::all(
+                'SELECT d.id, d.name, d.avg_consult_minutes, s.name AS specialty, r.name AS room_name
+                   FROM doctors d LEFT JOIN specialties s ON s.id = d.specialty_id
+                   LEFT JOIN rooms r ON r.id = d.room_id
+                  WHERE d.clinic_id = ? AND d.is_active = 1 ORDER BY d.name',
+                [(int) $clinic['id']]
+            );
+            http_response_code(422);
+            view('book/form', [
+                'title' => 'Book an appointment · ' . $clinic['name'],
+                'clinicRecord' => $clinic,
+                'doctors' => $doctors,
+                'date' => $date,
+                'error' => $message,
+            ], false);
+        };
+
+        if ($doctorId <= 0 || Db::scalar('SELECT id FROM doctors WHERE id = ? AND clinic_id = ? AND is_active = 1', [$doctorId, $clinicId]) === null) {
+            $fail('Choose a doctor.');
+            return;
+        }
+        if (mb_strlen($name) < 2 || mb_strlen($name) > 120) {
+            $fail('Enter the patient name.');
+            return;
+        }
+        if (preg_match('/^0[0-9]{9}$/', preg_replace('/\s+/', '', $phone)) !== 1) {
+            $fail('Enter a Sri Lankan mobile number, for example 077 123 4567.');
+            return;
+        }
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) !== 1 || strtotime($date) < strtotime(Db::today())) {
+            $fail('Choose a date from today onwards.');
+            return;
+        }
+        if (preg_match('/^\d{2}:\d{2}$/', $time) !== 1) {
+            $fail('Choose a time.');
+            return;
+        }
+
+        // A booking is a request, not a queue position: the patient is checked
+        // in when they physically arrive, which is where the late-arrival
+        // policy is applied.
+        try {
+            $patient = (new \App\Services\PatientService())->findOrCreate($clinicId, [
+                'full_name' => $name,
+                'phone' => preg_replace('/\s+/', '', $phone),
+            ]);
+            (new \App\Services\AppointmentService())->create(
+                $clinicId,
+                $doctorId,
+                (int) $patient['id'],
+                $date . ' ' . $time . ':00',
+                'online'
+            );
+        } catch (\RuntimeException $e) {
+            $fail($e->getMessage());
+            return;
+        }
+
+        (new \App\Services\AuditService())->log($clinicId, 'appointment.booked_online', 'appointment', null, [
+            'date' => $date, 'time' => $time,
+        ]);
+
+        view('book/confirmed', [
+            'title' => 'Appointment requested · ' . $clinic['name'],
+            'clinicRecord' => $clinic,
+            'name' => $name,
+            'date' => $date,
+            'time' => $time,
+            'doctor' => (string) Db::scalar('SELECT name FROM doctors WHERE id = ?', [$doctorId]),
+        ], false);
+    }
+
     public function demoBoard(): void
     {
         $link = Db::scalar(

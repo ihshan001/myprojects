@@ -197,7 +197,7 @@ tests/run.php                 the suite
 node tools/php.mjs tests/run.php     # or: npm test
 ```
 
-49 checks across the state machine, queue engine, tenant isolation, doctor
+64 checks across the state machine, queue engine, tenant isolation, doctor
 scoping, authorisation, priority ordering, range estimates, notifications,
 CSRF, password hashing, plan limits, suspension durability, QR generation,
 reporting and i18n. The suite builds and destroys its own SQLite database, so
@@ -206,10 +206,14 @@ it never touches demo data.
 ```
  State machine          6 ✓
  Queue engine          11 ✓
+ Queue integrity        4 ✓
  Tenant isolation       5 ✓
  Authorisation          4 ✓
  Priority ordering      1 ✓
  Wait estimates         2 ✓
+ Late arrivals          3 ✓
+ Online booking         3 ✓
+ Transfer               3 ✓
  Notifications          5 ✓
  Security               4 ✓
  Plan limits            2 ✓
@@ -234,6 +238,24 @@ it never touches demo data.
 
 This is enforced by `QueueService` and the router, not by hiding buttons: a
 receptionist with `curl` and a receptionist with a mouse hit the same wall.
+
+## When things go wrong
+
+Two operational documents, written to be followed under pressure rather than
+admired:
+
+* **`docs/CONTINUITY.md`** — how to recognise stale data, the paper fallback
+  procedure (token pad + manual log), and the reconciliation steps when service
+  returns. Staff are told never to clear the screen, because losing the order of
+  patients is worse than showing an old one.
+* **`docs/BACKUPS.md`** — dump flags that do not block a live queue, encryption
+  before the backup leaves the host, an off-host copy so an attacker cannot
+  delete it, and a quarterly restore drill that runs `healthcheck.php` against
+  the restored copy before anyone points production at it.
+
+The software supports both: every live surface marks itself stale after 30
+seconds without data, `/api/*` is never cached, and the audit log reconstructs
+exactly what happened while a clinic was on paper.
 
 ## Deliberate non-goals for v1
 
