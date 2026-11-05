@@ -3340,6 +3340,119 @@ Assert::test('a retired or foreign step cannot be ticked', function (): void {
 });
 
 /* ------------------------------------------------------------------ */
+/* 51. onboarding checklist                                            */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a freshly registered clinic is not ready and says why', function (): void {
+    seedTenant(85, 'fresh-clinic', 'Fresh Clinic');
+    // seedTenant verifies its owner; a real registration does not.
+    Db::run('UPDATE users SET email_verified_at = NULL WHERE clinic_id = 85 AND role = \'clinic_admin\'');
+
+    $onboarding = new App\Services\OnboardingService();
+    $summary = $onboarding->summary(85);
+
+    Assert::true($summary['blocking_open'], 'an unconfirmed owner blocks the clinic');
+    Assert::same('verify_email', $summary['next'], 'and is the first thing named');
+    Assert::true($summary['done'] < $summary['total'], 'the checklist is not complete');
+
+    $steps = array_column($onboarding->steps(85), null, 'key');
+    Assert::true($steps['verify_email']['blocking'], 'the email step is marked as blocking');
+    Assert::false($steps['verify_email']['done'], 'and is not done');
+});
+
+Assert::test('the blocking claim is real: no tokens until the owner is verified', function (): void {
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 85');
+    $patient = Db::insert('INSERT INTO patients (clinic_id, code, full_name, created_at) VALUES (85,?,?,?)',
+        ['OB1', 'Onboard One', Db::now()]);
+    $queue = new App\Domain\Queue\QueueService();
+
+    $refused = false;
+    try {
+        $queue->issueToken(85, $queueId, $patient, []);
+    } catch (\RuntimeException $e) {
+        $refused = str_contains($e->getMessage(), 'Confirm the clinic owner');
+    }
+    Assert::true($refused, 'the queue service itself refuses, so the warning is not decoration');
+
+    Db::run('UPDATE users SET email_verified_at = ? WHERE clinic_id = 85 AND role = \'clinic_admin\'', [Db::now()]);
+    $issued = $queue->issueToken(85, $queueId, $patient, []);
+    Assert::true(isset($issued['token']), 'and stops refusing once verified');
+
+    $summary = (new App\Services\OnboardingService())->summary(85);
+    Assert::false($summary['blocking_open'], 'the warning is gone the moment the data changes');
+});
+
+Assert::test('every step moves when, and only when, the clinic is actually set up', function (): void {
+    $onboarding = new App\Services\OnboardingService();
+    $before = $onboarding->summary(85);
+
+    // Hours are seven settings rows, not a table.
+    foreach ([0, 1, 2, 3, 4, 5, 6] as $day) {
+        Db::insert('INSERT INTO settings (scope, owner_id, key_name, value) VALUES (?,?,?,?)',
+            ['clinic', 85, 'hours.' . $day, $day === 0 ? 'closed' : '08:30-12:30']);
+    }
+    $afterHours = $onboarding->summary(85);
+    Assert::same($before['done'] + 1, $afterHours['done'], 'setting hours completes exactly one step');
+
+    // A second doctor completes the doctors step...
+    $room = (int) Db::scalar('SELECT id FROM rooms WHERE clinic_id = 85');
+    $doctor = Db::insert('INSERT INTO doctors (clinic_id, room_id, name, avg_consult_minutes, is_active, created_at) VALUES (85,?,?,10,1,?)',
+        [$room, 'Dr. Second', Db::now()]);
+    $afterDoctor = $onboarding->summary(85);
+    Assert::same($afterHours['done'] + 1, $afterDoctor['done'], 'a second doctor completes one step');
+
+    // ...and a schedule completes another.
+    Db::insert('INSERT INTO doctor_schedules (clinic_id, doctor_id, weekday, starts_at, ends_at, is_active, created_at) VALUES (85,?,1,?,?,1,?)',
+        [$doctor, '08:30', '12:30', Db::now()]);
+    $afterSchedule = $onboarding->summary(85);
+    Assert::same($afterDoctor['done'] + 1, $afterSchedule['done'], 'a schedule completes one step');
+
+    // Removing every doctor puts the doctors step back.
+    Db::run('UPDATE doctors SET is_active = 0 WHERE clinic_id = 85');
+    $regressed = $onboarding->summary(85);
+    Assert::same($afterSchedule['done'] - 1, $regressed['done'], 'a step regresses when the data does, rather than staying green');
+});
+
+Assert::test('the display step is recorded once and stays recorded', function (): void {
+    $onboarding = new App\Services\OnboardingService();
+    $before = $onboarding->summary(85)['done'];
+
+    $onboarding->noteSeen(85, 'display_seen');
+    $after = $onboarding->summary(85)['done'];
+    $onboarding->noteSeen(85, 'display_seen');
+
+    Assert::same($before + 1, $after, 'looking at the display completes that step');
+    Assert::same($after, $onboarding->summary(85)['done'], 'recording it again changes nothing');
+    Assert::same(1, (int) Db::scalar(
+        "SELECT COUNT(*) FROM settings WHERE scope = 'clinic' AND owner_id = 85 AND key_name = 'onboarding.display_seen'"
+    ), 'and writes one row, not a new one per visit');
+});
+
+Assert::test('a fully configured clinic reaches 100% with nothing left to do', function (): void {
+    $onboarding = new App\Services\OnboardingService();
+    Db::run("UPDATE users SET is_active = 1 WHERE clinic_id = 85");
+    Db::insert('INSERT INTO users (clinic_id, name, email, password_hash, role, is_active, created_at, email_verified_at)
+                VALUES (85,?,?,?,?,1,?,?)',
+        ['Desk Two', 'desk85@example.lk', password_hash('Passw0rd!23', PASSWORD_DEFAULT), 'receptionist', Db::now(), Db::now()]);
+    Db::run("UPDATE clinics SET phone = '+94 11 000 0085', address_line = '12 Main St' WHERE id = 85");
+    Db::run('UPDATE doctors SET is_active = 1 WHERE clinic_id = 85');
+
+    $summary = $onboarding->summary(85);
+    Assert::same(100, $summary['percent'], 'every step is satisfied by data');
+    Assert::same(null, $summary['next'], 'and there is no next step');
+    Assert::false($summary['blocking_open'], 'nothing is blocking');
+});
+
+Assert::test("one clinic's checklist says nothing about another", function (): void {
+    seedTenant(86, 'other-clinic', 'Other Clinic');
+    $a = (new App\Services\OnboardingService())->summary(85);
+    $b = (new App\Services\OnboardingService())->summary(86);
+
+    Assert::same(100, $a['percent'], 'clinic 85 stays complete');
+    Assert::true($b['percent'] < 100, "clinic 86 is not credited with clinic 85's work");
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

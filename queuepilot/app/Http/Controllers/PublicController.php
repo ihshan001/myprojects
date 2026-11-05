@@ -233,8 +233,12 @@ final class PublicController
                 redirect('/login');
                 return;
             }
-            flash('success', 'Welcome to QueuePilot! Your 14-day trial has started — let\'s open your first queue.');
-            redirect('/app');
+            // Straight to the checklist, not the board. A new owner looking at
+            // an empty dashboard has to guess what to do first; the checklist
+            // names it and is measured from the data, so it cannot claim more
+            // progress than the clinic has.
+            flash('success', 'Welcome to QueuePilot! Your 14-day trial has started. These are the steps that make the clinic run — most take a minute.');
+            redirect('/getting-started');
         } catch (\Throwable $e) {
             Log::error('clinic.register.failed', ['error' => $e->getMessage()]);
             Session::flash('old', array_diff_key($data, ['password' => 1]));

@@ -29,6 +29,7 @@ use App\Http\Controllers\PublicController;
 use App\Http\Controllers\QueueController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\BreakController;
+use App\Http\Controllers\OnboardingController;
 use App\Http\Controllers\PriorityRuleController;
 use App\Http\Controllers\WorkflowController;
 use App\Http\Controllers\QueueConfigController;
@@ -130,6 +131,10 @@ Router::post('/queues/priority-rules/{id}/delete', [PriorityRuleController::clas
 Router::get('/queues/workflows', [WorkflowController::class, 'index'], ['auth' => true]);
 Router::post('/queues/workflows', [WorkflowController::class, 'save'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/queues/workflows/{id}/delete', [WorkflowController::class, 'delete'], ['auth' => true, 'ability' => 'clinic.manage']);
+
+// Getting started — a checklist measured from clinic data, not ticks.
+Router::get('/getting-started', [OnboardingController::class, 'index'], ['auth' => true]);
+Router::get('/getting-started/display', [OnboardingController::class, 'seenDisplay'], ['auth' => true]);
 
 Router::get('/rooms', [RoomController::class, 'index'], ['auth' => true]);
 Router::post('/rooms', [RoomController::class, 'store'], ['auth' => true, 'ability' => 'doctor.manage']);

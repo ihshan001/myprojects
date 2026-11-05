@@ -5,7 +5,7 @@ codebase actually does. It is deliberately blunt: a feature is **Built** only
 if I ran it against the live server, **Partial** if something exists but does
 not meet the scenario as written, and **Not built** otherwise.
 
-Verified on 2026-11-05 against commit `HEAD` (203 automated checks, 151 files
+Verified on 2026-11-05 against commit `HEAD` (209 automated checks, 154 files
 lint-clean, healthcheck all-good, all five demo logins re-checked).
 
 > **Read this first.** The blueprint describes a mature product with billing,
@@ -138,6 +138,7 @@ lint-clean, healthcheck all-good, all five demo logins re-checked).
 | Scenario | State | Notes |
 |---|:--:|---|
 | A clinic signs up and gets a working workspace | ✅ | `/register`, trial plan applied, admin user created |
+| A new owner is told what is still missing, and it is true | ✅ | **Built.** `/getting-started`, reached automatically after registration: eight steps measured from clinic data (owner email confirmed, opening hours, doctors, schedules, invited staff, phone and address, display opened, first token). Verified on a fresh registration: 0/8 and "cannot issue tokens" while the owner was unconfirmed, then 8/8 as each was actually done; removing every doctor un-ticks the doctors step, so it cannot stay green from one good day |
 | Staff are invited rather than given a shared password | ✅ | Single-use invitation links, hashed, expiring |
 | Password policy is enforced | ✅ | Minimum length + letter + number, one rule used everywhere |
 | Two-factor authentication | ✅ | TOTP, with recovery handled by a reset tool |
@@ -304,7 +305,7 @@ first clinic goes live — the automated suite does not replace it.
 | Tracking | 5 | 0 | 1 |
 | Displays | 5 | 0 | 0 |
 | Notifications | 5 | 1 | 0 |
-| Accounts | 8 | 0 | 1 |
+| Accounts | 9 | 0 | 1 |
 | Tenancy | 7 | 0 | 0 |
 | Doctors | 5 | 1 | 0 |
 | Reporting | 8 | 1 | 1 |
@@ -312,7 +313,7 @@ first clinic goes live — the automated suite does not replace it.
 | Money | 2 | 0 | 3 |
 | Hardware | 2 | 1 | 2 |
 | Other verticals | 5 | 0 | 3 |
-| **Total** | **96** | **7** | **13** |
+| **Total** | **97** | **7** | **13** |
 
 **What is genuinely finished.** The queue engine holds up under adversarial
 input: issuing, calling, transferring, prioritising, pausing, closing,

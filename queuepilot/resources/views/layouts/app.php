@@ -44,6 +44,7 @@ if ($u) {
                 ['/queues/config', 'switch', 'Queue settings', $isActive('/queues/config')],
                 ['/queues/priority-rules', 'alert', 'Priority rules', $isActive('/queues/priority-rules')],
                 ['/queues/workflows', 'check-circle', 'Service workflows', $isActive('/queues/workflows')],
+                ['/getting-started', 'sparkles', 'Getting started', $isActive('/getting-started')],
                 ['/breaks', 'pause', 'Breaks', $isActive('/breaks')],
                 // Departments and the operating calendar are clinic structure;
                 // a doctor does not need to see them, reception does not edit

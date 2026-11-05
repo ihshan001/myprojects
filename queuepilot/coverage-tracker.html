@@ -130,13 +130,13 @@
         </label>
         <p class="note"><code>/register</code> creates the clinic, owner and trial, then mails a confirmation link. Until it is opened the clinic can sign in but cannot issue tokens; a super admin can verify by hand when mail fails, and that override is audited. Verified live.</p>
       </li>
-      <li class="item" data-status="partial">
+      <li class="item" data-status="built">
         <label class="row">
           <input type="checkbox" class="tick" data-id="Platform and business|Self-service onboarding">
           <span class="name">Self-service onboarding</span>
-          <span class="pill partial">Partial</span>
+          <span class="pill built">Built</span>
         </label>
-        <p class="note">Registration → workspace works, and <code>onboarding</code> is recorded in settings. There is no guided wizard beyond the registration form.</p>
+        <p class="note"><code>/getting-started</code>, reached automatically after registration: eight steps measured from the clinic's own data, never from a tick. Verified on a genuinely fresh registration: 0/8 with &ldquo;cannot issue tokens&rdquo; while the owner is unconfirmed, then up to 8/8 as each thing was actually done — and a step goes <em>back</em> to incomplete if the data goes back (removing every doctor un-ticks the doctors step).</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
@@ -1183,7 +1183,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (203 automated checks, 151 files lint-clean, healthcheck green).
+    application (209 automated checks, 154 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.
