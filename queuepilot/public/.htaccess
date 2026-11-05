@@ -1,0 +1,11 @@
+# Apache front-controller config (mirror of the nginx try_files rule)
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(?:assets|uploads)/ - [L]
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^ index.php [L]
+</IfModule>
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+</IfModule>

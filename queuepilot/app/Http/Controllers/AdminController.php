@@ -1,0 +1,142 @@
+<?php
+declare(strict_types=1);
+
+namespace App\Http\Controllers;
+
+use App\Core\Db;
+use App\Core\Request;
+use App\Services\AuditService;
+
+/** Platform (super admin) console: tenants, plans, revenue. */
+final class AdminController
+{
+    public function index(): void
+    {
+        $clinics = Db::all(
+            "SELECT c.*, p.name AS plan_name, p.price_monthly,
+                    (SELECT COUNT(*) FROM queue_entries e
+                      WHERE e.clinic_id = c.id AND substr(e.joined_at,1,10) = ?) AS today_entries,
+                    (SELECT COUNT(*) FROM users u WHERE u.clinic_id = c.id) AS staff_count
+               FROM clinics c LEFT JOIN plans p ON p.id = c.plan_id
+              ORDER BY c.created_at DESC",
+            [Db::today()]
+        );
+
+        $mrr = 0.0;
+        foreach ($clinics as $c) {
+            if ($c['billing_status'] === 'active' && $c['billing_status'] !== 'suspended') {
+                $mrr += (float) ($c['price_monthly'] ?? 0);
+            }
+        }
+
+        view('admin/index', [
+            'title' => 'Platform overview',
+            'clinics' => $clinics,
+            'mrr' => $mrr,
+            'totals' => [
+                'clinics' => count($clinics),
+                'active' => count(array_filter($clinics, fn ($c) => $c['billing_status'] === 'active')),
+                'trial' => count(array_filter($clinics, fn ($c) => $c['billing_status'] === 'trial')),
+                'suspended' => count(array_filter($clinics, fn ($c) => $c['billing_status'] === 'suspended')),
+                'patients_today' => (int) Db::scalar(
+                    'SELECT COUNT(*) FROM queue_entries WHERE substr(joined_at,1,10) = ?', [Db::today()]
+                ),
+            ],
+        ]);
+    }
+
+    public function clinics(): void
+    {
+        $clinics = Db::all(
+            "SELECT c.*, p.name AS plan_name, p.price_monthly,
+                    (SELECT COUNT(*) FROM users u WHERE u.clinic_id = c.id) AS staff,
+                    (SELECT COUNT(*) FROM patients pt WHERE pt.clinic_id = c.id) AS patients,
+                    (SELECT COUNT(*) FROM queue_entries e WHERE e.clinic_id = c.id) AS entries
+               FROM clinics c LEFT JOIN plans p ON p.id = c.plan_id
+              ORDER BY c.name"
+        );
+        view('admin/clinics', [
+            'title' => 'Clinics',
+            'clinics' => $clinics,
+            'plans' => Db::all('SELECT * FROM plans ORDER BY sort_order'),
+        ]);
+    }
+
+    public function updateClinic(string $id): void
+    {
+        $clinicId = (int) $id;
+        $clinic = Db::one('SELECT * FROM clinics WHERE id = ?', [$clinicId]);
+        if (!$clinic) {
+            abort(404, 'Clinic not found.');
+            return;
+        }
+
+        $action = Request::string('action');
+        if ($action === 'suspend' || $action === 'activate') {
+            $status = $action === 'suspend' ? 'suspended' : 'active';
+            // Data is preserved in both directions — suspension is a billing
+            // state, never a deletion event.
+            Db::run('UPDATE clinics SET billing_status = ?, updated_at = ? WHERE id = ?',
+                [$status, Db::now(), $clinicId]);
+            (new AuditService())->log($clinicId, 'platform.clinic_' . $action, 'clinic', $clinicId);
+            flash('success', $clinic['name'] . ' is now ' . $status . '. Queue history is untouched.');
+            redirect('/admin/clinics');
+            return;
+        }
+
+        if ($action === 'plan') {
+            $planId = Request::int('plan_id');
+            $plan = Db::one('SELECT * FROM plans WHERE id = ?', [$planId]);
+            if (!$plan) {
+                flash('error', 'Unknown plan.');
+                redirect('/admin/clinics');
+                return;
+            }
+            Db::run('UPDATE clinics SET plan_id = ?, updated_at = ? WHERE id = ?', [$planId, Db::now(), $clinicId]);
+            (new AuditService())->log($clinicId, 'platform.plan_assigned', 'clinic', $clinicId, ['plan' => $plan['code']]);
+            flash('success', $clinic['name'] . ' moved to ' . $plan['name'] . '.');
+        }
+        redirect('/admin/clinics');
+    }
+
+    public function plans(): void
+    {
+        view('admin/plans', [
+            'title' => 'Plans & billing',
+            'plans' => Db::all('SELECT * FROM plans ORDER BY sort_order'),
+            'revenue' => Db::all(
+                "SELECT status, COUNT(*) AS n, SUM(amount) AS total FROM invoices GROUP BY status"
+            ),
+            'invoices' => Db::all(
+                'SELECT i.*, c.name AS clinic_name FROM invoices i JOIN clinics c ON c.id = i.clinic_id
+                  ORDER BY i.created_at DESC LIMIT 40'
+            ),
+        ]);
+    }
+
+    public function savePlan(): void
+    {
+        $id = Request::int('id');
+        $data = [
+            'name' => Request::string('name'),
+            'price_monthly' => (float) Request::string('price_monthly', '0'),
+            'max_doctors' => Request::int('max_doctors', 1),
+            'max_staff' => Request::int('max_staff', 1),
+            'max_queues' => Request::int('max_queues', 2),
+            'features' => Request::string('features'),
+            'is_active' => Request::bool('is_active') ? 1 : 0,
+        ];
+
+        if ($id > 0) {
+            Db::run(
+                'UPDATE plans SET name=?, price_monthly=?, max_doctors=?, max_staff=?, max_queues=?, features=?, is_active=?
+                  WHERE id = ?',
+                [$data['name'], $data['price_monthly'], $data['max_doctors'], $data['max_staff'],
+                 $data['max_queues'], $data['features'], $data['is_active'], $id]
+            );
+            (new AuditService())->log(null, 'platform.plan_updated', 'plan', $id, $data);
+            flash('success', 'Plan updated.');
+        }
+        redirect('/admin/plans');
+    }
+}

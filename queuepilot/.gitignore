@@ -1,0 +1,14 @@
+# runtime state — never commit a database, log or session file
+storage/db/*.sqlite
+storage/db/*.sqlite-wal
+storage/db/*.sqlite-shm
+storage/logs/*.log
+storage/sessions/sess_*
+
+# dependencies and build tooling
+node_modules/
+.arena/
+
+# local environment
+.env
+.env.local
