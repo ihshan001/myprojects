@@ -3558,6 +3558,172 @@ Assert::test('a policy that changes nothing is refused', function (): void {
 });
 
 /* ------------------------------------------------------------------ */
+/* 53. notification payload hygiene                                    */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a sent message keeps no deliverable number, a queued one does', function (): void {
+    seedTenant(88, 'payload-clinic', 'Payload Clinic');
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 88');
+    $patient = Db::insert('INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (88,?,?,?,?)',
+        ['PH1', 'Payload One', '0771234567', Db::now()]);
+    $queue = new App\Domain\Queue\QueueService();
+    $entry = $queue->issueToken(88, $queueId, $patient, []);
+
+    $notifications = new App\Services\NotificationService();
+    // token_issued is queued by issueToken itself.
+    $row = Db::one("SELECT id, status, payload_json, to_number FROM notifications WHERE entry_id = ? AND template = 'token_issued'", [$entry['entry_id']]);
+    Assert::true($row !== null, 'the token message exists');
+    Assert::same('queued', (string) $row['status'], 'and is waiting to be sent');
+
+    $payload = json_decode((string) $row['payload_json'], true);
+    Assert::same('0771234567', (string) ($payload['to'] ?? ''), 'a queued message still holds the number a retry needs');
+    Assert::false(str_contains((string) $row['to_number'], '0771234567'), 'while the readable column is masked');
+
+    // Send it, then the number must be gone.
+    $notifications->processDue();
+    $after = Db::one('SELECT status, payload_json FROM notifications WHERE id = ?', [(int) $row['id']]);
+    Assert::same('logged', (string) $after['status'], 'the log transport recorded it');
+    $afterPayload = json_decode((string) $after['payload_json'], true);
+    Assert::true(!isset($afterPayload['to']), 'and the deliverable number was removed');
+    Assert::true(trim((string) ($afterPayload['body'] ?? '')) !== '', 'the message body survives, so the history screen still reads');
+});
+
+Assert::test('no finished message anywhere still carries a number', function (): void {
+    $offenders = 0;
+    foreach (Db::all("SELECT status, payload_json FROM notifications WHERE payload_json IS NOT NULL AND payload_json <> ''") as $row) {
+        $payload = json_decode((string) $row['payload_json'], true);
+        if (!is_array($payload) || ($payload['to'] ?? '') === '') {
+            continue;
+        }
+        if (in_array((string) $row['status'], ['sent', 'logged', 'abandoned'], true)) {
+            $offenders++;
+        }
+    }
+    Assert::same(0, $offenders, 'every terminal message has had its number removed');
+});
+
+/* ------------------------------------------------------------------ */
+/* 54. incident records                                                */
+/* ------------------------------------------------------------------ */
+
+Assert::test('an incident gets a reference, a first entry and a real timeline', function (): void {
+    seedTenant(89, 'incident-clinic', 'Incident Clinic');
+    $incidents = new App\Services\IncidentService();
+
+    $detected = date('Y-m-d\TH:i', time() - 30 * 60);
+    $id = $incidents->open(89, [
+        'title' => 'Display boards stopped updating',
+        'severity' => 'major',
+        'detected_at' => $detected,
+        'summary' => 'Every board shows a stale token.',
+    ], null);
+
+    $incident = Db::one('SELECT * FROM incidents WHERE id = ?', [$id]);
+    Assert::true(preg_match('/^INC-\d{4}-\d{4}$/', (string) $incident['reference']) === 1, 'it has a reference an operator can quote');
+    Assert::same('major', (string) $incident['severity'], 'the severity is kept');
+    Assert::same('open', (string) $incident['status'], 'and it starts open');
+    Assert::false(str_contains((string) $incident['detected_at'], 'T'), 'the browser timestamp is normalised, not stored raw');
+
+    $entries = $incidents->entries($id);
+    Assert::same(1, count($entries), 'opening writes the first entry');
+    Assert::contains('Incident opened', (string) $entries[0]['body'], 'which says who opened it and what they saw');
+
+    // Remember which incident this test opened: the next tests act on it, and
+    // "the newest incident" would otherwise pick up whatever a later case made.
+    $GLOBALS['incident_probe_id'] = $id;
+});
+
+Assert::test('time to acknowledge is measured from detection, not from the click', function (): void {
+    $incidents = new App\Services\IncidentService();
+    $id = (int) $GLOBALS['incident_probe_id'];
+
+    Assert::true($incidents->acknowledge(89, $id, null), 'the incident is acknowledged');
+    $row = Db::one('SELECT * FROM incidents WHERE id = ?', [$id]);
+    $timings = $incidents->timings($row);
+    $expected = (int) round((strtotime((string) $row['acknowledged_at']) - strtotime((string) $row['detected_at'])) / 60);
+    Assert::same($expected, $timings['acknowledge_minutes'], 'the response time is measured from detection, not from the click');
+    Assert::true($timings['acknowledge_minutes'] >= 29, 'which is about the half hour the incident was open');
+
+    $first = (string) Db::scalar('SELECT acknowledged_at FROM incidents WHERE id = ?', [$id]);
+    Assert::false($incidents->acknowledge(89, $id, null), 'a second acknowledgement is refused');
+    Assert::same($first, (string) Db::scalar('SELECT acknowledged_at FROM incidents WHERE id = ?', [$id]),
+        'so the response clock never resets under the incident');
+});
+
+Assert::test('the timeline appends and is attributed', function (): void {
+    $incidents = new App\Services\IncidentService();
+    $id = (int) $GLOBALS['incident_probe_id'];
+
+    $incidents->addEntry($id, 'cause', 'The display cache key was rotated without clearing the old one.');
+    $incidents->addEntry($id, 'action', 'Restarted the poller on all three screens.');
+    $entries = $incidents->entries($id);
+    $bodies = array_column($entries, 'body');
+
+    // Opening wrote one, acknowledging wrote another, so these two are the
+    // newest. Asserting on the tail rather than an absolute count keeps the
+    // test about ordering instead of arithmetic that changes with every step.
+    Assert::true(count($entries) >= 4, 'the timeline grew');
+    Assert::contains('cache key', (string) $bodies[count($bodies) - 2], 'the cause reads back in order');
+    Assert::contains('Restarted', (string) $bodies[count($bodies) - 1], 'and the action came after it');
+    Assert::same('cause', (string) $entries[count($entries) - 2]['kind'], 'the cause entry is typed as a cause');
+
+    $refused = 0;
+    foreach ([['unknown', 'x'], ['note', '   ']] as [$kind, $body]) {
+        try {
+            $incidents->addEntry($id, $kind, $body);
+        } catch (\InvalidArgumentException) {
+            $refused++;
+        }
+    }
+    Assert::same(2, $refused, 'a blank entry and an unknown kind are both refused');
+});
+
+Assert::test('mitigate then resolve, and a resolved incident takes no more steps', function (): void {
+    $incidents = new App\Services\IncidentService();
+    $id = (int) $GLOBALS['incident_probe_id'];
+
+    Assert::true($incidents->mitigate(89, $id, 'Boards updating again.'), 'mitigation is recorded');
+    Assert::same('mitigated', (string) Db::scalar('SELECT status FROM incidents WHERE id = ?', [$id]), 'the status moved');
+
+    Assert::true($incidents->resolve(89, $id, 'Key rotation now clears the cache.'), 'resolution is recorded');
+    Assert::same('resolved', (string) Db::scalar('SELECT status FROM incidents WHERE id = ?', [$id]), 'the incident is closed');
+
+    Assert::false($incidents->resolve(89, $id, 'again'), 'resolving twice does nothing');
+    Assert::false($incidents->mitigate(89, $id, 'again'), 'and a resolved incident cannot be mitigated');
+
+    $timings = $incidents->timings(Db::one('SELECT * FROM incidents WHERE id = ?', [$id]));
+    Assert::true($timings['resolve_minutes'] !== null, 'time to resolve is computed');
+});
+
+Assert::test('an incident cannot be detected in the future or opened nameless', function (): void {
+    $incidents = new App\Services\IncidentService();
+    $refused = 0;
+
+    foreach ([
+        ['title' => 'ab', 'severity' => 'minor'],
+        ['title' => 'Something', 'severity' => 'catastrophic'],
+        ['title' => 'In the future', 'severity' => 'minor', 'detected_at' => date('Y-m-d\TH:i', time() + 7200)],
+    ] as $bad) {
+        try {
+            $incidents->open(89, $bad, null);
+        } catch (\InvalidArgumentException) {
+            $refused++;
+        }
+    }
+    Assert::same(3, $refused, 'a two-letter title, an unknown severity and a future detection are all refused');
+});
+
+Assert::test("a clinic cannot read or progress another clinic's incident", function (): void {
+    seedTenant(90, 'other-incident', 'Other Incident');
+    $incidents = new App\Services\IncidentService();
+    $id = (int) $GLOBALS['incident_probe_id'];
+
+    Assert::true($incidents->find(90, $id) === null, 'the other clinic cannot see it');
+    Assert::false($incidents->acknowledge(90, $id, null), 'nor acknowledge it');
+    Assert::true($incidents->find(89, $id) !== null, 'while its own clinic still can');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

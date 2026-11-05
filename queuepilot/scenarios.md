@@ -196,6 +196,7 @@ lint-clean, healthcheck all-good, all five demo logins re-checked).
 | Audit can be read by an admin | ✅ | `/audit`, filterable, receptionist-forbidden |
 | Backups run and are verified | ✅ | `tools/backup.php` plus a restore drill that restores into a scratch DB and checks integrity |
 | Health is monitorable from outside | ✅ | `/api/health` with a token: worker backlog, stale sessions, long waits, backup age, schema parity |
+| An incident has a written timeline | ✅ | **Built.** `/incidents` — severity, detection time, who acknowledged and when, every action, cause and decision appended in order. Time to acknowledge and to resolve are computed from timestamps (a 30-minute-old incident reports 30 minutes, not 0), a second acknowledgement cannot reset the clock, and a resolved incident takes no further steps. Found and fixed while building it: `datetime-local` posts carry a `T`, which made `strtotime` read a 25-minute response as 355. **Still no pager** — nothing here wakes anyone; that is a provider contract |
 | A paper fallback exists | ✅ | **Rehearsed.** `docs/CONTINUITY.md` plus `tools/continuity-drill.php`, which prints the board state to copy off the screen, the next paper token numbers, blank manual-log rows and the reconcile arithmetic, then passes or fails. Run 5 Nov 2026: 37 seen, 10 cancelled, 9 waiting, 0 duplicates, PASSED |
 | **Data retention and account closure** | ✅ | **Built.** A clinic requests closure by typing its exact name; staff are signed out, open sessions closed, and `purge_after` set to +90 days. `tools/purge.php` refuses before the window, then removes clinic data and users in one transaction while **keeping invoices**, and marks the clinic `[closed] <name>` so the slug is never reusable. Verified end to end on Lakeview |
 | Right to export a clinic's data | ◐ | Every report exports as CSV and the audit log is readable, but there is no single complete-archive export |
@@ -310,11 +311,11 @@ first clinic goes live — the automated suite does not replace it.
 | Tenancy | 7 | 0 | 0 |
 | Doctors | 6 | 1 | 0 |
 | Reporting | 8 | 1 | 1 |
-| Data & ops | 6 | 1 | 0 |
+| Data & ops | 7 | 1 | 0 |
 | Money | 2 | 0 | 3 |
 | Hardware | 2 | 1 | 2 |
 | Other verticals | 5 | 0 | 3 |
-| **Total** | **98** | **7** | **13** |
+| **Total** | **99** | **7** | **13** |
 
 **What is genuinely finished.** The queue engine holds up under adversarial
 input: issuing, calling, transferring, prioritising, pausing, closing,

@@ -1096,7 +1096,7 @@
           <span class="name">Incident response</span>
           <span class="pill partial">Partial</span>
         </label>
-        <p class="note"><code>docs/OPERATIONS.md</code> is an on-call runbook. No paging integration and no incident timeline tool.</p>
+        <p class="note"><code>/incidents</code>: an append-only timeline — severity, who acknowledged and when, every action, cause and decision, with time-to-acknowledge and time-to-resolve computed from timestamps so a post-mortem cannot flatter itself. Platform alerts attach to an incident. <strong>Nothing pages anybody:</strong> waking a person up is a provider contract (PagerDuty, an on-call phone), not code, and <code>docs/OPERATIONS.md</code> says who to call.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
@@ -1112,7 +1112,7 @@
           <span class="name">Security testing</span>
           <span class="pill partial">Partial</span>
         </label>
-        <p class="note">145 automated checks plus adversarial curl probes each session. <strong>No external penetration test, no dependency CVE scan.</strong></p>
+        <p class="note">217 automated checks, adversarial curl probes each session, and <code>npm run security</code> — a standing check of dependency advisories (136 packages, 0 known), runtime settings, secrets in the tree, every unauthenticated route, and whether a finished notification still holds a patient's number. It found a real leak while being written. <strong>Still no external penetration test — that is a person's engagement, not code.</strong></p>
       </li>
     </ul>
   </section>
@@ -1183,7 +1183,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (215 automated checks, 157 files lint-clean, healthcheck green).
+    application (223 automated checks, 162 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.

@@ -30,6 +30,7 @@ use App\Http\Controllers\QueueController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\AppointmentPolicyController;
 use App\Http\Controllers\BreakController;
+use App\Http\Controllers\IncidentController;
 use App\Http\Controllers\OnboardingController;
 use App\Http\Controllers\PriorityRuleController;
 use App\Http\Controllers\WorkflowController;
@@ -141,6 +142,15 @@ Router::get('/getting-started/display', [OnboardingController::class, 'seenDispl
 Router::get('/queues/appointment-policies', [AppointmentPolicyController::class, 'index'], ['auth' => true]);
 Router::post('/queues/appointment-policies', [AppointmentPolicyController::class, 'save'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/queues/appointment-policies/{id}/delete', [AppointmentPolicyController::class, 'delete'], ['auth' => true, 'ability' => 'clinic.manage']);
+
+// Incident records — an append-only timeline of what broke and what was done.
+Router::get('/incidents', [IncidentController::class, 'index'], ['auth' => true]);
+Router::post('/incidents', [IncidentController::class, 'openIncident'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::get('/incidents/{id}', [IncidentController::class, 'show'], ['auth' => true]);
+Router::post('/incidents/{id}/entries', [IncidentController::class, 'addEntry'], ['auth' => true]);
+Router::post('/incidents/{id}/acknowledge', [IncidentController::class, 'acknowledge'], ['auth' => true]);
+Router::post('/incidents/{id}/mitigate', [IncidentController::class, 'mitigate'], ['auth' => true]);
+Router::post('/incidents/{id}/resolve', [IncidentController::class, 'resolve'], ['auth' => true]);
 
 Router::get('/rooms', [RoomController::class, 'index'], ['auth' => true]);
 Router::post('/rooms', [RoomController::class, 'store'], ['auth' => true, 'ability' => 'doctor.manage']);

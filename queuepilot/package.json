@@ -2,7 +2,7 @@
   "name": "queuepilot",
   "version": "1.0.0",
   "private": true,
-  "description": "QueuePilot \u2014 multi-tenant clinic queue management SaaS (PHP 8.3 + MySQL + Tailwind)",
+  "description": "QueuePilot — multi-tenant clinic queue management SaaS (PHP 8.3 + MySQL + Tailwind)",
   "type": "module",
   "scripts": {
     "dev": "node tools/serve.mjs",
@@ -17,7 +17,9 @@
     "health": "node tools/php.mjs tools/healthcheck.php",
     "lint": "node tools/lint.mjs",
     "icons": "node tools/gen-icons.mjs",
-    "worker:loop": "node tools/php.mjs tools/queue-worker.php --loop 30"
+    "worker:loop": "node tools/php.mjs tools/queue-worker.php --loop 30",
+    "security": "node tools/security-check.mjs",
+    "security:strict": "node tools/security-check.mjs --strict"
   },
   "devDependencies": {
     "qrcode-generator": "^1.4.4",

@@ -354,23 +354,25 @@ final class NotificationService
                 $outcome = $this->gateway($job['channel'])->send($to, $body);
                 if ($outcome === 'logged') {
                     Db::run(
-                        "UPDATE notifications SET status='logged', attempts=?, last_error=?, sent_at=NULL WHERE id=?",
-                        [$attempts, 'recorded by the log transport — not sent to the patient', $job['id']]
+                        "UPDATE notifications SET status='logged', attempts=?, last_error=?, sent_at=NULL, payload_json=? WHERE id=?",
+                        [$attempts, 'recorded by the log transport — not sent to the patient',
+                         $this->withoutNumber($job['payload_json']), $job['id']]
                     );
                     $logged++;
                     continue;
                 }
                 Db::run(
-                    "UPDATE notifications SET status='sent', attempts=?, sent_at=?, last_error=NULL WHERE id=?",
-                    [$attempts, Db::now(), $job['id']]
+                    "UPDATE notifications SET status='sent', attempts=?, sent_at=?, last_error=NULL, payload_json=? WHERE id=?",
+                    [$attempts, Db::now(), $this->withoutNumber($job['payload_json']), $job['id']]
                 );
                 $sent++;
             } catch (\Throwable $e) {
                 $status = $attempts >= 3 ? 'abandoned' : 'queued';
                 $retryAt = date('Y-m-d H:i:s', time() + 60 * (2 ** $attempts));
                 Db::run(
-                    'UPDATE notifications SET status=?, attempts=?, last_error=?, scheduled_at=? WHERE id=?',
-                    [$status, $attempts, mb_substr($e->getMessage(), 0, 290), $retryAt, $job['id']]
+                    'UPDATE notifications SET status=?, attempts=?, last_error=?, scheduled_at=?, payload_json=? WHERE id=?',
+                    [$status, $attempts, mb_substr($e->getMessage(), 0, 290), $retryAt,
+                     $attempts >= 3 ? $this->withoutNumber($job['payload_json']) : $job['payload_json'], $job['id']]
                 );
                 $failed++;
                 Log::warn('notification.send.failed', ['id' => $job['id'], 'error' => $e->getMessage()]);
@@ -386,6 +388,28 @@ final class NotificationService
             'whatsapp' => new WhatsAppGateway(),
             default    => new SmsGateway(),
         };
+    }
+
+    /**
+     * The same payload with the deliverable number removed.
+     *
+     * The raw number has to exist somewhere between queueing and sending —
+     * that is how the message reaches the patient — but keeping it after the
+     * send is finished means every row this clinic ever messaged holds a real
+     * number, and a database dump hands over the whole patient list. So the
+     * number lives for as long as a retry could still need it: removed on
+     * success or on the log transport, kept while the job is still queued or
+     * being retried, dropped when it is abandoned. The masked `to_number`
+     * column is what staff read either way.
+     */
+    private function withoutNumber(string $payloadJson): ?string
+    {
+        $payload = json_decode($payloadJson, true);
+        if (!is_array($payload)) {
+            return $payloadJson;
+        }
+        unset($payload['to']);
+        return json_encode($payload, JSON_UNESCAPED_UNICODE);
     }
 
     /**

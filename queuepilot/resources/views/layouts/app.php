@@ -45,6 +45,7 @@ if ($u) {
                 ['/queues/priority-rules', 'alert', 'Priority rules', $isActive('/queues/priority-rules')],
                 ['/queues/workflows', 'check-circle', 'Service workflows', $isActive('/queues/workflows')],
                 ['/queues/appointment-policies', 'clock', 'Appointment policies', $isActive('/queues/appointment-policies')],
+                ['/incidents', 'shield', 'Incidents', $isActive('/incidents')],
                 ['/getting-started', 'sparkles', 'Getting started', $isActive('/getting-started')],
                 ['/breaks', 'pause', 'Breaks', $isActive('/breaks')],
                 // Departments and the operating calendar are clinic structure;
