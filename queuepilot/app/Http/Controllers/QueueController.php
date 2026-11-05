@@ -245,6 +245,7 @@ final class QueueController
         view('queue/board', [
             'title' => $queue['name'],
             'queue' => $queue,
+            'session' => $service->sessionState($queue),
             'queues' => $repo->liveQueues($clinicId),
             'rows' => $repo->board($clinicId, $queueId),
             'serving' => $service->nowServing($clinicId, $queueId),
@@ -426,6 +427,42 @@ final class QueueController
     }
 
     /** Open / pause / close a session for today. */
+    /**
+     * The doctor's "I am starting now".
+     *
+     * Authorised narrowly: a doctor may start only their own session, while
+     * reception and admins may start any session in their clinic — because
+     * the common real case is a doctor phoning to say they have arrived and
+     * the desk pressing it for them.
+     */
+    public function startSession(): void
+    {
+        $clinicId = $this->guard();
+        $queueId = Request::int('queue_id');
+
+        $queue = Db::one('SELECT * FROM queues WHERE id = ? AND clinic_id = ?', [$queueId, $clinicId]);
+        if ($queue === null) {
+            abort(404, 'That session does not exist.');
+            return;
+        }
+
+        if (Auth::role() === Auth::ROLE_DOCTOR) {
+            $own = (int) Db::scalar('SELECT doctor_id FROM users WHERE id = ?', [(int) Auth::id()]);
+            if ($own === 0 || (int) $queue['doctor_id'] !== $own) {
+                abort(403, 'You can only start your own session.');
+                return;
+            }
+        }
+
+        $result = (new QueueService())->startSession($clinicId, $queueId, (int) Auth::id());
+        if ($result['ok']) {
+            flash('success', $result['message']);
+        } else {
+            flash('error', $result['message']);
+        }
+        back('/queue?queue_id=' . $queueId);
+    }
+
     public function sessionControl(): void
     {
         $clinicId = $this->guard();

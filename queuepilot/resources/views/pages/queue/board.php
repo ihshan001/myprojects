@@ -48,6 +48,53 @@
   </div>
 </div>
 
+<?php
+// "Open" and "the doctor is in the room" are different facts. Saying which
+// one is true, in words, is the whole point of this banner — a board that
+// silently allows calls is how a patient is called into an empty room.
+$session = $session ?? ['started' => true, 'state' => 'running', 'label' => 'Running'];
+$tone = match ($session['state']) {
+    'not_started' => 'border-amber-300 bg-amber-50 text-amber-900',
+    'paused' => 'border-slate-300 bg-slate-100 text-slate-700',
+    'closed' => 'border-slate-300 bg-slate-100 text-slate-600',
+    default => 'border-emerald-200 bg-emerald-50 text-emerald-900',
+};
+?>
+<div class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border <?= $tone ?> px-4 py-3">
+  <div>
+    <p class="text-sm font-semibold">
+      <?php if ($session['state'] === 'not_started'): ?>
+        The doctor has not started this session yet
+      <?php elseif ($session['state'] === 'running'): ?>
+        Session running — patients can be called
+      <?php else: ?>
+        <?= e($session['label']) ?>
+      <?php endif; ?>
+    </p>
+    <p class="mt-0.5 text-xs leading-relaxed opacity-80">
+      <?php if ($session['state'] === 'not_started'): ?>
+        Tokens are still being issued and queued. Press start when the doctor is actually
+        ready to see patients — calling is blocked until then, so nobody is called into an empty room.
+      <?php elseif ($session['state'] === 'running'): ?>
+        Started <?= e(date('g:i A', strtotime((string) $queue['started_at']))) ?>.
+        <?= (int) \App\Core\Db::scalar('SELECT COUNT(*) FROM queue_entries WHERE queue_id = ? AND status = ?', [(int) $queue['id'], 'waiting']) ?> waiting.
+      <?php else: ?>
+        Patients keep their place. Resume the session to continue calling.
+      <?php endif; ?>
+    </p>
+  </div>
+
+  <?php if ($session['state'] === 'not_started'): ?>
+    <form method="post" action="/queue/session/start">
+      <?= csrf_field() ?>
+      <input type="hidden" name="queue_id" value="<?= (int) $queue['id'] ?>">
+      <button class="btn w-full justify-center bg-teal-700 text-sm text-white sm:w-auto">
+        Start session
+      </button>
+    </form>
+  <?php endif; ?>
+</div>
+
 <div class="mt-5 grid gap-4 sm:grid-cols-3">
   <div class="card card-pad">
     <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Now serving</p>

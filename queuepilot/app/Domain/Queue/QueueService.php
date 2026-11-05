@@ -222,6 +222,93 @@ final class QueueService
     }
 
     /* ------------------------------------------------------------------ */
+    /* The doctor's own session start                                      */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * "I am in the room now."
+     *
+     * Separate from opening the queue, because they answer different
+     * questions. Opening says the desk is taking names; starting says the
+     * doctor can actually see them. A board that conflates the two calls
+     * patients into an empty room at 08:00.
+     *
+     * Idempotent on purpose: a doctor who presses it twice, or a second
+     * browser that retries, must not reset the clock that measures how long
+     * the session has been running.
+     *
+     * @return array{ok:bool,message:string,started_at:?string,already:bool}
+     */
+    public function startSession(int $clinicId, int $queueId, ?int $actorId = null): array
+    {
+        $queue = Db::one(
+            'SELECT id, name, status, started_at, session_date FROM queues WHERE id = ? AND clinic_id = ?',
+            [$queueId, $clinicId]
+        );
+        if ($queue === null) {
+            return ['ok' => false, 'message' => 'That session does not exist.', 'started_at' => null, 'already' => false];
+        }
+        if ((string) $queue['status'] === 'closed') {
+            return ['ok' => false, 'message' => 'That session is closed for the day.', 'started_at' => null, 'already' => false];
+        }
+        // Starting yesterday's session would backdate a claim about who was
+        // where, so it is refused rather than silently accepted.
+        if ((string) $queue['session_date'] !== Db::today()) {
+            return ['ok' => false, 'message' => 'That session belongs to another day.', 'started_at' => null, 'already' => false];
+        }
+        if ($queue['started_at'] !== null) {
+            return [
+                'ok' => true,
+                'message' => 'This session is already running.',
+                'started_at' => (string) $queue['started_at'],
+                'already' => true,
+            ];
+        }
+
+        $now = Db::now();
+        Db::run(
+            'UPDATE queues SET started_at = ?, started_by = ? WHERE id = ? AND clinic_id = ? AND started_at IS NULL',
+            [$now, $actorId, $queueId, $clinicId]
+        );
+        // No entry: this is a session-level event, not a patient's. `0` would
+        // violate the foreign key — the column is nullable, so pass null.
+        Db::insert(
+            'INSERT INTO queue_events (clinic_id, queue_id, entry_id, actor_id, action, meta_json, created_at)
+             VALUES (?,?,?,?,?,?,?)',
+            [$clinicId, $queueId, null, $actorId, 'session_started', json_encode(['by' => $actorId]), Db::now()]
+        );
+        $this->audit->log($clinicId, 'queue.session_started', 'queue', $queueId, ['name' => (string) $queue['name']]);
+
+        return ['ok' => true, 'message' => 'Session started. You can call patients now.', 'started_at' => $now, 'already' => false];
+    }
+
+    /**
+     * The board's picture of whether a doctor is actually seeing patients.
+     *
+     * Returns a plain reason so the UI never has to infer one from two
+     * fields — "open but not started" and "started but paused" both need to
+     * read as sentences, not as a guessing game in a template.
+     *
+     * @return array{started:bool,state:string,label:string}
+     */
+    public function sessionState(array $queue): array
+    {
+        $status = (string) ($queue['status'] ?? 'closed');
+        $started = ($queue['started_at'] ?? null) !== null;
+
+        if ($status === 'closed') {
+            return ['started' => $started, 'state' => 'closed', 'label' => 'Closed for the day'];
+        }
+        if (!$started) {
+            return ['started' => false, 'state' => 'not_started', 'label' => 'Waiting for the doctor to start'];
+        }
+        if ($status === 'paused' || !empty($queue['break_started_at'])) {
+            return ['started' => true, 'state' => 'paused', 'label' => 'Paused'];
+        }
+        return ['started' => true, 'state' => 'running', 'label' => 'Running'];
+    }
+
+    /* ------------------------------------------------------------------ */
     /* Transitions                                                         */
     /* ------------------------------------------------------------------ */
 
@@ -239,6 +326,25 @@ final class QueueService
                 $entry = $this->repo->lockEntry($clinicId, $entryId);
                 if (!$entry) {
                     return ['ok' => false, 'status' => 'unknown', 'message' => 'Queue entry not found.'];
+                }
+
+                // A doctor who is not in the room cannot call anybody into it.
+                // Only `call` and `start` are gated: a desk may still cancel,
+                // skip or transfer a patient before the doctor arrives, and
+                // someone already in consultation must always be able to finish.
+                if (in_array($action, ['call', 'start'], true)) {
+                    $sessionStarted = Db::scalar(
+                        'SELECT started_at FROM queues WHERE id = ? AND clinic_id = ?',
+                        [(int) $entry['queue_id'], $clinicId]
+                    );
+                    if ($sessionStarted === null) {
+                        return [
+                            'ok' => false,
+                            'status' => (string) $entry['status'],
+                            'message' => 'That session has not been started yet. '
+                                . 'Press "Start session" when the doctor is ready — patients are still queued.',
+                        ];
+                    }
                 }
 
                 // Optimistic concurrency: reject stale UI actions.

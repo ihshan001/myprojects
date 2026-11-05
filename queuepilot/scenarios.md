@@ -67,7 +67,7 @@ lint-clean, healthcheck all-good, all five demo logins re-checked).
 | Doctor can recall a token that did not appear | ✅ | `recall` — bounded, recorded |
 | Doctor marks a patient absent | ✅ | `skip` / `no_show` |
 | An absent patient can rejoin | ✅ | `requeue` from `skipped` / `no_show` — the token is reused, not reissued |
-| "Start session" as a distinct doctor action | ◐ | The **queue session** has open/pause/close states. There is no separate per-doctor "I am starting now" that gates the board |
+| "Start session" as a distinct doctor action | ✅ | **Built.** `queues.started_at` / `started_by` make "the desk is taking names" and "the doctor is in the room" two facts instead of one, because conflating them called patients into an empty room at 08:00. `POST /queue/session/start` sets it; `call` and `start` are **refused** until then with a sentence telling the operator what to press, while the desk can still cancel, skip and transfer, and anyone already in consultation can always finish. Idempotent — a second press says "already running" and does not move the clock. A doctor may start only their own session (403 otherwise); reception and admins may start any, because the common real case is a doctor phoning to say they have arrived. Refuses yesterday's session rather than backdating a claim. Existing open sessions were backfilled as started by the migration so a live clinic was not locked out mid-morning |
 
 ## 4. Queue disruption — delays, pauses, closure
 
@@ -301,7 +301,7 @@ first clinic goes live — the automated suite does not replace it.
 |---|:--:|:--:|:--:|:--:|
 | 1. Patient arrival and token issuing | 8 | 0 | 0 | 0 |
 | 2. Appointment booking | 9 | 0 | 0 | 0 |
-| 3. Calling, consultation and completion | 7 | 1 | 0 | 0 |
+| 3. Calling, consultation and completion | 8 | 0 | 0 | 0 |
 | 4. Queue disruption — delays, pauses, closure | 6 | 0 | 0 | 0 |
 | 5. Priority and clinical override | 5 | 1 | 0 | 0 |
 | 6. Transfers between services | 4 | 0 | 1 | 0 |
@@ -316,7 +316,7 @@ first clinic goes live — the automated suite does not replace it.
 | 15. Money | 2 | 0 | 3 | 0 |
 | 16. Hardware and physical space | 4 | 1 | 0 | 0 |
 | 17. Other verticals | 5 | 0 | 3 | 0 |
-| **Total (122 scenarios)** | **107** | **6** | **7** | **2** |
+| **Total (122 scenarios)** | **108** | **5** | **7** | **2** |
 
 **What is genuinely finished.** The queue engine holds up under adversarial
 input: issuing, calling, transferring, prioritising, pausing, closing,

@@ -99,6 +99,7 @@ Router::get('/queue/{id}/slip.escpos', [QueueController::class, 'slipEscpos'], [
 Router::get('/queue/entry', [QueueController::class, 'entry'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/action', [QueueController::class, 'action'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/step', [QueueController::class, 'markStep'], ['auth' => true, 'ability' => 'queue.operate']);
+Router::post('/queue/session/start', [QueueController::class, 'startSession'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/session', [QueueController::class, 'sessionControl'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/delay', [QueueController::class, 'announceDelay'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::get('/display', [DisplayController::class, 'screen'], ['auth' => true]);

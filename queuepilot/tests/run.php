@@ -59,10 +59,13 @@ function seedTenant(int $id, string $slug, string $name): void
          VALUES (?, ?, ?, ?, 1, ?)',
         [$id, 'Dr. Test ' . $id, $roomId, 10, Db::now()]
     );
+    // `started_at` is set because a seed tenant is meant to represent an
+    // ordinary working session. A not-started session is a distinct state and
+    // its own test sets that up explicitly.
     $queueId = Db::insert(
-        'INSERT INTO queues (clinic_id, doctor_id, name, token_prefix, session_date, status, last_token_no, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, 0, ?)',
-        [$id, $doctorId, 'OPD', 'A', Db::today(), 'open', Db::now()]
+        'INSERT INTO queues (clinic_id, doctor_id, name, token_prefix, session_date, status, last_token_no, created_at, started_at)
+         VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)',
+        [$id, $doctorId, 'OPD', 'A', Db::today(), 'open', Db::now(), Db::now()]
     );
 
     // Every tenant has an owner. Closure tests need staff to sign out, and a
@@ -4218,6 +4221,55 @@ Assert::test('the satisfaction report leads with the response rate, not just the
     Assert::true($report['by_doctor'] !== [], 'with a per-doctor breakdown');
     Assert::same($doctorId, (int) Db::scalar('SELECT doctor_id FROM visit_feedback WHERE clinic_id = 104 LIMIT 1'),
         'each rating is tied to the doctor who saw the patient');
+});
+
+/* ------------------------------------------------------------------ */
+/* 61. The doctor's own session start                                  */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a session that has not been started refuses to call anybody into the room', function (): void {
+    seedTenant(105, 'session-start', 'Session Start Clinic');
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 105 ORDER BY id LIMIT 1');
+    $doctorId = (int) Db::scalar('SELECT doctor_id FROM queues WHERE id = ?', [$queueId]);
+    $patient = Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (105,?,?,?,?)',
+        ['SS1', 'Session Patient', '0771237301', Db::now()]
+    );
+    $service = new App\Domain\Queue\QueueService();
+    $issued = $service->issueToken(105, $queueId, $patient, ['source' => 'walkin']);
+
+    // A new session starts unstarted. Tokens may still be issued — the desk
+    // keeps taking names — but nobody may be called into the room.
+    Db::run('UPDATE queues SET started_at = NULL WHERE id = ?', [$queueId]);
+    $before = $service->apply(105, (int) $issued['entry_id'], 'call', []);
+    Assert::false($before['ok'], 'calling is refused while the session has not started');
+    Assert::contains('has not been started', (string) $before['message'], 'and the message says what to press');
+    Assert::same('waiting', (string) Db::scalar('SELECT status FROM queue_entries WHERE id = ?', [(int) $issued['entry_id']]),
+        'the patient is still waiting, not silently dropped');
+
+    // Starting is idempotent: pressing twice must not reset the clock that
+    // says how long the session has been running.
+    $first = $service->startSession(105, $queueId, 1);
+    Assert::true($first['ok'], 'a doctor can start it');
+    Assert::false($first['already'], 'and the first press is a real start');
+    $second = $service->startSession(105, $queueId, 1);
+    Assert::true($second['already'], 'the second press says it is already running');
+    Assert::same((string) $first['started_at'], (string) $second['started_at'], 'and does not move the start time');
+
+    $after = $service->apply(105, (int) $issued['entry_id'], 'call', []);
+    Assert::true($after['ok'], 'calling works once the session has started');
+
+    // The state, as the board reads it.
+    $state = $service->sessionState(Db::one('SELECT * FROM queues WHERE id = ?', [$queueId]));
+    Assert::same('running', $state['state'], 'the board reports it as running');
+
+    // Refusals that matter: another day, and a closed session.
+    Db::run("UPDATE queues SET session_date = ? WHERE id = ?", [date('Y-m-d', strtotime('-1 day')), $queueId]);
+    $otherDay = $service->startSession(105, $queueId, 1);
+    Assert::false($otherDay['ok'], "yesterday's session cannot be started today");
+    Assert::contains('another day', (string) $otherDay['message'], 'and says why');
+
+    Assert::true($doctorId > 0, 'the session belongs to a doctor');
 });
 
 /* ------------------------------------------------------------------ */

@@ -435,7 +435,8 @@
           <span class="name">Session start and end</span>
           <span class="pill built">Built</span>
         </label>
-        <p class="note">Open/pause/close per queue. Closing with patients waiting requires an explicit acknowledgement.</p>
+        <p class="note">Open/pause/close per queue. Closing with patients waiting requires an explicit acknowledgement.
+          <b>And the doctor's own start:</b> <code>queues.started_at</code> is a separate fact from "the desk is taking names", because conflating the two called patients into an empty room at 08:00. <code>POST /queue/session/start</code> is idempotent and <code>call</code>/<code>start</code> are refused until it happens, while cancel, skip and transfer still work; anyone in consultation can always finish. A doctor may start only their own session (403 otherwise).</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
