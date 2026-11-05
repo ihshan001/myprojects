@@ -44,8 +44,10 @@ files lint-clean, healthcheck all-good).
 | Scenario | State | Notes |
 |---|:--:|---|
 | Patient books ahead for a doctor | ✅ | `POST /appointments` with date + doctor |
-| Booking respects the doctor's daily capacity | ✅ | `max_patients` is checked, refusal states the number |
-| Available slots reflect the doctor's real schedule | ◐ | **The slot list is a hardcoded array (08:30 … 16:30) in `book/form.php`.** It ignores the doctor's working days and existing bookings. This is the most misleading thing in the product right now |
+| Booking respects capacity | ✅ | Capacity is the number of consultations that fit inside the configured hours at that doctor's consultation length; the grid stops there instead of inventing a 40-slot day |
+| Available slots reflect the doctor's real schedule | ✅ | `SlotService` builds the grid from clinic hours per weekday, the doctor's own consultation length, times already booked, and leave. A closed day says "the clinic is closed"; a full day says so |
+| A forged booking time is refused | ✅ | The POST re-checks the slot; verified that 03:17, a Sunday and a 120-day-ahead date all return 422 with a sentence |
+| Booking does not reveal other patients | ✅ | Fixed during this audit: the clash message named the patient holding the slot, on a public unauthenticated page |
 | Patient cancels an appointment themselves | ○ | No route. Only a receptionist can act on an appointment, and even they can only check it in |
 | Patient reschedules | ○ | No route |
 | Appointment reminder is sent automatically | ◐ | A message template exists; nothing schedules or sends it |
@@ -159,7 +161,8 @@ files lint-clean, healthcheck all-good).
 |---|:--:|---|
 | Doctors are created with a specialty and a room | ✅ | Validated, consultation time clamped |
 | A doctor only sees their own queue | ✅ | Scoped by `doctor_id` |
-| Working days and hours per doctor | ○ | No columns, no UI. Availability is one capacity number (`max_patients`) |
+| Working days and hours per doctor | ◐ | Hours exist **per clinic, per weekday** (`settings` key `hours.<0-6>`, default 08:30–12:30 when unset). A per-doctor roster is still not modelled |
+| A clinic edits its opening hours | ✅ | Settings → Opening hours: seven weekday rows plus a booking horizon. Verified end to end — saving Mon–Fri 09:00–13:00 changed the public booking grid to 09:00…12:45 and closing Sunday made the page say so |
 | Leave is recorded and blocks booking | ✅ | Leave rows block new appointments for the window |
 | Doctor cancels a session | ◐ | The doctor can pause and close a queue, but cannot cancel appointments in bulk |
 | Payroll, rosters, commissions | ⛔ | Not a queue problem |
@@ -249,7 +252,8 @@ first clinic goes live — the automated suite does not replace it.
 | 10 | SMS gateway returns 500 | The queue action still succeeds; the failure is logged and visible; no duplicate sends | ◐ retry logic tested, real gateway is a stub |
 | 11 | Insufficient plan limit | Token issuing is refused with a clear reason, not a silent no-op (a limit rejection once read as "the form is broken") | ✅ verified |
 | 12 | Backup restores onto a clean machine | Data intact, audit chain intact, healthcheck green afterwards | ✅ drill in `docs/BACKUPS.md` |
-| 13 | Patient books an appointment for a full day | Refused with the capacity number, not a blank page | ✅ verified |
+| 13 | Patient books an appointment when the day is full | Every slot is filtered out, the select is disabled, the submit is disabled and the page states why | ✅ verified |
+| 16 | A script posts a time the form never offered | 422 with "not available", no appointment created | ✅ verified |
 | 14 | Whole clinic runs a day on paper | `docs/CONTINUITY.md` drill completes with no data lost on re-entry | ○ written, never rehearsed |
 | 15 | 200 patients in one day | Board stays responsive; wait estimates stay sane; no unbounded query | ◐ load-tested at 200 rows, not with real traffic |
 
@@ -278,10 +282,10 @@ first clinic goes live — the automated suite does not replace it.
 
 **The honest one-liner:** the queue engine is finished and hardened — issuing,
 calling, transferring, pausing, closing, cancelling and auditing all hold up
-under adversarial input. What is missing is around the edges: scheduling that
-respects real working hours, a payment gateway, notification history,
-department structure, and the administrative surfaces for organisations and
-staff activity. Those are additions, not repairs; nothing in the list above
-is a trap where the UI implies a feature the backend cannot deliver — except
-the hardcoded booking slots, which is called out above and should be fixed
-before a clinic relies on it.
+under adversarial input. Scheduling now reflects real clinic hours rather than
+a fixed list, and the booking page no longer leaks other patients' names. What
+is missing is around the edges: a payment gateway, notification history,
+department structure, a per-doctor roster, and the administrative surfaces for
+organisations, opening hours and staff activity. Those are additions, not
+repairs — no scenario above describes a UI that promises what the backend
+cannot do.

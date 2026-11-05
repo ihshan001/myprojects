@@ -1657,6 +1657,120 @@ Assert::test('a closed session leaves no waiting rows behind', function (): void
 });
 
 /* ------------------------------------------------------------------ */
+/* 30. appointment slots come from real availability, not a fixed list  */
+/* ------------------------------------------------------------------ */
+
+Assert::test('slots follow the doctor length and stop at closing time', function (): void {
+    $clinicId = 1;
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1 LIMIT 1');
+    Db::run("UPDATE doctors SET avg_consult_minutes = 20 WHERE id = ?", [$doctorId]);
+    // A plain Tuesday, far enough out that "today" logic does not apply.
+    $date = date('Y-m-d', strtotime('next tuesday +7 days'));
+    (new App\Services\SlotService())->saveHours($clinicId, [
+        (int) date('w', strtotime($date)) => '09:00-11:00',
+    ]);
+
+    $result = (new App\Services\SlotService())->slotsFor($clinicId, $doctorId, $date);
+    Assert::same(['09:00', '09:20', '09:40', '10:00', '10:20', '10:40'], $result['slots']);
+    Assert::same(null, $result['reason']);
+});
+
+Assert::test('a closed day offers nothing and says why', function (): void {
+    $clinicId = 1;
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1 LIMIT 1');
+    $sunday = date('Y-m-d', strtotime('next sunday'));
+    (new App\Services\SlotService())->saveHours($clinicId, [0 => 'closed']);
+
+    $result = (new App\Services\SlotService())->slotsFor($clinicId, $doctorId, $sunday);
+    Assert::same([], $result['slots']);
+    Assert::contains('closed', (string) $result['reason']);
+});
+
+Assert::test('a booked slot disappears from the list', function (): void {
+    $clinicId = 1;
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1 LIMIT 1');
+    $date = date('Y-m-d', strtotime('next tuesday +14 days'));
+    (new App\Services\SlotService())->saveHours($clinicId, [
+        (int) date('w', strtotime($date)) => '09:00-10:00',
+    ]);
+
+    $before = (new App\Services\SlotService())->slotsFor($clinicId, $doctorId, $date)['slots'];
+    Assert::true(in_array('09:00', $before, true), '09:00 starts free');
+
+    $patient = Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (1, ?, ?, ?, ?)',
+        ['SLOT1', 'Slot Test', '0771234599', Db::now()]
+    );
+    (new App\Services\AppointmentService())->create($clinicId, $doctorId, (int) $patient, $date . ' 09:00:00');
+
+    $after = (new App\Services\SlotService())->slotsFor($clinicId, $doctorId, $date)['slots'];
+    Assert::false(in_array('09:00', $after, true), 'the taken slot is not offered');
+    Assert::false((new App\Services\SlotService())->isOffered($clinicId, $doctorId, $date, '09:00'));
+});
+
+Assert::test('a doctor on leave has no slots and the reason says so', function (): void {
+    $clinicId = 1;
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1 LIMIT 1');
+    $date = date('Y-m-d', strtotime('next tuesday +21 days'));
+    (new App\Services\SlotService())->saveHours($clinicId, [
+        (int) date('w', strtotime($date)) => '09:00-11:00',
+    ]);
+    (new App\Services\DoctorService())->addLeave($clinicId, $doctorId, $date, $date, 'Test leave', null);
+
+    $result = (new App\Services\SlotService())->slotsFor($clinicId, $doctorId, $date);
+    Assert::same([], $result['slots']);
+    Assert::contains('leave', (string) $result['reason']);
+});
+
+Assert::test('the booking horizon is clamped to a sane range', function (): void {
+    $service = new App\Services\SlotService();
+    Db::run(
+        "INSERT INTO settings (scope, owner_id, key_name, value) VALUES ('clinic', 1, 'booking.horizon_days', '99999')
+         ON CONFLICT (scope, owner_id, key_name) DO UPDATE SET value = excluded.value"
+    );
+    Assert::same(180, $service->horizonDays(1), 'absurd horizons are clamped');
+
+    Db::run(
+        "INSERT INTO settings (scope, owner_id, key_name, value) VALUES ('clinic', 1, 'booking.horizon_days', '0')
+         ON CONFLICT (scope, owner_id, key_name) DO UPDATE SET value = excluded.value"
+    );
+    Assert::same(1, $service->horizonDays(1), 'zero becomes one day, never "book no appointments"');
+    Db::run("DELETE FROM settings WHERE scope='clinic' AND owner_id=1 AND key_name='booking.horizon_days'");
+});
+
+Assert::test('a slot clash never names the patient who holds it', function (): void {
+    // The clash message renders on a public page. Naming the other patient
+    // tells a stranger who is seeing which doctor and when.
+    $clinicId = 1;
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1 LIMIT 1');
+    $date = date('Y-m-d', strtotime('next tuesday +28 days'));
+    $when = $date . ' 09:00:00';
+
+    $p1 = Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (1, ?, ?, ?, ?)',
+        ['LEAK1', 'Confidential Person', '0771234600', Db::now()]
+    );
+    $p2 = Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (1, ?, ?, ?, ?)',
+        ['LEAK2', 'Second Person', '0771234601', Db::now()]
+    );
+
+    $service = new App\Services\AppointmentService();
+    $service->create($clinicId, $doctorId, (int) $p1, $when);
+
+    $message = null;
+    try {
+        $service->create($clinicId, $doctorId, (int) $p2, $when);
+    } catch (\RuntimeException $e) {
+        $message = $e->getMessage();
+    }
+
+    Assert::true($message !== null, 'the second booking is refused');
+    Assert::false(str_contains((string) $message, 'Confidential'), 'the holder is not named');
+    Assert::false(str_contains((string) $message, 'Person'), 'no part of the name leaks');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

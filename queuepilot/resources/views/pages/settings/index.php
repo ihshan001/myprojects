@@ -100,6 +100,55 @@
       </form>
     </div>
 
+    <?php $dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']; ?>
+    <div class="card overflow-hidden">
+      <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+        <p class="text-xs font-semibold text-slate-600">Opening hours and booking</p>
+      </div>
+      <form method="post" action="/settings/hours" class="space-y-3 px-4 py-4">
+        <?= csrf_field() ?>
+        <p class="text-[11px] leading-relaxed text-slate-500">
+          The public booking page builds its times from this grid — the clinic's hours on each
+          weekday, divided by each doctor's own consultation length, minus appointments already
+          booked. Days left empty use the 8:30&nbsp;AM&ndash;12:30&nbsp;PM default and say so to the patient.
+        </p>
+
+        <?php foreach ($dayNames as $dow => $dayName): ?>
+          <?php $row = $weekHours[$dow] ?? ['open' => null, 'close' => null, 'closed' => true, 'configured' => false]; ?>
+          <div class="grid grid-cols-[7.5rem_1fr_1fr_auto] items-center gap-2">
+            <label class="text-xs font-medium text-slate-600" for="open_<?= $dow ?>"><?= e($dayName) ?></label>
+            <input class="input py-1.5 text-xs" type="time" id="open_<?= $dow ?>" name="open_<?= $dow ?>"
+                   value="<?= e($row['open'] ?? '') ?>" <?= $canManage ? '' : 'disabled' ?>>
+            <input class="input py-1.5 text-xs" type="time" name="close_<?= $dow ?>"
+                   value="<?= e($row['close'] ?? '') ?>" <?= $canManage ? '' : 'disabled' ?>
+                   aria-label="<?= e($dayName) ?> closing time">
+            <label class="flex items-center gap-1.5 text-[11px] text-slate-500">
+              <input type="checkbox" name="closed_<?= $dow ?>" value="1"
+                     <?= $row['closed'] ? 'checked' : '' ?> <?= $canManage ? '' : 'disabled' ?>>
+              closed
+            </label>
+            <?php if (!$row['configured']): ?>
+              <span class="col-start-2 col-span-3 text-[10px] text-slate-400">default — not yet set by this clinic</span>
+            <?php endif; ?>
+          </div>
+        <?php endforeach; ?>
+
+        <div class="grid gap-3 border-t border-slate-100 pt-3 sm:grid-cols-2">
+          <div>
+            <label class="label" for="horizon_days">Book up to (days ahead)</label>
+            <input class="input" type="number" id="horizon_days" name="horizon_days" min="1" max="180"
+                   value="<?= (int) ($horizon ?? 30) ?>" <?= $canManage ? '' : 'disabled' ?>>
+          </div>
+        </div>
+
+        <?php if ($canManage): ?>
+          <button class="btn-primary w-full">Save opening hours</button>
+        <?php else: ?>
+          <p class="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">Only a clinic owner can change opening hours.</p>
+        <?php endif; ?>
+      </form>
+    </div>
+
     <div class="card overflow-hidden">
       <div class="flex items-center justify-between border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
         <p class="text-xs font-semibold text-slate-600">Staff accounts</p>

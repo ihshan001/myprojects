@@ -252,11 +252,36 @@ final class PublicController
         $doctorService = new \App\Services\DoctorService();
         $doctors = $doctorService->bookable((int) $clinic['id'], $date);
 
+        // Slots belong to a doctor and a date, not to the clinic. Resolve the
+        // chosen doctor (defaulting to the first bookable one) and ask the
+        // slot service what is genuinely available. The template renders the
+        // reason when the list is empty instead of an empty dropdown.
+        $slotService = new \App\Services\SlotService();
+        $doctorId = Request::int('doctor_id');
+        $chosen = null;
+        foreach ($doctors as $d) {
+            if ((int) $d['id'] === $doctorId) {
+                $chosen = $d;
+                break;
+            }
+        }
+        if ($chosen === null && $doctors !== []) {
+            $chosen = $doctors[0];
+        }
+        $availability = $chosen !== null
+            ? $slotService->slotsFor((int) $clinic['id'], (int) $chosen['id'], $date)
+            : ['slots' => [], 'reason' => 'No doctor is available on this date.', 'hours' => null];
+
         view('book/form', [
             'title' => 'Book an appointment · ' . $clinic['name'],
             'clinicRecord' => $clinic,
             'doctors' => $doctors,
             'date' => $date,
+            'slots' => $availability['slots'],
+            'slotReason' => $availability['reason'],
+            'hours' => $availability['hours'],
+            'chosenDoctorId' => $chosen !== null ? (int) $chosen['id'] : null,
+            'horizon' => $slotService->horizonDays((int) $clinic['id']),
             'error' => null,
         ], false);
     }
@@ -286,14 +311,34 @@ final class PublicController
         $date = Request::string('date');
         $time = Request::string('time', '09:00');
 
-        $fail = function (string $message) use ($clinic, $slug, $date): void {
+        $fail = function (string $message, int $doctorId = 0) use ($clinic, $slug, $date): void {
             $doctors = (new \App\Services\DoctorService())->bookable((int) $clinic['id'], $date);
+            $slotService = new \App\Services\SlotService();
+            $chosen = null;
+            foreach ($doctors as $d) {
+                if ((int) $d['id'] === $doctorId) {
+                    $chosen = $d;
+                    break;
+                }
+            }
+            if ($chosen === null && $doctors !== []) {
+                $chosen = $doctors[0];
+            }
+            $availability = $chosen !== null
+                ? $slotService->slotsFor((int) $clinic['id'], (int) $chosen['id'], $date)
+                : ['slots' => [], 'reason' => 'No doctor is available on this date.', 'hours' => null];
+
             http_response_code(422);
             view('book/form', [
                 'title' => 'Book an appointment · ' . $clinic['name'],
                 'clinicRecord' => $clinic,
                 'doctors' => $doctors,
                 'date' => $date,
+                'slots' => $availability['slots'],
+                'slotReason' => $availability['reason'],
+                'hours' => $availability['hours'],
+                'chosenDoctorId' => $chosen !== null ? (int) $chosen['id'] : null,
+                'horizon' => $slotService->horizonDays((int) $clinic['id']),
                 'error' => $message,
             ], false);
         };
@@ -306,6 +351,10 @@ final class PublicController
             $fail('Enter the patient name.');
             return;
         }
+        if ((new \App\Services\DoctorService())->isOnLeave($clinicId, $doctorId, $date)) {
+            $fail('That doctor is on leave on ' . $date . '. Choose another day or another doctor.', $doctorId);
+            return;
+        }
         if (preg_match('/^0[0-9]{9}$/', preg_replace('/\s+/', '', $phone)) !== 1) {
             $fail('Enter a Sri Lankan mobile number, for example 077 123 4567.');
             return;
@@ -314,16 +363,27 @@ final class PublicController
             $fail('Choose a date from today onwards.');
             return;
         }
+        // The horizon is a rule, not a UI hint: thirty days is enough for a
+        // patient and short enough that the clinic's schedule is not frozen
+        // months ahead by bookings nobody remembers making.
+        if (strtotime($date) > strtotime('+' . (new \App\Services\SlotService())->horizonDays($clinicId) . ' days')) {
+            $fail('Appointments can only be booked ' . (new \App\Services\SlotService())->horizonDays($clinicId) . ' days ahead.');
+            return;
+        }
         if (preg_match('/^\d{2}:\d{2}$/', $time) !== 1) {
             $fail('Choose a time.');
             return;
         }
-        // Leave is checked here and not only in the form: the form is a
-        // suggestion, the POST is the request of record.
-        if ((new \App\Services\DoctorService())->isOnLeave($clinicId, $doctorId, $date)) {
-            $fail('That doctor is on leave on ' . $date . '. Choose another day or another doctor.');
+        // The dropdown is a suggestion; this is the request of record. Without
+        // this check a script (or a stale tab) can post any minute of the day
+        // and create an appointment at a time the clinic never offered.
+        if (!(new \App\Services\SlotService())->isOffered($clinicId, $doctorId, $date, $time)) {
+            $fail('That time is not available. Please pick one of the times shown.', $doctorId);
             return;
         }
+        // Leave was already checked above, before the slot list was consulted:
+        // a doctor on leave has no slots, and reporting "not available" would
+        // hide the real reason.
 
         // A booking is a request, not a queue position: the patient is checked
         // in when they physically arrive, which is where the late-arrival

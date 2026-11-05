@@ -47,19 +47,18 @@ final class AppointmentService
      */
     public function create(int $clinicId, int $doctorId, int $patientId, string $when, string $source = 'online', int $duration = 15): int
     {
-        $clash = Db::one(
-            "SELECT a.id, p.full_name FROM appointments a
-               JOIN patients p ON p.id = a.patient_id
-              WHERE a.clinic_id = ? AND a.doctor_id = ? AND a.scheduled_for = ?
-                AND a.status IN ('booked','checked_in')
-              LIMIT 1",
+        // Deliberately does not select the patient: the clash message is
+        // rendered on the public booking page, and naming the person who
+        // already holds the slot tells a stranger who is seeing which doctor
+        // and when. Presence of the clash is all the caller needs.
+        $clash = Db::scalar(
+            "SELECT COUNT(*) FROM appointments
+              WHERE clinic_id = ? AND doctor_id = ? AND scheduled_for = ?
+                AND status IN ('booked','checked_in')",
             [$clinicId, $doctorId, $when]
         );
-        if ($clash) {
-            throw new \RuntimeException(sprintf(
-                'That time is already booked for this doctor (%s). Choose another slot.',
-                $clash['full_name']
-            ));
+        if ((int) $clash > 0) {
+            throw new \RuntimeException('That time was just taken. Please choose another slot.');
         }
 
         return Db::insert(

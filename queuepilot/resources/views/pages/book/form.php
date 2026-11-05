@@ -8,8 +8,9 @@
  *  - the clinic's own colour, so it does not look like a third-party site
  */
 $brand = $clinicRecord['brand_color'] ?: '#0F766E';
-$slots = ['08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
-          '14:00', '14:30', '15:00', '15:30', '16:00', '16:30'];
+// $slots comes from SlotService: real clinic hours, real doctor length, minus
+// times already booked. Never rebuilt here — a view that invents availability
+// is how the page came to offer 08:30 on days nobody works.
 ?>
 <!DOCTYPE html>
 <html lang="<?= e($clinicRecord['locale'] ?? 'en') ?>" class="h-full">
@@ -59,7 +60,9 @@ $slots = ['08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
         <?php $anyBookable = false; ?>
         <?php foreach ($doctors as $d): ?>
           <?php $away = !empty($d['on_leave']); $anyBookable = $anyBookable || !$away; ?>
-          <option value="<?= (int) $d['id'] ?>" <?= $away ? 'disabled' : '' ?>>
+          <option value="<?= (int) $d['id'] ?>"
+                  <?= $away ? 'disabled' : '' ?>
+                  <?= (int) $d['id'] === (int) ($chosenDoctorId ?? 0) ? 'selected' : '' ?>>
             <?= e($d['name']) ?><?= !empty($d['specialty']) ? ' — ' . e($d['specialty']) : '' ?><?= $away ? ' (on leave)' : '' ?>
           </option>
         <?php endforeach; ?>
@@ -75,19 +78,40 @@ $slots = ['08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
         <div>
           <label class="label" for="date">Date</label>
           <input class="input" type="date" id="date" name="date" required
-                 value="<?= e($date) ?>" min="<?= e(App\Core\Db::today()) ?>">
+                 value="<?= e($date) ?>" min="<?= e(App\Core\Db::today()) ?>"
+                 max="<?= e(date('Y-m-d', strtotime('+' . (int) ($horizon ?? 30) . ' days'))) ?>">
         </div>
         <div>
           <label class="label" for="time">Time</label>
-          <select class="select" id="time" name="time">
-            <?php foreach ($slots as $slot): ?>
-              <option value="<?= e($slot) ?>"><?= e(date('g:i A', strtotime($slot))) ?></option>
-            <?php endforeach; ?>
-          </select>
+          <?php if ($slots !== []): ?>
+            <select class="select" id="time" name="time">
+              <?php foreach ($slots as $slot): ?>
+                <option value="<?= e($slot) ?>"><?= e(date('g:i A', strtotime($slot))) ?></option>
+              <?php endforeach; ?>
+            </select>
+          <?php else: ?>
+            <select class="select" id="time" name="time" disabled>
+              <option value="">No times available</option>
+            </select>
+          <?php endif; ?>
         </div>
       </div>
 
-      <button class="btn-primary mt-5 w-full" type="submit">Request appointment</button>
+      <?php if ($slots === [] && !empty($slotReason)): ?>
+        <p class="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800">
+          <?= e($slotReason) ?>
+        </p>
+      <?php elseif (!empty($hours['open'])): ?>
+        <p class="mt-2 text-[11px] leading-relaxed text-slate-500">
+          <?= e(date('l', strtotime($date))) ?> hours:
+          <?= e(date('g:i A', strtotime($hours['open']))) ?>–<?= e(date('g:i A', strtotime($hours['close']))) ?>.
+          <?php if (empty($hours['configured'])): ?>
+            The clinic has not set its own hours, so these are the defaults.
+          <?php endif; ?>
+        </p>
+      <?php endif; ?>
+
+      <button class="btn-primary mt-5 w-full" type="submit"<?= $slots === [] ? ' disabled' : '' ?>>Request appointment</button>
 
       <p class="mt-3 text-center text-[11px] leading-relaxed text-slate-500">
         This holds your slot. Please arrive 10 minutes early and check in at reception.

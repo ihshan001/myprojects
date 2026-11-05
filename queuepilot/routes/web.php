@@ -93,6 +93,7 @@ Router::post('/doctors/leave/{id}/delete', [ClinicController::class, 'removeLeav
 Router::post('/doctors/{id}', [ClinicController::class, 'updateDoctor'], ['auth' => true, 'ability' => 'doctor.manage']);
 Router::get('/settings', [ClinicController::class, 'settings'], ['auth' => true]);
 Router::post('/settings', [ClinicController::class, 'saveSettings'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/settings/hours', [ClinicController::class, 'saveHours'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/settings/staff', [ClinicController::class, 'storeStaff'], ['auth' => true, 'ability' => 'staff.manage']);
 Router::post('/settings/invites', [ClinicController::class, 'inviteStaff'], ['auth' => true, 'ability' => 'staff.manage']);
 Router::post('/settings/invites/{id}/revoke', [ClinicController::class, 'revokeInvite'], ['auth' => true, 'ability' => 'staff.manage']);

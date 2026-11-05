@@ -175,6 +175,10 @@ final class ClinicController
             // only way the invite reaches the person, so it is shown once,
             // here, to the administrator who created it.
             'inviteLink' => \App\Core\Session::takeFlash('last_invite_link'),
+            // Opening hours drive the public booking grid. Read here so the
+            // settings page can show what a patient is actually being offered.
+            'weekHours' => $this->weekHours($clinicId),
+            'horizon' => (new \App\Services\SlotService())->horizonDays($clinicId),
         ]);
     }
 
@@ -213,6 +217,82 @@ final class ClinicController
         (new AuditService())->log($clinicId, 'clinic.settings_updated', 'clinic', $clinicId, ['name' => $name]);
         flash('success', 'Clinic settings saved.');
         redirect('/settings');
+    }
+
+    /**
+     * Save the weekly opening hours that the public booking page uses.
+     *
+     * Separate from saveSettings on purpose: hours are submitted as a grid of
+     * seven rows, and a half-filled grid should be rejected as a whole rather
+     * than silently saving three days of a four-day change.
+     */
+    public function saveHours(): void
+    {
+        $clinicId = $this->clinicId();
+        $week = [];
+        $errors = [];
+
+        for ($dow = 0; $dow <= 6; $dow++) {
+            $closed = Request::input('closed_' . $dow) !== null;
+            if ($closed) {
+                $week[$dow] = 'closed';
+                continue;
+            }
+            $open = Request::string('open_' . $dow);
+            $close = Request::string('close_' . $dow);
+            if ($open === '' && $close === '') {
+                continue; // untouched row keeps its previous value
+            }
+            if (preg_match('/^\d{2}:\d{2}$/', $open) !== 1 || preg_match('/^\d{2}:\d{2}$/', $close) !== 1) {
+                $errors[] = 'Use times like 08:30 on every open day.';
+                continue;
+            }
+            if ($close <= $open) {
+                $errors[] = 'Closing time must be after opening time (' . date('l', strtotime('next sunday +' . $dow . ' days')) . ').';
+                continue;
+            }
+            $week[$dow] = $open . '-' . $close;
+        }
+
+        if ($errors !== []) {
+            flash('error', implode(' ', array_unique($errors)));
+            redirect('/settings');
+            return;
+        }
+
+        (new \App\Services\SlotService())->saveHours($clinicId, $week);
+
+        $horizon = max(1, min(180, Request::int('horizon_days', 30)));
+        Db::run(
+            "INSERT INTO settings (scope, owner_id, key_name, value) VALUES ('clinic', ?, 'booking.horizon_days', ?)
+             ON CONFLICT (scope, owner_id, key_name) DO UPDATE SET value = excluded.value",
+            [$clinicId, (string) $horizon]
+        );
+
+        (new AuditService())->log($clinicId, 'clinic.hours_updated', 'clinic', $clinicId, ['week' => $week]);
+        flash('success', 'Opening hours saved. The booking page now uses them.');
+        redirect('/settings');
+    }
+
+    /** @return array<int, array{open: ?string, close: ?string, closed: bool, configured: bool}> */
+    private function weekHours(int $clinicId): array
+    {
+        $service = new \App\Services\SlotService();
+        $out = [];
+        for ($dow = 0; $dow <= 6; $dow++) {
+            // "Closed" is detected by asking the service about a date that
+            // falls on that weekday, so the page and the booking grid can
+            // never disagree about what a row means.
+            $date = date('Y-m-d', strtotime('next sunday +' . $dow . ' days'));
+            $hours = $service->hoursFor($clinicId, $date);
+            $out[$dow] = [
+                'open' => $hours['open'],
+                'close' => $hours['close'],
+                'closed' => $hours['open'] === null,
+                'configured' => $hours['configured'],
+            ];
+        }
+        return $out;
     }
 
     /**
