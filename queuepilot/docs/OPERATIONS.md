@@ -8,7 +8,21 @@ to know whether the system is working and what to do if it is not.
 ```bash
 php tools/healthcheck.php          # deploy sanity: schema, plans, CSS, schema parity
 curl -H "Authorization: Bearer $MONITOR_TOKEN" https://queues.example.lk/api/health
+node tools/security-check.mjs      # before every release that changes dependencies
 ```
+
+`tools/security-check.mjs` is the standing posture check: dependency
+advisories from `npm audit`, PHP settings that turn a bug into a breach,
+whether `.env` is in the repository, every route reachable without signing in,
+and whether a finished notification still holds a patient's phone number. It
+prints warnings for things this demo environment cannot change (php-wasm cannot
+toggle `expose_php`) and failures for things that are actually wrong. `npm run
+security` runs it; `npm run security:strict` exits non-zero for CI.
+
+It is **not** a penetration test. It catches the mistakes that are cheap to
+catch mechanically, and it found a real leak the first time it ran — 18
+finished notifications still carried a deliverable phone number in their
+payload.
 
 `healthcheck.php` is a pre-flight for a deploy: it proves the files are there
 and the two schema dialects still agree. `api/health` is the live probe: it
@@ -16,8 +30,27 @@ answers questions about *this* database right now.
 
 `/api/health` returns `200` for `ok` and `warning`, and `503` for `critical`,
 so a normal uptime monitor can watch it without parsing JSON. The body lists
-every check with a one-line sentence, which is what you paste into the incident
-channel.
+every check with a one-line sentence, which is what you paste into `/incidents`.
+
+## Where an incident goes
+
+**`/incidents`** (clinic staff, or the platform admin for anything platform-wide).
+Open it while it is happening, not afterwards:
+
+1. **Open** — title, severity, and the time it was actually detected. Attach an
+   open `system_alerts` row if the platform raised one.
+2. **Acknowledge** ("I am on it") — records who took it. Time-to-acknowledge is
+   measured from *detection*, so a late acknowledgement cannot flatter the
+   response time.
+3. **Add entries** as you go — actions, causes, decisions, references. The
+   timeline is append-only; a correction is a new entry that says it corrects
+   one.
+4. **Mitigate** when the bleeding stops, **resolve** when it is fixed. Record the
+   cause while it is fresh — that is the entry that stops the next one.
+
+Nothing pages anybody. That is a provider contract (PagerDuty, Opsgenie, an
+on-call phone) and this codebase cannot supply it. This document says who to
+call; `/incidents` says what happened.
 
 Example of a real failure it reports:
 
