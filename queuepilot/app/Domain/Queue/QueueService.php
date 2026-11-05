@@ -54,6 +54,16 @@ final class QueueService
                 throw new \RuntimeException('This clinic account is closed.');
             }
 
+            // An unverified owner can configure the clinic and look around, but
+            // cannot put a patient in a queue. This is the one place that
+            // matters, so the check lives here rather than in each controller.
+            if (!(new \App\Services\EmailVerificationService())->clinicMayIssueTokens($clinicId)) {
+                throw new \RuntimeException(
+                    'Confirm the clinic owner\'s email address before issuing tokens. '
+                    . 'Open Billing and press "Resend confirmation", or ask the platform administrator to verify it.'
+                );
+            }
+
             $queue = $this->repo->queue($clinicId, $queueId);
             if (!$queue) {
                 throw new \RuntimeException('Queue not found for this clinic.');

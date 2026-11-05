@@ -49,6 +49,14 @@
             <button class="act-mute">Apply</button>
           </form>
 
+          <?php if (($c['owner_verified_at'] ?? null) === null && !empty($c['owner_id'])): ?>
+            <form method="post" action="/admin/clinics/<?= (int) $c['owner_id'] ?>/verify-email"
+                  onsubmit="return confirm('Mark this address as verified by hand? Only do this once you have spoken to the owner.')">
+              <?= csrf_field() ?>
+              <button class="act-mute" title="<?= e((string) $c['owner_email']) ?>">Verify email</button>
+            </form>
+          <?php endif; ?>
+
           <form method="post" action="/admin/clinics/<?= (int) $c['id'] ?>">
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="<?= $c['billing_status'] === 'suspended' ? 'activate' : 'suspend' ?>">
@@ -67,6 +75,14 @@
         <p>Renews: <b class="text-slate-700"><?= e((string) ($c['renews_on'] ?? '—')) ?></b></p>
         <p>Timezone: <b class="text-slate-700"><?= e((string) $c['timezone']) ?></b></p>
         <p>Slug: <b class="font-mono text-slate-700"><?= e((string) $c['slug']) ?></b></p>
+        <p class="sm:col-span-2">Owner:
+          <b class="text-slate-700"><?= e((string) ($c['owner_email'] ?? '—')) ?></b>
+          <?php if (($c['owner_verified_at'] ?? null) !== null): ?>
+            <span class="badge-emerald ml-1">verified</span>
+          <?php elseif (!empty($c['owner_email'])): ?>
+            <span class="badge-amber ml-1">unverified — cannot issue tokens</span>
+          <?php endif; ?>
+        </p>
       </div>
 
       <?php

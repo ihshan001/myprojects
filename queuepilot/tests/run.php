@@ -68,9 +68,9 @@ function seedTenant(int $id, string $slug, string $name): void
     // Every tenant has an owner. Closure tests need staff to sign out, and a
     // clinic with no admin is not a state the product allows anyway.
     Db::insert(
-        'INSERT INTO users (clinic_id, name, email, password_hash, role, is_active, created_at)
-         VALUES (?, ?, ?, ?, ?, 1, ?)',
-        [$id, 'Admin ' . $id, 'admin' . $id . '@alpha.example', password_hash('Admin#2026', PASSWORD_DEFAULT), 'clinic_admin', Db::now()]
+        'INSERT INTO users (clinic_id, name, email, password_hash, role, is_active, created_at, email_verified_at)
+         VALUES (?, ?, ?, ?, ?, 1, ?, ?)',
+        [$id, 'Admin ' . $id, 'admin' . $id . '@alpha.example', password_hash('Admin#2026', PASSWORD_DEFAULT), 'clinic_admin', Db::now(), Db::now()]
     );
 }
 
@@ -2289,6 +2289,106 @@ Assert::test('the unanswered count ignores tickets the platform has replied to',
         []
     );
     Assert::same([$silent], array_map(static fn (array $r): int => (int) $r['id'], $rows), 'only the ticket nobody answered');
+});
+
+/* ------------------------------------------------------------------ */
+/* 39. email verification                                              */
+/* ------------------------------------------------------------------ */
+
+Assert::test('an unverified clinic cannot issue tokens', function (): void {
+    seedTenant(30, 'unverified-clinic', 'Unverified Clinic');
+    // seedTenant marks owners verified so the rest of the suite can issue
+    // tokens; this test is about the unverified case, so clear it here.
+    Db::run('UPDATE users SET email_verified_at = NULL WHERE email = ?', ['admin30@alpha.example']);
+    $service = new App\Services\EmailVerificationService();
+
+    // seedTenant creates an owner with no verification stamp.
+    Assert::false($service->clinicMayIssueTokens(30), 'blocked before verification');
+
+    $patient = Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (30,?,?,?,?)',
+        ['UV' . bin2hex(random_bytes(2)), 'Blocked Patient', '+94771200001', Db::now()]
+    );
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 30');
+
+    $message = '';
+    try {
+        (new App\Domain\Queue\QueueService())->issueToken(30, $queueId, $patient, ['source' => 'walkin']);
+    } catch (\Throwable $e) {
+        $message = $e->getMessage();
+    }
+
+    Assert::contains('Confirm the clinic owner', $message, 'the refusal explains itself');
+    Assert::same(0, (int) Db::scalar('SELECT COUNT(*) FROM queue_entries WHERE clinic_id = 30'), 'no token was written');
+});
+
+Assert::test('a verification link works once and opens the gate', function (): void {
+    seedTenant(31, 'verifying-clinic', 'Verifying Clinic');
+    Db::run('UPDATE users SET email_verified_at = NULL WHERE email = ?', ['admin31@alpha.example']);
+    $ownerId = (int) Db::scalar("SELECT id FROM users WHERE email = 'admin31@alpha.example'");
+    $service = new App\Services\EmailVerificationService();
+
+    $token = $service->send($ownerId, true);
+    Assert::true($token !== null && strlen((string) $token) >= 20, 'a token was issued');
+    Assert::false($service->clinicMayIssueTokens(31), 'still blocked while the link is unopened');
+
+    Assert::same($ownerId, $service->verify((string) $token), 'the link verifies the owner');
+    Assert::true($service->clinicMayIssueTokens(31), 'the gate is open');
+
+    Assert::true($service->verify((string) $token) === null, 'the same link is refused the second time');
+});
+
+Assert::test('an expired link is refused', function (): void {
+    seedTenant(32, 'expired-clinic', 'Expired Clinic');
+    Db::run('UPDATE users SET email_verified_at = NULL WHERE email = ?', ['admin32@alpha.example']);
+    $ownerId = (int) Db::scalar("SELECT id FROM users WHERE email = 'admin32@alpha.example'");
+    $service = new App\Services\EmailVerificationService();
+
+    $token = (string) $service->send($ownerId, true);
+    Db::run('UPDATE email_verifications SET expires_at = ? WHERE user_id = ?', [date('Y-m-d H:i:s', time() - 60), $ownerId]);
+
+    Assert::true($service->verify($token) === null, 'an expired token verifies nothing');
+    Assert::false($service->clinicMayIssueTokens(32), 'still blocked');
+});
+
+Assert::test('a second send invalidates the first link', function (): void {
+    seedTenant(33, 'resend-clinic', 'Resend Clinic');
+    Db::run('UPDATE users SET email_verified_at = NULL WHERE email = ?', ['admin33@alpha.example']);
+    $ownerId = (int) Db::scalar("SELECT id FROM users WHERE email = 'admin33@alpha.example'");
+    $service = new App\Services\EmailVerificationService();
+
+    $first = (string) $service->send($ownerId, true);
+    $second = (string) $service->send($ownerId, true);
+    Assert::true($first !== $second, 'a fresh token each time');
+
+    Assert::true($service->verify($first) === null, 'the older link is dead');
+    Assert::same($ownerId, $service->verify($second), 'the newest link works');
+});
+
+Assert::test('the platform can verify an address by hand', function (): void {
+    seedTenant(34, 'manual-clinic', 'Manual Clinic');
+    Db::run('UPDATE users SET email_verified_at = NULL WHERE email = ?', ['admin34@alpha.example']);
+    $ownerId = (int) Db::scalar("SELECT id FROM users WHERE email = 'admin34@alpha.example'");
+    $service = new App\Services\EmailVerificationService();
+
+    Assert::false($service->clinicMayIssueTokens(34));
+    Assert::true($service->verifyByHand($ownerId, (int) $GLOBALS['superAdminId']), 'staff verification succeeds');
+    Assert::true($service->clinicMayIssueTokens(34), 'the clinic can work');
+
+    Assert::same(1, (int) Db::scalar(
+        "SELECT COUNT(*) FROM audit_logs WHERE action = 'user.email_verified_by_staff' AND entity_id = ?",
+        [$ownerId]
+    ), 'the override is audited');
+});
+
+Assert::test('an already verified address gets no new link', function (): void {
+    seedTenant(35, 'verified-clinic', 'Verified Clinic');
+    Db::run('UPDATE users SET email_verified_at = NULL WHERE email = ?', ['admin35@alpha.example']);
+    $ownerId = (int) Db::scalar("SELECT id FROM users WHERE email = 'admin35@alpha.example'");
+    $service = new App\Services\EmailVerificationService();
+    Db::run('UPDATE users SET email_verified_at = ? WHERE id = ?', [Db::now(), $ownerId]);
+
+    Assert::true($service->send($ownerId, true) === null, 'nothing is sent for a confirmed address');
 });
 
 /* ------------------------------------------------------------------ */

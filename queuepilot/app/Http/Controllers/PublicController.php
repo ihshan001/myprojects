@@ -213,6 +213,20 @@ final class PublicController
 
         try {
             $result = (new ClinicService())->register($data, $plan);
+
+            // Prove the address before the clinic can put a patient in a queue.
+            // Sending is best-effort: a mail failure must not lose the account
+            // somebody just created, so the token is issued anyway and the
+            // banner on the billing page offers a resend.
+            try {
+                $ownerId = (int) Db::scalar('SELECT id FROM users WHERE email = ?', [$data['email']]);
+                if ($ownerId > 0) {
+                    (new \App\Services\EmailVerificationService())->send($ownerId, true);
+                }
+            } catch (\Throwable $e) {
+                \App\Core\Log::warn('auth.verification_send_failed', ['error' => $e->getMessage()]);
+            }
+
             [$ok] = Auth::attempt($data['email'], $data['password'], Request::ip());
             if (!$ok) {
                 flash('success', 'Clinic created. Please sign in.');

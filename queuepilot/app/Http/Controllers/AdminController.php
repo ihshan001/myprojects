@@ -59,7 +59,14 @@ final class AdminController
             "SELECT c.*, p.name AS plan_name, p.price_monthly,
                     (SELECT COUNT(*) FROM users u WHERE u.clinic_id = c.id) AS staff,
                     (SELECT COUNT(*) FROM patients pt WHERE pt.clinic_id = c.id) AS patients,
-                    (SELECT COUNT(*) FROM queue_entries e WHERE e.clinic_id = c.id) AS entries
+                    (SELECT COUNT(*) FROM queue_entries e WHERE e.clinic_id = c.id) AS entries,
+                    -- Who owns the account and whether they have proved the
+                    -- address. A clinic that cannot issue tokens because mail
+                    -- never arrived is a support call, and this is the screen
+                    -- where it gets fixed.
+                    (SELECT u.email FROM users u WHERE u.clinic_id = c.id AND u.role = 'clinic_admin' ORDER BY u.id LIMIT 1) AS owner_email,
+                    (SELECT u.id FROM users u WHERE u.clinic_id = c.id AND u.role = 'clinic_admin' ORDER BY u.id LIMIT 1) AS owner_id,
+                    (SELECT u.email_verified_at FROM users u WHERE u.clinic_id = c.id AND u.role = 'clinic_admin' ORDER BY u.id LIMIT 1) AS owner_verified_at
                FROM clinics c LEFT JOIN plans p ON p.id = c.plan_id
               ORDER BY c.name"
         );

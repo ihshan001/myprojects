@@ -183,6 +183,37 @@ if ($u) {
       </div>
     <?php endif; ?>
 
+    <?php
+    // A clinic whose owner has not confirmed their address can look around but
+    // cannot issue tokens. Saying so once, at the top of every page, is fairer
+    // than letting a receptionist discover it at the desk with a patient in
+    // front of them.
+    $qpClinicId = \App\Core\Auth::clinicId();
+    $qpVerifyBanner = $qpClinicId !== null
+        && \App\Core\Auth::can('queue.operate')
+        && !(new \App\Services\EmailVerificationService())->clinicMayIssueTokens($qpClinicId);
+    ?>
+    <?php if ($qpVerifyBanner): ?>
+      <div class="px-4 pt-4 sm:px-6 lg:px-8">
+        <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p class="flex flex-wrap items-center gap-2">
+            <svg class="h-4 w-4 shrink-0"><use href="#i-alert"/></svg>
+            <span class="font-semibold">Confirm the owner's email to start issuing tokens.</span>
+            <span class="text-amber-800">Patients cannot be queued until the address on this account is confirmed.</span>
+          </p>
+          <div class="mt-2 flex flex-wrap items-center gap-3 pl-6">
+            <form method="post" action="/verify-email/resend">
+              <?= csrf_field() ?>
+              <button class="rounded border border-amber-300 bg-white px-2.5 py-1 text-xs font-medium text-amber-900 hover:bg-amber-100">
+                Resend confirmation
+              </button>
+            </form>
+            <a href="/billing" class="text-xs font-medium text-amber-900 underline">Billing &amp; account</a>
+          </div>
+        </div>
+      </div>
+    <?php endif; ?>
+
     <main class="page">
       <?= $content ?>
     </main>

@@ -16,6 +16,7 @@ use App\Http\Controllers\BillingController;
 use App\Http\Controllers\ClinicController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DisplayController;
+use App\Http\Controllers\EmailVerificationController;
 use App\Http\Controllers\MonitorController;
 use App\Http\Controllers\PasswordResetController;
 use App\Http\Controllers\CalendarController;
@@ -55,6 +56,10 @@ Router::get('/forgot-password', [PasswordResetController::class, 'showRequest'])
 Router::post('/forgot-password', [PasswordResetController::class, 'send']);
 Router::get('/reset-password/{token}', [PasswordResetController::class, 'showReset']);
 Router::post('/reset-password/{token}', [PasswordResetController::class, 'reset']);
+// Email confirmation. The link is public; resending needs the session.
+Router::get('/verify-email/{token}', [EmailVerificationController::class, 'verify'], ['csrf' => false]);
+Router::post('/verify-email/resend', [EmailVerificationController::class, 'resend'], ['auth' => true]);
+Router::post('/admin/clinics/{id}/verify-email', [EmailVerificationController::class, 'verifyByHand'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/login/2fa/cancel', [AuthController::class, 'cancelTwoFactor']);
 // Staff invitation acceptance
 Router::get('/invite/{token}', [AuthController::class, 'showInvite'], ['csrf' => false]);

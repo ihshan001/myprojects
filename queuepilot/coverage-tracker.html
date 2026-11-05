@@ -103,8 +103,8 @@
   </div>
 
   <div class="legend">
-    <span><i class="dot built"></i> 102 built</span>
-    <span><i class="dot partial"></i> 21 partial</span>
+    <span><i class="dot built"></i> 103 built</span>
+    <span><i class="dot partial"></i> 20 partial</span>
     <span><i class="dot missing"></i> 0 not built</span>
   </div>
 
@@ -126,9 +126,9 @@
         <label class="row">
           <input type="checkbox" class="tick" data-id="Platform and business|Clinic registration and verification">
           <span class="name">Clinic registration and verification</span>
-          <span class="pill partial">Partial</span>
+          <span class="pill built">Built</span>
         </label>
-        <p class="note"><code>/register</code> creates a clinic + admin and applies a trial. There is <strong>no email verification</strong> step and no manual review queue — a clinic is live immediately.</p>
+        <p class="note"><code>/register</code> creates the clinic, owner and trial, then mails a confirmation link. Until it is opened the clinic can sign in but cannot issue tokens; a super admin can verify by hand when mail fails, and that override is audited. Verified live.</p>
       </li>
       <li class="item" data-status="partial">
         <label class="row">
@@ -1183,7 +1183,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (151 automated checks, 129 files lint-clean, healthcheck green).
+    application (157 automated checks, 132 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.
