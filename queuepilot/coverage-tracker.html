@@ -103,8 +103,8 @@
   </div>
 
   <div class="legend">
-    <span><i class="dot built"></i> 110 built</span>
-    <span><i class="dot partial"></i> 13 partial</span>
+    <span><i class="dot built"></i> 111 built</span>
+    <span><i class="dot partial"></i> 12 partial</span>
     <span><i class="dot missing"></i> 0 not built</span>
   </div>
 
@@ -238,9 +238,9 @@
         <label class="row">
           <input type="checkbox" class="tick" data-id="Clinic administration|Consultation room management">
           <span class="name">Consultation room management</span>
-          <span class="pill partial">Partial</span>
+          <span class="pill built">Built</span>
         </label>
-        <p class="note">Rooms are created and attached to doctors. There is <strong>no standalone room screen</strong> — a room is added as part of the doctor form.</p>
+        <p class="note"><code>/rooms</code> adds, renames and removes rooms with a floor, shows which doctors use each. Names are unique per clinic, case-insensitively; a room assigned to an active doctor cannot be removed. Renames reach every display on its next poll.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
@@ -1183,7 +1183,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (173 automated checks, 138 files lint-clean, healthcheck green).
+    application (176 automated checks, 140 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.

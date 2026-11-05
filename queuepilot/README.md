@@ -204,7 +204,7 @@ tests/run.php                 the suite
 node tools/php.mjs tests/run.php     # or: npm test
 ```
 
-173 checks across the state machine, queue engine, tenant isolation, doctor
+176 checks across the state machine, queue engine, tenant isolation, doctor
 scoping, authorisation, priority ordering, range estimates, notifications,
 CSRF, password hashing, plan limits, suspension durability, QR generation,
 reporting, i18n, holds, doctor leave, staff invitations, TOTP (including the

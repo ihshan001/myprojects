@@ -40,6 +40,7 @@ if ($u) {
                 $isDoctor ? null : ['/appointments', 'calendar', t('nav.appointments', 'Appointments'), $isActive('/appointments')],
                 $isDoctor ? null : ['/patients', 'users', t('nav.patients', 'Patients'), $isActive('/patients')],
                 ['/doctors', 'stethoscope', t('nav.doctors', 'Doctors & rooms'), $isActive('/doctors')],
+                ['/rooms', 'building', 'Rooms', $isActive('/rooms')],
                 // Departments and the operating calendar are clinic structure;
                 // a doctor does not need to see them, reception does not edit
                 // them, and the page itself hides the write controls by role.

@@ -28,6 +28,7 @@ use App\Http\Controllers\PatientController;
 use App\Http\Controllers\PublicController;
 use App\Http\Controllers\QueueController;
 use App\Http\Controllers\ReportController;
+use App\Http\Controllers\RoomController;
 
 /* --------------------------------------------------------------- public */
 Router::get('/', [PublicController::class, 'landing']);
@@ -101,6 +102,11 @@ Router::post('/appointments/{id}/checkin', [AppointmentController::class, 'check
 /* ------------------------------------------------- doctors, rooms, staff */
 Router::get('/doctors', [ClinicController::class, 'doctors'], ['auth' => true]);
 Router::post('/doctors', [ClinicController::class, 'storeDoctor'], ['auth' => true, 'ability' => 'doctor.manage']);
+// Rooms. Previously created only by signup and never editable.
+Router::get('/rooms', [RoomController::class, 'index'], ['auth' => true]);
+Router::post('/rooms', [RoomController::class, 'store'], ['auth' => true, 'ability' => 'doctor.manage']);
+Router::post('/rooms/{id}', [RoomController::class, 'update'], ['auth' => true, 'ability' => 'doctor.manage']);
+Router::post('/rooms/{id}/delete', [RoomController::class, 'destroy'], ['auth' => true, 'ability' => 'doctor.manage']);
 // Leave routes are declared BEFORE `/doctors/{id}`: the router takes the
 // first match, so a literal path must never sit behind a parameter route.
 Router::post('/doctors/leave', [ClinicController::class, 'addLeave'], ['auth' => true, 'ability' => 'doctor.manage']);
