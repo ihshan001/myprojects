@@ -5,7 +5,7 @@ codebase actually does. It is deliberately blunt: a feature is **Built** only
 if I ran it against the live server, **Partial** if something exists but does
 not meet the scenario as written, and **Not built** otherwise.
 
-Verified on 2026-11-05 against commit `22e8a05` (119 automated checks, 107
+Verified on 2026-11-05 against commit `fafe770` (125 automated checks, 108
 files lint-clean, healthcheck all-good).
 
 > **Read this first.** The blueprint describes a mature product with billing,
