@@ -88,6 +88,8 @@ Router::get('/app', [DashboardController::class, 'index'], ['auth' => true, 'abi
 Router::get('/queue/new', [QueueController::class, 'newPatient'], ['auth' => true, 'ability' => 'queue.issue']);
 Router::post('/queue/new', [QueueController::class, 'createEntry'], ['auth' => true, 'ability' => 'queue.issue']);
 Router::get('/queue', [QueueController::class, 'show'], ['auth' => true, 'ability' => 'queue.operate']);
+// A barcode reader types the code and presses Enter: GET, no CSRF, no mutation.
+Router::get('/queue/scan', [QueueController::class, 'scan'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::get('/queue/token-issued', [QueueController::class, 'tokenIssued'], ['auth' => true, 'ability' => 'queue.operate']);
 // Token slip for a thermal printer. HTML for a browser print dialog, ESC/POS
 // for a wired receipt printer. Both carry only the token — no clinical data.

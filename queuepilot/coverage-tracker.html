@@ -802,7 +802,7 @@
           <span class="name">QR code on physical tokens</span>
           <span class="pill built">Built</span>
         </label>
-        <p class="note">QR generated on the tracking page and the receipt; the slip prints the URL in text too.</p>
+        <p class="note">QR generated on the tracking page and the receipt; the slip prints the URL in text too. <b>And now read back:</b> a scan box on the board accepts a whole <code>…/t/&lt;token&gt;</code> URL (what the slip's QR holds, host ignored, query and fragment stripped), a bare token from a keyboard-wedge reader, or a printed label like <code>A005</code>, and opens that visit. A scan is a lookup, not an action — calling, skipping and completing still go through the normal CSRF-protected POSTs. Scoped to the scanning clinic, with one refusal sentence for "another clinic's slip" and "no such code", so a stranger's slip teaches nothing. Expired links and a label shared by two sessions refuse rather than guess.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">

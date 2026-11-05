@@ -25,6 +25,22 @@
         </select>
       </form>
     <?php endif; ?>
+    <!--
+      The scan box. A barcode reader is a keyboard: it types the code into
+      whatever has focus and presses Enter. So this is a real GET form with
+      autofocus, and the field is wide enough to hold a whole tracking URL —
+      which is what the slip's QR actually contains.
+    -->
+    <form method="get" action="/queue/scan" class="flex items-center gap-1.5">
+      <input type="hidden" name="queue_id" value="<?= (int) $queue['id'] ?>">
+      <div class="relative">
+        <svg class="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"><use href="#i-qr"/></svg>
+        <input class="input !py-2 pl-8 text-xs" type="text" name="code" id="scan-code"
+               placeholder="Scan a slip or type A012" autocomplete="off" autocapitalize="characters"
+               aria-label="Scan a token or tracking code">
+      </div>
+      <button class="btn-secondary !py-2 text-xs">Find</button>
+    </form>
     <a href="/queue/new?queue=<?= (int) $queue['id'] ?>" class="btn-primary">
       <svg class="h-4 w-4"><use href="#i-plus"/></svg>
       New patient

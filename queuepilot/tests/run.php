@@ -3937,6 +3937,90 @@ Assert::test('a kiosk refuses a session that is not open today', function (): vo
 });
 
 /* ------------------------------------------------------------------ */
+/* 58. Scanning a slip at the desk                                     */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a scanned slip resolves to its own visit and nothing else', function (): void {
+    seedTenant(95, 'scan', 'Scan Clinic');
+    $svc = new App\Services\ScanService();
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 95 ORDER BY id LIMIT 1');
+    $patient = Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (95,?,?,?,?)',
+        ['S1', 'Scanner Patient', '0771237001', Db::now()]
+    );
+    $issued = (new App\Domain\Queue\QueueService())->issueToken(95, $queueId, $patient, ['source' => 'walkin']);
+    $token = (string) $issued['track_token'];
+    Db::run("UPDATE queue_entries SET track_expires_at = datetime('now','+6 hours') WHERE id = ?", [(int) $issued['entry_id']]);
+
+    // The receiver at the desk reads the QR on the printed slip, which holds a
+    // full tracking URL — not the bare token.
+    $byUrl = $svc->resolve(95, 'https://clinic.example.lk/t/' . $token);
+    Assert::true($byUrl['ok'], 'a full tracking URL from the slip resolves');
+    Assert::same((int) $issued['entry_id'], (int) $byUrl['entry_id'], 'to the right visit');
+
+    $bare = $svc->resolve(95, $token);
+    Assert::true($bare['ok'], 'a reader that emits only the token also works');
+    Assert::same((int) $issued['entry_id'], (int) $bare['entry_id'], 'and resolves to the same visit');
+
+    $messy = $svc->resolve(95, "  \"https://x.lk/t/$token?utm=1#top\"  ");
+    Assert::true($messy['ok'], 'quotes, a query string and a fragment are tolerated, because scanners emit them');
+
+    // The scoping that matters: a slip is not a key to another clinic.
+    $wrongClinic = $svc->resolve(1, $token);
+    Assert::false($wrongClinic['ok'], "the same code is refused at another clinic");
+    Assert::contains('not a visit at this clinic', (string) $wrongClinic['reason'],
+        'with the same sentence as a code that does not exist, so nothing is learned from the difference');
+
+    $nothing = $svc->resolve(95, '');
+    Assert::false($nothing['ok'], 'an empty scan is refused rather than matching something');
+    Assert::contains('Nothing was scanned', (string) $nothing['reason'], 'and says what happened');
+});
+
+Assert::test('a scanned slip for a finished or ambiguous visit refuses instead of guessing', function (): void {
+    seedTenant(96, 'scan2', 'Scan Two Clinic');
+    $svc = new App\Services\ScanService();
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 96 ORDER BY id LIMIT 1');
+    $patient = Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (96,?,?,?,?)',
+        ['S2', 'Expired Scanner', '0771237002', Db::now()]
+    );
+    $issued = (new App\Domain\Queue\QueueService())->issueToken(96, $queueId, $patient, ['source' => 'walkin']);
+
+    Db::run("UPDATE queue_entries SET track_expires_at = datetime('now','-2 hours') WHERE id = ?", [(int) $issued['entry_id']]);
+    $expired = $svc->resolve(96, (string) $issued['track_token']);
+    Assert::false($expired['ok'], 'a link that has expired does not open the visit');
+    Assert::contains('finished', (string) $expired['reason'], 'and the desk is told to search by name instead');
+
+    // Two sessions on the same day can both contain A001. Picking one would
+    // put a patient into the wrong doctor's queue.
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 96 ORDER BY id LIMIT 1');
+    $second = Db::insert(
+        'INSERT INTO queues (clinic_id, doctor_id, name, token_prefix, session_date, status, last_token_no, created_at)
+         VALUES (96, ?, ?, ?, ?, ?, 0, ?)',
+        [$doctorId, 'Second session', 'A', Db::today(), 'open', Db::now()]
+    );
+    // A patient may hold only one entry per queue, so the ambiguous label needs
+    // a patient in each session that has not already been issued a token here.
+    $ambiguousPatients = [];
+    foreach (['S3' => 'First Session Patient', 'S4' => 'Second Session Patient'] as $code => $name) {
+        $ambiguousPatients[] = Db::insert(
+            'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (96,?,?,?,?)',
+            [$code, $name, '07712370' . substr($code, 1) . '0', Db::now()]
+        );
+    }
+    foreach ([[$queueId, $ambiguousPatients[0]], [$second, $ambiguousPatients[1]]] as $i => [$q, $who]) {
+        Db::run(
+            "INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status, priority, sort_weight, source, joined_at, track_token, version)
+             VALUES (96, ?, ?, 900, 'A900', 'waiting', 0, 3, 'walkin', ?, ?, 0)",
+            [$q, $who, Db::now(), 'a900token' . str_repeat('x', 8) . $i]
+        );
+    }
+    $ambiguous = $svc->resolve(96, 'A900');
+    Assert::false($ambiguous['ok'], 'a label that exists in two sessions is not guessed at');
+    Assert::contains('Search by name', (string) $ambiguous['reason'], 'the desk is told what to do instead');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

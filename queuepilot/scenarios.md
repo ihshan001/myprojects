@@ -221,7 +221,7 @@ lint-clean, healthcheck all-good, all five demo logins re-checked).
 | A thermal token printer | ✅ | **Built.** `/queue/{id}/slip` renders an 80 mm HTML slip and `/queue/{id}/slip.escpos` a raw ESC/POS byte stream with control characters stripped from patient text. No driver or USB bridge ships with this — the browser print dialog or a wired printer is used |
 | A token kiosk | ✅ | **Built.** `/kiosk/{key}` is a lobby tablet that issues its own walk-in tokens: one name field, an optional mobile, and only the sessions that are actually open today (a paused one is offered with a longer-wait warning; a closed one is not offered at all). The receipt shows the number and how many are ahead, then clears itself after 45 seconds so the next person does not read the last person's visit. It **cannot** set a priority — a self-service kiosk that can mark an arrival urgent is a queue that fills with urgent people — and it never lists another patient. The credential is a separate 192-bit key from the display's, so photographing the lobby screen does not let a stranger mint tokens. Verified live: token A008 issued with a correct ahead-count, and refreshing the receipt issued nothing further |
 | Offline operation and reconciliation | ◐ | QueuePilot is server-first by design. A service worker keeps the shell rendering, the board marks itself offline, and the paper fallback is rehearsed. Offline **writes** are not implemented and would be a different architecture |
-| Barcode / QR scanning at the desk | ○ | Tokens are typed or looked up, not scanned |
+| Barcode / QR scanning at the desk | ✅ | **Built.** A scan box sits on the board; a reader is a keyboard, so it is a GET form with autofocus and the code goes straight to the visit. `ScanService` accepts a full `…/t/<token>` URL (what the printed slip's QR actually contains, host ignored, query and fragment stripped), the bare token, or a printed label like `A005`. It is a **lookup, not an action** — nothing about the visit changes, and any call/skip/complete still goes through the normal POST + CSRF path. Scoped to the scanning clinic with the same refusal sentence for "another clinic's slip" and "no such code", so holding a stranger's slip teaches nothing. Expired links and a label that exists in two sessions both refuse rather than guess. Verified: URL, bare token and label all resolved to the same entry; expired, cross-clinic and nonsense inputs all refused |
 
 ---
 
@@ -314,9 +314,9 @@ first clinic goes live — the automated suite does not replace it.
 | 13. Reporting | 8 | 1 | 1 | 0 |
 | 14. Data, privacy and operations | 7 | 1 | 0 | 1 |
 | 15. Money | 2 | 0 | 3 | 0 |
-| 16. Hardware and physical space | 3 | 1 | 1 | 0 |
+| 16. Hardware and physical space | 4 | 1 | 0 | 0 |
 | 17. Other verticals | 5 | 0 | 3 | 0 |
-| **Total (122 scenarios)** | **104** | **6** | **10** | **2** |
+| **Total (122 scenarios)** | **105** | **6** | **9** | **2** |
 
 **What is genuinely finished.** The queue engine holds up under adversarial
 input: issuing, calling, transferring, prioritising, pausing, closing,

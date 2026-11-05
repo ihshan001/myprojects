@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Core\RateLimiter;
 use App\Core\Request;
 use App\Core\Session;
 use App\Domain\Queue\QueueRepository;
@@ -14,6 +15,7 @@ use App\Services\AppointmentService;
 use App\Services\AuditService;
 use App\Services\DoctorService;
 use App\Services\PatientService;
+use App\Services\ScanService;
 
 final class QueueController
 {
@@ -248,6 +250,47 @@ final class QueueController
             'serving' => $service->nowServing($clinicId, $queueId),
             'canOperate' => Auth::can('queue.operate'),
         ]);
+    }
+
+    /**
+     * Accept a scanned code and go straight to that visit.
+     *
+     * GET, because a barcode reader is a keyboard: it types the code and
+     * presses Enter, so a form POST would need a tab stop and a click in the
+     * middle of a queue. Nothing is mutated here — the scan finds a visit,
+     * and any action on it still goes through the normal POST + CSRF path.
+     *
+     * The scanned value can be a whole `.../t/<token>` URL or the bare token;
+     * `ScanService` does the parsing and, importantly, the clinic scoping. A
+     * code from another clinic is refused with the same sentence as a code
+     * that does not exist, so a scanner-holder learns nothing either way.
+     */
+    public function scan(): void
+    {
+        $clinicId = $this->guard();
+        $code = Request::string('code');
+
+        // A scanner in a busy lobby is a machine gun of GETs; a person typing
+        // is not. Generous per minute, useless for enumeration.
+        RateLimiter::enforce('scan:ip:' . Request::ip(), 90, 60);
+        RateLimiter::enforce('scan:clinic:' . $clinicId, 400, 60);
+
+        $result = (new ScanService())->resolve($clinicId, $code);
+        if (!($result['ok'] ?? false)) {
+            flash('error', (string) ($result['reason'] ?? 'That code was not recognised.'));
+            $fallback = Request::string('queue_id') !== '' ? '?queue_id=' . Request::int('queue_id') : '';
+            redirect('/queue' . $fallback);
+            return;
+        }
+
+        // A scan is a lookup, not an action. Recorded so the desk can see the
+        // difference between "the patient was called" and "somebody waved a
+        // slip at the scanner", but nothing about the visit changes.
+        (new AuditService())->log($clinicId, 'queue.scanned', 'queue_entry', (int) $result['entry_id'], [
+            'how' => (string) $result['how'],
+        ]);
+
+        redirect('/queue/entry?id=' . (int) $result['entry_id']);
     }
 
     public function entry(): void
