@@ -3724,6 +3724,63 @@ Assert::test("a clinic cannot read or progress another clinic's incident", funct
 });
 
 /* ------------------------------------------------------------------ */
+/* 55. WhatsApp transport honesty                                      */
+/* ------------------------------------------------------------------ */
+
+Assert::test('WhatsApp never reports a send it did not make', function (): void {
+    $gateway = new App\Services\WhatsAppGateway();
+
+    putenv('WHATSAPP_TRANSPORT=auto');
+    putenv('WHATSAPP_TOKEN');
+    putenv('WHATSAPP_PHONE_ID');
+    Assert::same('logged', $gateway->send('0771234567', 'Your token is next.'),
+        'with no credentials the message is recorded, not claimed as sent');
+
+    putenv('WHATSAPP_TRANSPORT=log');
+    Assert::same('logged', $gateway->send('0771234567', 'Hello'), 'the log transport says logged');
+
+    // The old behaviour returned "simulated", which the worker stored as a
+    // completed send: a half-configured install looked identical to a working
+    // one from inside the app. Setting http must now be a loud failure.
+    putenv('WHATSAPP_TRANSPORT=http');
+    $threw = false;
+    try {
+        $gateway->send('0771234567', 'Hello');
+    } catch (\RuntimeException $e) {
+        $threw = str_contains($e->getMessage(), 'WHATSAPP_TOKEN');
+    }
+    Assert::true($threw, 'http without credentials fails loudly and says which variable is missing');
+
+    putenv('WHATSAPP_TRANSPORT');
+});
+
+Assert::test('a whatsapp notification the log transport records is never counted as sent', function (): void {
+    seedTenant(92, 'wa-clinic', 'WhatsApp Clinic');
+    Db::run('UPDATE clinics SET is_active = 1 WHERE id = 92');
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 92');
+    $patient = Db::insert('INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (92,?,?,?,?)',
+        ['WA1', 'WhatsApp One', '0771234567', Db::now()]);
+    $queue = new App\Domain\Queue\QueueService();
+    $entry = $queue->issueToken(92, $queueId, $patient, []);
+
+    // Queue one on the whatsapp channel explicitly.
+    Db::insert(
+        "INSERT INTO notifications (clinic_id, entry_id, channel, template, to_number, payload_json, dedupe_key, status, attempts, scheduled_at, created_at)
+         VALUES (92, ?, 'whatsapp', 'visit_completed', '•••••567', ?, 'wa-test:1', 'queued', 0, ?, ?)",
+        [$entry['entry_id'], json_encode(['body' => 'Thank you', 'to' => '0771234567']), Db::now(), Db::now()]
+    );
+
+    putenv('WHATSAPP_TRANSPORT=log');
+    $result = (new App\Services\NotificationService())->processDue();
+    putenv('WHATSAPP_TRANSPORT');
+
+    $row = Db::one("SELECT status, last_error, sent_at FROM notifications WHERE dedupe_key = 'wa-test:1'");
+    Assert::same('logged', (string) $row['status'], 'it is stored as recorded, not sent');
+    Assert::contains('not sent to the patient', (string) $row['last_error'], 'and says so in words a clinic can read');
+    Assert::same(null, $row['sent_at'], 'with no send timestamp at all');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

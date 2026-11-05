@@ -132,6 +132,7 @@ lint-clean, healthcheck all-good, all five demo logins re-checked).
 | Credentials are never logged | ✅ | Numbers are redacted before they reach a log line, and stored notification rows now hold only the last three digits — found during this audit, when a queue dump showed every patient's full number |
 | Templates are per clinic | ◐ | Templates are a code-level map with Sinhala/Tamil/English copy; the per-clinic override I previously claimed does not exist. Changing the wording is a deploy |
 | Appointment reminders go out on a schedule | ✅ | See section 2. The worker owns the schedule; nothing is tied to a page load |
+| A WhatsApp message is sent the way Meta actually expects | ✅ | **Verified against a real HTTP sink.** Bearer auth, `94771234567` normalisation, `type: text` inside the 24-hour window and a proper `type: template` object with a body parameter outside it, with Meta's own error text surfaced on a 4xx. The previous adapter returned `simulated` when credentials were missing and the worker filed it as a send — replaced: `http` without credentials now fails loudly, and the log transport reports "recorded, not sent". **Not exercised against a live Business account**: that needs a template approved in Meta Business Manager |
 
 ## 10. Accounts, onboarding and access
 
@@ -306,7 +307,7 @@ first clinic goes live — the automated suite does not replace it.
 | Transfers | 4 | 0 | 1 |
 | Tracking | 5 | 0 | 1 |
 | Displays | 5 | 0 | 0 |
-| Notifications | 5 | 1 | 0 |
+| Notifications | 6 | 1 | 0 |
 | Accounts | 9 | 0 | 1 |
 | Tenancy | 7 | 0 | 0 |
 | Doctors | 6 | 1 | 0 |
@@ -315,7 +316,7 @@ first clinic goes live — the automated suite does not replace it.
 | Money | 2 | 0 | 3 |
 | Hardware | 2 | 1 | 2 |
 | Other verticals | 5 | 0 | 3 |
-| **Total** | **99** | **7** | **13** |
+| **Total** | **100** | **7** | **13** |
 
 **What is genuinely finished.** The queue engine holds up under adversarial
 input: issuing, calling, transferring, prioritising, pausing, closing,

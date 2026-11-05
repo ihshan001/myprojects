@@ -832,7 +832,7 @@
           <span class="name">WhatsApp integration</span>
           <span class="pill partial">Partial</span>
         </label>
-        <p class="note">Adapter shares the SMS transport design. Not exercised against a real WhatsApp Business account — the message contract differs from SMS (template approval, 24-hour windows) and would need its own work.</p>
+        <p class="note">Cloud API transport rebuilt to the SMS standard and verified against a real HTTP sink: bearer auth, the <code>94771234567</code> number normalisation, a plain <code>type: text</code> body and a proper <code>type: template</code> object with a body parameter, plus a 4xx surfacing Meta's own error text. The old version returned <code>simulated</code> when credentials were missing and the worker stored it as a send — that is gone; missing credentials under <code>http</code> now fail loudly and the log transport reports &ldquo;recorded, not sent&rdquo;. <strong>Still not exercised against a live WhatsApp Business account</strong>: sending outside a 24-hour window needs a template approved in Meta Business Manager, which is an account activity.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
@@ -1183,7 +1183,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (223 automated checks, 162 files lint-clean, healthcheck green).
+    application (225 automated checks, 162 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.
