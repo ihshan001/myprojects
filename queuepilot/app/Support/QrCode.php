@@ -4,451 +4,627 @@ declare(strict_types=1);
 namespace App\Support;
 
 /**
- * Self-contained QR Code encoder (ISO/IEC 18004), byte mode, versions 1–10,
- * error-correction level M, mask pattern 0.
+ * A small QR encoder, because the printed token slip needs one and this
+ * project has no Composer.
  *
- * Why hand-rolled: no Composer in this deployment, and a QR code is the one
- * thing a receptionist actually needs (scan instead of typing a URL).
+ * Scope is deliberately narrow: **byte mode, error-correction level M,
+ * versions 1–6** (up to 106 bytes). That is not a general-purpose QR library
+ * — it is exactly what a tracking URL needs, and every line of it is
+ * verifiable against a reference encoder. A version-40 multi-block
+ * implementation would be three times the code and none of it would ever run.
  *
- * Verified by tests/qr_test.php, which checks:
- *   • the codeword stream against the spec's bit layout,
- *   • the data-module count equals codewords × 8 (placement is exact),
- *   • round-trip decoding with an independent decoder for several payloads.
+ * Two things matter for correctness and are worth stating:
  *
- * Layout notes that are easy to get wrong (and are asserted in tests):
- *   • The two 15-module format areas share the module at (8,8) → reserve once.
- *   • The vertical timing column (x=6) is skipped by shifting $right to 5,
- *     which is why the traversal direction is computed from the shifted value.
- *   • The first pad byte after the terminator is 0xEC (then 0x11 alternating).
+ *  1. **The Reed–Solomon arithmetic is over GF(256) with the QR primitive
+ *     polynomial 0x11D**, not the AES one (0x11B). Using the wrong polynomial
+ *     produces a QR that looks perfect and cannot be scanned.
+ *  2. **The mask is chosen by the standard's four penalty rules.** Skipping
+ *     mask selection, or always using mask 0, produces codes that fail on
+ *     some phone cameras — particularly on cheap thermal paper.
+ *
+ * Verified module-for-module against Python's `qrcode` library.
  */
 final class QrCode
 {
-    /** [version][eccLevelIndex 0=L,1=M,2=Q,3=H] */
-    private const ECC_CODEWORDS_PER_BLOCK = [
-        1 => [7, 10, 13, 17], 2 => [10, 16, 22, 28], 3 => [15, 26, 18, 22],
-        4 => [20, 18, 26, 16], 5 => [26, 24, 18, 22], 6 => [18, 16, 24, 28],
-        7 => [20, 18, 18, 26], 8 => [24, 22, 22, 26], 9 => [30, 22, 20, 24],
-        10 => [18, 26, 24, 28],
+    /** Error-correction level M: ~15% recoverable, the usual choice for print. */
+    private const EC_LEVEL_M_BITS = 0b00;
+
+    /**
+     * Per version (1–6), at EC level M: [total codewords, ec codewords per
+     * block, [data codewords per block, ...]].
+     */
+    private const BLOCKS = [
+        1 => [26, 10, [16]],
+        2 => [44, 16, [28]],
+        3 => [70, 26, [44]],
+        4 => [100, 18, [32, 32]],
+        5 => [134, 24, [43, 43]],
+        6 => [172, 16, [27, 27, 27, 27]],
     ];
 
-    private const NUM_BLOCKS = [
-        1 => [1, 1, 1, 1], 2 => [1, 1, 1, 1], 3 => [1, 1, 2, 2], 4 => [1, 2, 2, 4],
-        5 => [1, 2, 4, 4], 6 => [2, 4, 4, 4], 7 => [2, 4, 6, 5], 8 => [2, 4, 6, 6],
-        9 => [2, 5, 8, 8], 10 => [4, 5, 8, 8],
-    ];
-
-    private const TOTAL_CODEWORDS = [
-        1 => 26, 2 => 44, 3 => 70, 4 => 100, 5 => 134,
-        6 => 172, 7 => 196, 8 => 242, 9 => 292, 10 => 346,
-    ];
-
+    /** Alignment pattern centre coordinates per version. */
     private const ALIGNMENT = [
-        1 => [], 2 => [6, 18], 3 => [6, 22], 4 => [6, 26], 5 => [6, 30],
-        6 => [6, 34], 7 => [6, 22, 38], 8 => [6, 24, 42], 9 => [6, 26, 46], 10 => [6, 28, 50],
+        1 => [],
+        2 => [6, 18],
+        3 => [6, 22],
+        4 => [6, 26],
+        5 => [6, 30],
+        6 => [6, 34],
     ];
 
-    /** @var array<int, array<int, bool>> */
+    /** @var array<int, array<int, bool>> module matrix, true = dark */
     private array $modules = [];
-    /** @var array<int, array<int, bool>> */
-    private array $isFunction = [];
-    private int $size;
-    private int $version;
-    /** 0=L 1=M 2=Q 3=H */
-    private int $eccLevel;
+    private int $size = 0;
+    /** @var array<int, array<int, bool>> reserved (function pattern) cells */
+    private array $reserved = [];
 
-    private function __construct(int $version, int $eccLevel)
+    /** Which of the eight masks won the penalty contest for this code. */
+    private int $chosenMask = 0;
+
+    /**
+     * Render as a PNG string.
+     *
+     * `$scale` is pixels per module and `$quiet` the mandatory quiet zone in
+     * modules (the standard says 4; a thermal printer's edge is not always
+     * crisp, so the slip uses 4 and the screen uses 2 for space).
+     */
+    public static function png(string $text, int $scale = 4, int $quiet = 4): string
     {
-        $this->version = $version;
-        $this->eccLevel = $eccLevel;
-        $this->size = $version * 4 + 17;
-        for ($y = 0; $y < $this->size; $y++) {
-            $this->modules[$y] = array_fill(0, $this->size, false);
-            $this->isFunction[$y] = array_fill(0, $this->size, false);
-        }
+        $qr = new self();
+        $qr->encode($text);
+        return $qr->renderPng($scale, $quiet);
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Public API                                                          */
-    /* ------------------------------------------------------------------ */
-
-    public static function svg(string $text, int $scale = 4, string $dark = '#0f172a', string $light = '#ffffff'): string
+    /**
+     * Render as a self-contained SVG string. No external images, no scripts,
+     * no external references — safe to embed in a printed slip or an email.
+     */
+    public static function svg(string $text, int $scale = 4, int $quiet = 4): string
     {
-        [$version, $ecc] = self::fitVersion($text);
-        $qr = new self($version, $ecc);
+        $qr = new self();
         $qr->encode($text);
+        $size = $qr->size;
+        $dim = ($size + $quiet * 2) * $scale;
 
-        $border = 4;
-        $dim = ($qr->size + $border * 2) * $scale;
-        $path = '';
-        for ($y = 0; $y < $qr->size; $y++) {
-            for ($x = 0; $x < $qr->size; $x++) {
-                if ($qr->modules[$y][$x]) {
-                    $px = ($x + $border) * $scale;
-                    $py = ($y + $border) * $scale;
-                    $path .= "M{$px} {$py}h{$scale}v{$scale}h-{$scale}z";
+        $lines = [];
+        $lines[] = '<svg xmlns="http://www.w3.org/2000/svg"';
+        $lines[] = '     viewBox="0 0 ' . $dim . ' ' . $dim . '"';
+        $lines[] = '     shape-rendering="crispEdges">';
+        $lines[] = '  <rect width="' . $dim . '" height="' . $dim . '" fill="#ffffff"/>';
+        foreach ($qr->modules as $r => $row) {
+            foreach ($row as $c => $dark) {
+                if (!$dark) {
+                    continue;
                 }
+                $x = ($c + $quiet) * $scale;
+                $y = ($r + $quiet) * $scale;
+                $lines[] = '  <rect x="' . $x . '" y="' . $y . '"'
+                    . ' width="' . $scale . '" height="' . $scale . '" fill="#000000"/>';
             }
         }
-
-        return '<svg xmlns="http://www.w3.org/2000/svg" width="' . $dim . '" height="' . $dim
-            . '" viewBox="0 0 ' . $dim . ' ' . $dim . '" shape-rendering="crispEdges" role="img">'
-            . '<rect width="100%" height="100%" fill="' . $light . '"/>'
-            . '<path d="' . $path . '" fill="' . $dark . '"/></svg>';
+        $lines[] = '</svg>';
+        return implode("\n", $lines) . "\n";
     }
 
-    /** Inline data URI — no file writes, no extra request, CSP-safe. */
-    public static function dataUri(string $text, int $scale = 4, string $dark = '#0f172a', string $light = '#ffffff'): string
+    /**
+     * The raw matrix with a specific mask forced on, for reference comparison.
+     * Rows are '0'/'1' strings ('1' = dark).
+     */
+    public static function matrixWithMask(string $text, int $mask): array
     {
-        return 'data:image/svg+xml;base64,' . base64_encode(self::svg($text, $scale, $dark, $light));
-    }
-
-    /** @return array<int, string> rows of '0'/'1' — used by the test suite. */
-    public static function matrix(string $text): array
-    {
-        [$version, $ecc] = self::fitVersion($text);
-        $qr = new self($version, $ecc);
+        $qr = new self();
+        $qr->forcedMask = $mask;
         $qr->encode($text);
         $out = [];
-        for ($y = 0; $y < $qr->size; $y++) {
-            $row = '';
-            for ($x = 0; $x < $qr->size; $x++) {
-                $row .= $qr->modules[$y][$x] ? '1' : '0';
-            }
-            $out[] = $row;
+        foreach ($qr->modules as $row) {
+            $out[] = implode('', array_map(static fn (bool $c): string => $c ? '1' : '0', $row));
         }
         return $out;
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Capacity selection                                                  */
-    /* ------------------------------------------------------------------ */
-
-    /** @return array{0:int,1:int} version, ecc index */
-    private static function fitVersion(string $text): array
+    /**
+     * The raw matrix, for tests: list of rows of '0'/'1' strings ('1' = dark).
+     * Strings, not booleans, so callers can `preg_match` and `str_starts_with`
+     * them directly.
+     */
+    public static function matrix(string $text): array
     {
-        $len = strlen($text);
-        foreach (self::TOTAL_CODEWORDS as $version => $total) {
-            $ecc = self::ECC_CODEWORDS_PER_BLOCK[$version][1];      // prefer M
-            $blocks = self::NUM_BLOCKS[$version][1];
-            $dataCodewords = $total - $ecc * $blocks;
-            $headerBits = 4 + ($version <= 9 ? 8 : 16);
-            if ($headerBits + $len * 8 <= $dataCodewords * 8) {
-                return [$version, 1];
-            }
+        $qr = new self();
+        $qr->encode($text);
+        $out = [];
+        foreach ($qr->modules as $row) {
+            $out[] = implode('', array_map(static fn (bool $c): string => $c ? '1' : '0', $row));
         }
-        throw new \RuntimeException('Payload too long for this QR implementation (' . $len . ' bytes).');
+        return $out;
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Encoding                                                            */
-    /* ------------------------------------------------------------------ */
+    /** @var int|null force a specific mask (tests compare against a reference) */
+    private ?int $forcedMask = null;
 
     private function encode(string $text): void
     {
-        $this->drawFunctionPatterns();
-        $codewords = $this->buildCodewords($text);
-        $this->drawCodewords($codewords);
-        $this->drawFormatBits();
-        if ($this->version >= 7) {
-            $this->drawVersionBits();
-        }
-    }
-
-    /** @return array<int, int> final interleaved data + ECC codewords */
-    public static function codewordsFor(string $text): array
-    {
-        [$version, $ecc] = self::fitVersion($text);
-        $qr = new self($version, $ecc);
-        return $qr->buildCodewords($text);
-    }
-
-    /** @return array<int, int> */
-    private function buildCodewords(string $text): array
-    {
-        $total = self::TOTAL_CODEWORDS[$this->version];
-        $eccPerBlock = self::ECC_CODEWORDS_PER_BLOCK[$this->version][$this->eccLevel];
-        $blockCount = self::NUM_BLOCKS[$this->version][$this->eccLevel];
-        $dataCodewords = $total - $eccPerBlock * $blockCount;
-        $capacityBits = $dataCodewords * 8;
+        $data = array_values(unpack('C*', $text) ?: []);
+        $version = $this->pickVersion(count($data));
 
         $bits = [];
-        $this->appendBits($bits, 0b0100, 4);                                  // byte mode
-        $this->appendBits($bits, strlen($text), $this->version <= 9 ? 8 : 16);
-        for ($i = 0; $i < strlen($text); $i++) {
-            $this->appendBits($bits, ord($text[$i]), 8);
+        // Mode indicator 0100 = byte mode.
+        $this->push($bits, 0b0100, 4);
+        // Character count: 8 bits for versions 1–9 in byte mode.
+        $this->push($bits, count($data), 8);
+        foreach ($data as $byte) {
+            $this->push($bits, $byte, 8);
         }
 
-        // terminator (up to 4 zero bits, never beyond capacity)
-        $this->appendBits($bits, 0, max(0, min(4, $capacityBits - count($bits))));
-        // pad to byte boundary
-        $this->appendBits($bits, 0, (8 - count($bits) % 8) % 8);
-        // alternating pad bytes, starting with 0xEC
-        for ($p = 0; count($bits) < $capacityBits; $p++) {
-            $this->appendBits($bits, $p % 2 === 0 ? 0xEC : 0x11, 8);
-        }
+        [$totalCodewords, $ecPerBlock, $dataBlocks] = self::BLOCKS[$version];
+        $dataCodewords = array_sum($dataBlocks);
 
-        $data = [];
+        // Terminator: up to four zero bits, then pad to a byte boundary.
+        $capacityBits = $dataCodewords * 8;
+        $this->push($bits, 0, min(4, $capacityBits - count($bits)));
+        while (count($bits) % 8 !== 0) {
+            $bits[] = 0;
+        }
+        $codewords = [];
         for ($i = 0; $i < count($bits); $i += 8) {
             $byte = 0;
             for ($j = 0; $j < 8; $j++) {
-                $byte = ($byte << 1) | $bits[$i + $j];
+                $byte = ($byte << 1) | ($bits[$i + $j] ?? 0);
             }
-            $data[] = $byte;
+            $codewords[] = $byte;
+        }
+        // Pad codewords 0xEC / 0x11 alternating, as the standard specifies.
+        $pad = [0xEC, 0x11];
+        $p = 0;
+        while (count($codewords) < $dataCodewords) {
+            $codewords[] = $pad[$p++ % 2];
         }
 
-        // split into RS blocks (short blocks first, then long ones)
-        $shortLen = intdiv($dataCodewords, $blockCount);
-        $longCount = $dataCodewords % $blockCount;
+        // Split into blocks, compute EC per block, then interleave.
         $blocks = [];
-        $eccBlocks = [];
+        $ecBlocks = [];
         $offset = 0;
-        for ($b = 0; $b < $blockCount; $b++) {
-            $len = $shortLen + ($b >= $blockCount - $longCount ? 1 : 0);
-            $chunk = array_slice($data, $offset, $len);
-            $offset += $len;
-            $blocks[] = $chunk;
-            $eccBlocks[] = $this->reedSolomon($chunk, $eccPerBlock);
+        foreach ($dataBlocks as $count) {
+            $block = array_slice($codewords, $offset, $count);
+            $offset += $count;
+            $blocks[] = $block;
+            $ecBlocks[] = $this->reedSolomon($block, $ecPerBlock);
         }
 
-        // interleave data, then interleave ECC
-        $out = [];
-        $maxData = max(array_map('count', $blocks));
+        $final = [];
+        $maxData = max($dataBlocks);
         for ($i = 0; $i < $maxData; $i++) {
             foreach ($blocks as $block) {
                 if (isset($block[$i])) {
-                    $out[] = $block[$i];
+                    $final[] = $block[$i];
                 }
             }
         }
-        for ($i = 0; $i < $eccPerBlock; $i++) {
-            foreach ($eccBlocks as $block) {
-                $out[] = $block[$i];
+        for ($i = 0; $i < $ecPerBlock; $i++) {
+            foreach ($ecBlocks as $block) {
+                if (isset($block[$i])) {
+                    $final[] = $block[$i];
+                }
             }
         }
-        return $out;
+
+        $this->size = 17 + 4 * $version;
+        $this->modules = array_fill(0, $this->size, array_fill(0, $this->size, false));
+        $this->reserved = array_fill(0, $this->size, array_fill(0, $this->size, false));
+
+        $this->drawFinder(0, 0);
+        $this->drawFinder($this->size - 7, 0);
+        $this->drawFinder(0, $this->size - 7);
+        $this->drawTiming();
+        $this->drawAlignment($version);
+        $this->reserveFormat();
+        $this->drawData($final);
+
+        // Choose the mask with the lowest penalty, per the standard's rules.
+        //
+        // The chosen index must be carried through to the format bits: a code
+        // whose format field says mask 0 while its data is masked with mask 5
+        // is a perfect-looking QR that no scanner can read. That was the first
+        // bug in this file, and it is invisible to any check short of a decode.
+        $best = null;
+        $bestPenalty = PHP_INT_MAX;
+        $this->chosenMask = 0;
+        $masks = $this->forcedMask !== null ? [$this->forcedMask] : range(0, 7);
+        foreach ($masks as $mask) {
+            $candidate = $this->applyMask($mask);
+            $penalty = $this->penalty($candidate);
+            if ($penalty < $bestPenalty) {
+                $bestPenalty = $penalty;
+                $best = $candidate;
+                $this->chosenMask = $mask;
+            }
+        }
+        $this->modules = $best ?? $this->modules;
+        $this->drawFormat($this->chosenMask);
     }
 
-    private function appendBits(array &$bits, int $value, int $length): void
+    private function pickVersion(int $bytes): int
+    {
+        // Byte-mode data capacity at EC level M, minus the 4+8 header bits.
+        $limits = [1 => 14, 2 => 26, 3 => 42, 4 => 62, 5 => 84, 6 => 106];
+        foreach ($limits as $version => $limit) {
+            if ($bytes <= $limit) {
+                return $version;
+            }
+        }
+        throw new \InvalidArgumentException('Text is too long for this QR encoder (' . strlen($bytes <= 0 ? '' : (string) $bytes) . ' bytes; limit 106).');
+    }
+
+    /** @param array<int, int> $bits */
+    private function push(array &$bits, int $value, int $length): void
     {
         for ($i = $length - 1; $i >= 0; $i--) {
             $bits[] = ($value >> $i) & 1;
         }
     }
 
-    /** @return array<int, int> */
-    private function reedSolomon(array $data, int $eccLen): array
+    /**
+     * @param array<int, int> $data
+     * @return array<int, int>
+     */
+    private function reedSolomon(array $data, int $ecCount): array
     {
-        static $exp = null, $log = null;
-        if ($exp === null) {
-            $exp = [];
-            $log = [];
-            $x = 1;
-            for ($i = 0; $i < 255; $i++) {
-                $exp[$i] = $x;
-                $log[$x] = $i;
-                $x <<= 1;
-                if ($x & 0x100) {
-                    $x ^= 0x11D;
-                }
-            }
-            for ($i = 255; $i < 512; $i++) {
-                $exp[$i] = $exp[$i - 255];
-            }
-        }
-
-        // Generator polynomial: ∏(X − α^i) for i = 0..eccLen-1.
-        // Coefficients are kept HIGHEST-degree-first (gen[0] = 1), which is the
-        // order the synthesised division needs below.
-        $gen = [1];
-        for ($i = 0; $i < $eccLen; $i++) {
-            $next = array_fill(0, count($gen) + 1, 0);
-            foreach ($gen as $j => $coef) {
-                if ($coef !== 0) {
-                    $next[$j] ^= $exp[($log[$coef] + $i) % 255];
-                }
-                $next[$j + 1] ^= $coef;
-            }
-            $gen = $next;
-        }
-        $gen = array_reverse($gen);   // now gen[0] = 1 (leading term)
-
-        $rem = array_fill(0, $eccLen, 0);
+        $generator = $this->generatorPoly($ecCount);
+        $remainder = array_fill(0, $ecCount, 0);
         foreach ($data as $byte) {
-            $factor = $byte ^ $rem[0];
-            array_shift($rem);
-            $rem[] = 0;
-            if ($factor !== 0) {
-                $logFactor = $log[$factor];
-                for ($i = 0; $i < $eccLen; $i++) {
-                    $rem[$i] ^= $exp[($logFactor + $log[$gen[$i + 1]]) % 255];
-                }
+            $factor = $byte ^ $remainder[0];
+            array_shift($remainder);
+            $remainder[] = 0;
+            for ($i = 0; $i < $ecCount; $i++) {
+                $remainder[$i] ^= $this->gfMul($generator[$i], $factor);
             }
         }
-        return $rem;
+        return $remainder;
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Function patterns                                                   */
-    /* ------------------------------------------------------------------ */
-
-    private function drawFunctionPatterns(): void
+    /**
+     * Generator polynomial for `$degree` EC codewords: (x - a^0)(x - a^1)…
+     *
+     * @return array<int, int>
+     */
+    private function generatorPoly(int $degree): array
     {
-        // timing patterns
-        for ($i = 0; $i < $this->size; $i++) {
-            $this->setFunction(6, $i, $i % 2 === 0);
-            $this->setFunction($i, 6, $i % 2 === 0);
-        }
-
-        // Finder pattern = 7×7 (rings at distance 0..3: dark,light,dark core),
-        // surrounded by a light separator (distance 4). Only the separator
-        // ring is light — getting this inverted breaks every decoder.
-        foreach ([[3, 3], [$this->size - 4, 3], [3, $this->size - 4]] as [$cx, $cy]) {
-            for ($dy = -4; $dy <= 4; $dy++) {
-                for ($dx = -4; $dx <= 4; $dx++) {
-                    $dist = max(abs($dx), abs($dy));
-                    if ($dist === 4) {
-                        $this->setFunction($cx + $dx, $cy + $dy, false);   // separator
-                        continue;
-                    }
-                    // dist 3 = outer dark ring, 2 = light ring, 1 & 0 = 3×3 core
-                    $this->setFunction($cx + $dx, $cy + $dy, $dist !== 2);
-                }
+        $poly = [1];
+        for ($i = 0; $i < $degree; $i++) {
+            $next = array_fill(0, count($poly) + 1, 0);
+            $alpha = $this->gfPow(2, $i);
+            foreach ($poly as $j => $coefficient) {
+                $next[$j] ^= $coefficient;
+                $next[$j + 1] ^= $this->gfMul($coefficient, $alpha);
             }
+            $poly = $next;
         }
+        // The leading 1 corresponds to nothing in the remainder loop.
+        array_shift($poly);
+        return $poly;
+    }
 
-        // alignment patterns
-        $centres = self::ALIGNMENT[$this->version];
-        $last = $this->size - 7;
-        foreach ($centres as $px) {
-            foreach ($centres as $py) {
-                if (($px === 6 && $py === 6) || ($px === 6 && $py === $last) || ($px === $last && $py === 6)) {
+    /** Multiply in GF(256) with the QR primitive polynomial 0x11D. */
+    private function gfMul(int $a, int $b): int
+    {
+        $result = 0;
+        for ($i = 0; $i < 8; $i++) {
+            if (($b & 1) !== 0) {
+                $result ^= $a;
+            }
+            $high = $a & 0x80;
+            $a = ($a << 1) & 0xFF;
+            if ($high !== 0) {
+                $a ^= 0x1D; // 0x11D with the leading bit dropped
+            }
+            $b >>= 1;
+        }
+        return $result;
+    }
+
+    private function gfPow(int $base, int $exponent): int
+    {
+        $result = 1;
+        for ($i = 0; $i < $exponent; $i++) {
+            $result = $this->gfMul($result, $base);
+        }
+        return $result;
+    }
+
+    private function set(int $row, int $col, bool $dark): void
+    {
+        if ($row >= 0 && $row < $this->size && $col >= 0 && $col < $this->size) {
+            $this->modules[$row][$col] = $dark;
+            $this->reserved[$row][$col] = true;
+        }
+    }
+
+    /** Finder pattern plus its separator. */
+    private function drawFinder(int $row, int $col): void
+    {
+        for ($r = -1; $r <= 7; $r++) {
+            for ($c = -1; $c <= 7; $c++) {
+                $rr = $row + $r;
+                $cc = $col + $c;
+                if ($rr < 0 || $rr >= $this->size || $cc < 0 || $cc >= $this->size) {
                     continue;
                 }
-                for ($dy = -2; $dy <= 2; $dy++) {
-                    for ($dx = -2; $dx <= 2; $dx++) {
-                        $this->setFunction($px + $dx, $py + $dy, max(abs($dx), abs($dy)) !== 1);
+                $inRing = ($r >= 0 && $r <= 6 && ($c === 0 || $c === 6))
+                    || ($c >= 0 && $c <= 6 && ($r === 0 || $r === 6));
+                $inCore = $r >= 2 && $r <= 4 && $c >= 2 && $c <= 4;
+                $this->set($rr, $cc, $inRing || $inCore);
+            }
+        }
+    }
+
+    private function drawTiming(): void
+    {
+        for ($i = 8; $i < $this->size - 8; $i++) {
+            $dark = $i % 2 === 0;
+            $this->set(6, $i, $dark);
+            $this->set($i, 6, $dark);
+        }
+    }
+
+    private function drawAlignment(int $version): void
+    {
+        $centres = self::ALIGNMENT[$version];
+        foreach ($centres as $row) {
+            foreach ($centres as $col) {
+                // Skip the three positions occupied by finder patterns.
+                if (($row === 6 && $col === 6)
+                    || ($row === 6 && $col === $this->size - 7)
+                    || ($row === $this->size - 7 && $col === 6)) {
+                    continue;
+                }
+                for ($r = -2; $r <= 2; $r++) {
+                    for ($c = -2; $c <= 2; $c++) {
+                        $ring = max(abs($r), abs($c));
+                        $this->set($row + $r, $col + $c, $ring !== 1);
                     }
                 }
             }
         }
+    }
 
-        // Reserve the two 15-module format-info areas; they share (8,8).
-        for ($i = 0; $i <= 5; $i++) {
-            $this->setFunction(8, $i, false);
-            $this->setFunction($i, 8, false);
-        }
-        $this->setFunction(8, 7, false);
-        $this->setFunction(8, 8, false);       // shared
-        $this->setFunction(7, 8, false);
-        for ($i = 0; $i < 8; $i++) {
-            $this->setFunction($this->size - 1 - $i, 8, false);
-            $this->setFunction(8, $this->size - 1 - $i, false);
-        }
-        $this->setFunction(8, $this->size - 8, true);   // dark module
-
-        // Reserve version-info areas for version ≥ 7.
-        if ($this->version >= 7) {
-            for ($i = 0; $i < 18; $i++) {
-                $a = $this->size - 11 + $i % 3;
-                $b = intdiv($i, 3);
-                $this->setFunction($a, $b, false);
-                $this->setFunction($b, $a, false);
+    /** Reserve the format-information strips so data does not land there. */
+    private function reserveFormat(): void
+    {
+        for ($i = 0; $i < 9; $i++) {
+            if ($i !== 6) {
+                $this->reserved[8][$i] = true;
+                $this->reserved[$i][8] = true;
             }
         }
-    }
-
-    private function drawFormatBits(): void
-    {
-        // The format word encodes the ECC *indicator* (L=01, M=00, Q=11, H=10),
-        // not the internal 0..3 index, plus the mask id (0 here).
-        $eccBits = [0b01, 0b00, 0b11, 0b10][$this->eccLevel];
-        $data = ($eccBits << 3) | 0;
-
-        $rem = $data;
-        for ($i = 0; $i < 10; $i++) {
-            $rem = ($rem << 1) ^ ((($rem >> 9) & 1) * 0x537);
-        }
-        $bits = (($data << 10) | $rem) ^ 0x5412;
-
-        for ($i = 0; $i <= 5; $i++) {
-            $this->setFunction(8, $i, (($bits >> $i) & 1) === 1);
-        }
-        $this->setFunction(8, 7, (($bits >> 6) & 1) === 1);
-        $this->setFunction(8, 8, (($bits >> 7) & 1) === 1);
-        $this->setFunction(7, 8, (($bits >> 8) & 1) === 1);
-        for ($i = 9; $i < 15; $i++) {
-            $this->setFunction(14 - $i, 8, (($bits >> $i) & 1) === 1);
-        }
-
+        // Top-right: eight cells along row 8, from the right edge inwards.
         for ($i = 0; $i < 8; $i++) {
-            $this->setFunction($this->size - 1 - $i, 8, (($bits >> $i) & 1) === 1);
+            $this->reserved[8][$this->size - 1 - $i] = true;
         }
-        for ($i = 8; $i < 15; $i++) {
-            $this->setFunction(8, $this->size - 15 + $i, (($bits >> $i) & 1) === 1);
+        // Bottom-left: SEVEN cells up column 8 (size-7 … size-2), then the
+        // dark module at size-8. Reserving eight here eats the first data
+        // column of the bottom-right block and makes the code unreadable
+        // while leaving every function pattern looking perfect.
+        for ($i = 1; $i <= 7; $i++) {
+            $this->reserved[$this->size - $i][8] = true;
         }
-        $this->setFunction(8, $this->size - 8, true);
+        // The dark module, always set.
+        $this->set($this->size - 8, 8, true);
     }
 
-    private function drawVersionBits(): void
+    /** @param array<int, int> $codewords */
+    private function drawData(array $codewords): void
     {
-        $rem = $this->version;
-        for ($i = 0; $i < 12; $i++) {
-            $rem = ($rem << 1) ^ ((($rem >> 11) & 1) * 0x1F25);
-        }
-        $bits = ($this->version << 12) | $rem;
-
-        for ($i = 0; $i < 18; $i++) {
-            $bit = (($bits >> $i) & 1) === 1;
-            $a = $this->size - 11 + $i % 3;
-            $b = intdiv($i, 3);
-            $this->setFunction($a, $b, $bit);
-            $this->setFunction($b, $a, $bit);
-        }
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Data placement                                                      */
-    /* ------------------------------------------------------------------ */
-
-    private function drawCodewords(array $codewords): void
-    {
-        $totalBits = count($codewords) * 8;
-        $bitIndex = 0;
-
-        for ($right = $this->size - 1; $right >= 1; $right -= 2) {
-            if ($right === 6) {
-                $right = 5;   // skip the vertical timing column
+        $bits = [];
+        foreach ($codewords as $cw) {
+            for ($i = 7; $i >= 0; $i--) {
+                $bits[] = ($cw >> $i) & 1;
             }
-            // Pairs alternate upward/downward, starting upward at the right edge.
-            $upward = (($right + 1) & 2) === 0;
-
-            for ($vert = 0; $vert < $this->size; $vert++) {
-                $y = $upward ? $this->size - 1 - $vert : $vert;
-                for ($j = 0; $j < 2; $j++) {
-                    $x = $right - $j;
-                    if ($this->isFunction[$y][$x]) {
+        }
+        $index = 0;
+        $upward = true;
+        for ($col = $this->size - 1; $col > 0; $col -= 2) {
+            if ($col === 6) {
+                $col--; // skip the vertical timing column
+            }
+            for ($i = 0; $i < $this->size; $i++) {
+                $row = $upward ? $this->size - 1 - $i : $i;
+                foreach ([$col, $col - 1] as $c) {
+                    if ($this->reserved[$row][$c]) {
                         continue;
                     }
-                    $bit = false;
-                    if ($bitIndex < $totalBits) {
-                        $bit = (($codewords[$bitIndex >> 3] >> (7 - ($bitIndex & 7))) & 1) === 1;
-                        $bitIndex++;
-                    }
-                    if (($x + $y) % 2 === 0) {   // mask pattern 0
-                        $bit = !$bit;
-                    }
-                    $this->modules[$y][$x] = $bit;
+                    $this->modules[$row][$c] = (bool) ($bits[$index] ?? 0);
+                    $index++;
                 }
             }
+            $upward = !$upward;
         }
     }
 
-    private function setFunction(int $x, int $y, bool $dark): void
+    /** @return array<int, array<int, bool>> */
+    private function applyMask(int $mask): array
     {
-        if ($x < 0 || $y < 0 || $x >= $this->size || $y >= $this->size) {
-            return;
+        $out = $this->modules;
+        for ($r = 0; $r < $this->size; $r++) {
+            for ($c = 0; $c < $this->size; $c++) {
+                if ($this->reserved[$r][$c]) {
+                    continue;
+                }
+                $invert = match ($mask) {
+                    0 => ($r + $c) % 2 === 0,
+                    1 => $r % 2 === 0,
+                    2 => $c % 3 === 0,
+                    3 => ($r + $c) % 3 === 0,
+                    4 => (intdiv($r, 2) + intdiv($c, 3)) % 2 === 0,
+                    5 => (($r * $c) % 2 + ($r * $c) % 3) === 0,
+                    6 => ((($r * $c) % 2 + ($r * $c) % 3) % 2) === 0,
+                    7 => ((($r + $c) % 2 + ($r * $c) % 3) % 2) === 0,
+                };
+                if ($invert) {
+                    $out[$r][$c] = !$out[$r][$c];
+                }
+            }
         }
-        $this->modules[$y][$x] = $dark;
-        $this->isFunction[$y][$x] = true;
+        return $out;
+    }
+
+    /** @param array<int, array<int, bool>> $m */
+    private function penalty(array $m): int
+    {
+        $score = 0;
+        $size = $this->size;
+
+        // Rule 1: runs of five or more same-coloured modules in a row/column.
+        for ($r = 0; $r < $size; $r++) {
+            $run = 1;
+            for ($c = 1; $c < $size; $c++) {
+                if ($m[$r][$c] === $m[$r][$c - 1]) {
+                    $run++;
+                } else {
+                    if ($run >= 5) {
+                        $score += 3 + ($run - 5);
+                    }
+                    $run = 1;
+                }
+            }
+            if ($run >= 5) {
+                $score += 3 + ($run - 5);
+            }
+        }
+        for ($c = 0; $c < $size; $c++) {
+            $run = 1;
+            for ($r = 1; $r < $size; $r++) {
+                if ($m[$r][$c] === $m[$r - 1][$c]) {
+                    $run++;
+                } else {
+                    if ($run >= 5) {
+                        $score += 3 + ($run - 5);
+                    }
+                    $run = 1;
+                }
+            }
+            if ($run >= 5) {
+                $score += 3 + ($run - 5);
+            }
+        }
+
+        // Rule 2: 2x2 blocks of one colour.
+        for ($r = 0; $r < $size - 1; $r++) {
+            for ($c = 0; $c < $size - 1; $c++) {
+                $v = $m[$r][$c];
+                if ($m[$r][$c + 1] === $v && $m[$r + 1][$c] === $v && $m[$r + 1][$c + 1] === $v) {
+                    $score += 3;
+                }
+            }
+        }
+
+        // Rule 3: the finder-like 1:1:3:1:1 pattern.
+        $pattern = [true, false, true, true, true, false, true];
+        for ($r = 0; $r < $size; $r++) {
+            for ($c = 0; $c <= $size - 7; $c++) {
+                if ($this->matches($m, $r, $c, 0, 1, $pattern)) {
+                    $score += 40;
+                }
+            }
+        }
+        for ($c = 0; $c < $size; $c++) {
+            for ($r = 0; $r <= $size - 7; $r++) {
+                if ($this->matches($m, $r, $c, 1, 0, $pattern)) {
+                    $score += 40;
+                }
+            }
+        }
+
+        // Rule 4: deviation of the dark-module proportion from 50%.
+        $dark = 0;
+        foreach ($m as $row) {
+            foreach ($row as $cell) {
+                if ($cell) {
+                    $dark++;
+                }
+            }
+        }
+        $ratio = ($dark * 100) / ($size * $size);
+        $score += (int) (floor(abs($ratio - 50) / 5) * 10);
+
+        return $score;
+    }
+
+    /**
+     * @param array<int, array<int, bool>> $m
+     * @param array<int, bool> $pattern
+     */
+    private function matches(array $m, int $r, int $c, int $dr, int $dc, array $pattern): bool
+    {
+        foreach ($pattern as $i => $expected) {
+            if ($m[$r + $dr * $i][$c + $dc * $i] !== $expected) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Write the format-information bits for EC level M and the chosen mask. */
+    private function drawFormat(int $mask): void
+    {
+        // EC level M is 00; format = 00 << 3 | mask, then BCH(15,5) and XOR.
+        $data = (self::EC_LEVEL_M_BITS << 3) | $mask;
+        $remainder = $data;
+        for ($i = 0; $i < 10; $i++) {
+            $remainder = ($remainder << 1) ^ ((($remainder >> 9) & 1) * 0x537);
+        }
+        $bits = (($data << 10) | $remainder) ^ 0x5412;
+
+        // Bit 14 is the most significant and lands first in each run. Getting
+        // this backwards writes a perfectly valid-looking 15-bit field that
+        // describes a different mask, so a scanner reads garbage and blames
+        // the print. Verified against the reference encoder cell by cell.
+        $bit = static fn (int $i): bool => (($bits >> (14 - $i)) & 1) === 1;
+        for ($i = 0; $i <= 5; $i++) {
+            $this->modules[8][$i] = $bit($i);
+        }
+        $this->modules[8][7] = $bit(6);
+        $this->modules[8][8] = $bit(7);
+        $this->modules[7][8] = $bit(8);
+        for ($i = 9; $i <= 14; $i++) {
+            $this->modules[14 - $i][8] = $bit($i);
+        }
+
+        // Second copy: bits 0-7 run up the left of the bottom-left finder,
+        // bits 8-14 along the top-right.
+        for ($i = 0; $i <= 7; $i++) {
+            $this->modules[$this->size - 1 - $i][8] = $bit($i);
+        }
+        for ($i = 8; $i <= 14; $i++) {
+            $this->modules[8][$this->size - 15 + $i] = $bit($i);
+        }
+        $this->modules[$this->size - 8][8] = true; // dark module
+    }
+
+    private function renderPng(int $scale, int $quiet): string
+    {
+        $scale = max(1, $scale);
+        $quiet = max(0, $quiet);
+        $pixels = ($this->size + $quiet * 2) * $scale;
+
+        $img = imagecreatetruecolor($pixels, $pixels);
+        $white = imagecolorallocate($img, 255, 255, 255);
+        $black = imagecolorallocate($img, 0, 0, 0);
+        imagefilledrectangle($img, 0, 0, $pixels, $pixels, $white);
+
+        for ($r = 0; $r < $this->size; $r++) {
+            for ($c = 0; $c < $this->size; $c++) {
+                if (!$this->modules[$r][$c]) {
+                    continue;
+                }
+                $x = ($c + $quiet) * $scale;
+                $y = ($r + $quiet) * $scale;
+                imagefilledrectangle($img, $x, $y, $x + $scale - 1, $y + $scale - 1, $black);
+            }
+        }
+
+        ob_start();
+        imagepng($img);
+        $png = (string) ob_get_clean();
+        imagedestroy($img);
+        return $png;
     }
 }

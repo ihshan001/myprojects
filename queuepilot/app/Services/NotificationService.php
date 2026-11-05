@@ -6,6 +6,7 @@ namespace App\Services;
 use App\Core\Db;
 use App\Core\Env;
 use App\Core\Log;
+use App\Services\FeatureService;
 
 /**
  * Notification architecture (outbox pattern).
@@ -346,6 +347,23 @@ final class NotificationService
             $body = $payload['body'] ?? '';
 
             try {
+                // Feature gate: a clinic without the `sms` feature cannot send
+                // SMS. This is enforced in the service layer, not merely by
+                // hiding a button in the UI. WhatsApp is gated the same way.
+                if (in_array($job['channel'], ['sms', 'whatsapp'], true)
+                    && !(new FeatureService())->enabled((int) $job['clinic_id'], $job['channel'])) {
+                    Db::run(
+                        "UPDATE notifications SET status='logged', attempts=?, last_error=?, sent_at=NULL, payload_json=? WHERE id=?",
+                        [$attempts, 'feature not enabled for this clinic — contact the platform operator',
+                         $this->withoutNumber($job['payload_json']), $job['id']]
+                    );
+                    $logged++;
+                    Log::info('notification.feature_gated', [
+                        'id' => $job['id'], 'channel' => $job['channel'], 'clinic_id' => $job['clinic_id'],
+                    ]);
+                    continue;
+                }
+
                 // The stored `to_number` is masked. The deliverable number
                 // lives in the payload, which is the only copy that needs it.
                 $to = (string) ($payload['to'] ?? '');
@@ -374,6 +392,11 @@ final class NotificationService
                     "UPDATE notifications SET status='sent', attempts=?, sent_at=?, last_error=NULL, payload_json=? WHERE id=?",
                     [$attempts, Db::now(), $this->withoutNumber($job['payload_json']), $job['id']]
                 );
+                // Meter every SMS that actually left the building so the
+                // operator can bill for it (0.64 LKR per message via text.lk).
+                if ($job['channel'] === 'sms') {
+                    (new FeatureService())->meterSms((int) $job['clinic_id']);
+                }
                 $sent++;
             } catch (\Throwable $e) {
                 $status = $attempts >= 3 ? 'abandoned' : 'queued';
@@ -393,10 +416,18 @@ final class NotificationService
 
     private function gateway(string $channel): Gateway
     {
-        return match ($channel) {
-            'whatsapp' => new WhatsAppGateway(),
-            default    => new SmsGateway(),
-        };
+        if ($channel === 'whatsapp') {
+            return new WhatsAppGateway();
+        }
+        // The transport is an operational choice (log / http / textlk), not a
+        // message channel. SMS_GATEWAY=textlk routes every outgoing SMS
+        // through text.lk; anything else uses the existing SmsGateway
+        // (log http auto).
+        $transport = strtolower((string) (Env::get('sms.gateway') ?: getenv('SMS_GATEWAY') ?: 'log'));
+        if ($transport === 'textlk') {
+            return new TextLkGateway();
+        }
+        return new SmsGateway();
     }
 
     /**

@@ -121,6 +121,9 @@ final class ThermalSlip
   td { padding: .7mm 0; vertical-align: top; }
   td.r { text-align: right; font-weight: 600; }
   .url { font-size: 9px; word-break: break-all; text-align: center; margin-top: 1mm; }
+  .qr { margin-top: 2mm; }
+  .qr img { width: 34mm; height: 34mm; image-rendering: pixelated; }
+  .qr-cap { font-size: 9px; margin: 0.5mm 0 0; }
   .no-print { text-align: center; margin-top: 4mm; }
   @media print { .no-print { display: none; } }
 </style></head>
@@ -137,7 +140,11 @@ final class ThermalSlip
   <table>' . $rows . '</table>
   <div class="rule"></div>
   <div class="c">Please stay nearby — we will call your token.</div>
-  ' . (!empty($data['url']) ? '<div class="url">Track live: ' . $esc($data['url']) . '</div>' : '') . '
+  ' . (!empty($data['qr_url'])
+        ? '<div class="c qr"><img src="' . $esc($data['qr_url']) . '" alt="Scan to watch your place in the queue">'
+          . '<p class="qr-cap">Scan to watch your place live</p></div>'
+        : '')
+      . (!empty($data['url']) ? '<div class="url">Track live: ' . $esc($data['url']) . '</div>' : '') . '
   <div class="no-print"><button onclick="window.print()">Print slip</button></div>
   <script>window.addEventListener("load",function(){ if(!location.search.includes("manual")) setTimeout(function(){ window.print(); },350); });</script>
 </body></html>';

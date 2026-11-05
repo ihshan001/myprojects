@@ -136,6 +136,56 @@ final class DisplayController
         redirect('/display');
     }
 
+    /**
+     * Patient-facing live queue — the same board the lobby TV shows, but
+     * optimised for a phone screen. No session required: the receptionist
+     * tells patients to open this link and watch their turn online.
+     *
+     * The markup pulls from /api/display/{key}, exactly the same endpoint the
+     * TV uses, so a patient at home and a TV in the lobby see identical
+     * content — token numbers, now-serving, room/doctor, delays, and counts.
+     * Nothing here reveals a patient's name or phone number.
+     */
+    public function live(string $key): void
+    {
+        $clinicId = Db::scalar(
+            "SELECT owner_id FROM settings WHERE scope='clinic' AND key_name='display_token' AND value = ?",
+            [$key]
+        );
+
+        $departmentName = null;
+        if (!$clinicId) {
+            $row = Db::one(
+                "SELECT owner_id, key_name FROM settings
+                  WHERE scope='clinic' AND key_name LIKE 'display.department.%' AND value = ?",
+                [$key]
+            );
+            if ($row) {
+                $clinicId = (int) $row['owner_id'];
+                $departmentName = Db::scalar(
+                    'SELECT name FROM departments WHERE id = ? AND clinic_id = ?',
+                    [(int) substr((string) $row['key_name'], strlen('display.department.')), $clinicId]
+                );
+            }
+        }
+
+        if (!$clinicId) {
+            abort(404, 'This queue link is not valid. Ask the clinic for a new one.');
+        }
+
+        $clinic = Db::one('SELECT * FROM clinics WHERE id = ?', [(int) $clinicId]);
+        if (!$clinic) {
+            abort(404, 'This queue link is not valid.');
+        }
+
+        view('display/live', [
+            'title' => $departmentName !== null ? $departmentName . ' — queue' : 'Queue',
+            'key' => $key,
+            'clinicRecord' => $clinic,
+            'departmentName' => $departmentName,
+        ], false);
+    }
+
     public function rotate(): void
     {
         $clinicId = Auth::clinicId();

@@ -193,6 +193,23 @@ final class QueueController
         exit;
     }
 
+    /**
+     * The tracking URL as a scannable QR PNG.
+     *
+     * A separate endpoint rather than a data: URI so the image caches, prints
+     * crisply at any printer resolution, and can be handed to a thermal
+     * printer's own renderer. Scoped like every other slip route: a manager
+     * can only render a QR for a token in their own clinic.
+     */
+    public function slipQr(string $id): void
+    {
+        $data = $this->slipData((int) $id);
+        header('Content-Type: image/png');
+        header('Cache-Control: private, max-age=3600');
+        echo \App\Support\QrCode::png((string) $data['url'], 8, 4);
+        exit;
+    }
+
     /** @return array<string, mixed> */
     private function slipData(int $entryId): array
     {
@@ -221,6 +238,7 @@ final class QueueController
             'room' => (string) ($entry['room_name'] ?? ''),
             'issued_at' => date('j M Y, g:i A', strtotime((string) $entry['joined_at'])),
             'url' => rtrim((string) \App\Core\Env::get('app.url', ''), '/') . '/t/' . (string) $entry['track_token'],
+            'qr_url' => '/queue/' . (int) $entry['id'] . '/qr.png',
         ];
     }
 

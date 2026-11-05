@@ -96,6 +96,7 @@ Router::get('/queue/token-issued', [QueueController::class, 'tokenIssued'], ['au
 // for a wired receipt printer. Both carry only the token — no clinical data.
 Router::get('/queue/{id}/slip', [QueueController::class, 'slip'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::get('/queue/{id}/slip.escpos', [QueueController::class, 'slipEscpos'], ['auth' => true, 'ability' => 'queue.operate']);
+Router::get('/queue/{id}/qr.png', [QueueController::class, 'slipQr'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::get('/queue/entry', [QueueController::class, 'entry'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/action', [QueueController::class, 'action'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/step', [QueueController::class, 'markStep'], ['auth' => true, 'ability' => 'queue.operate']);
@@ -265,6 +266,9 @@ Router::post('/admin/support/{id}/reply', [SupportController::class, 'reply'], [
 Router::post('/admin/support/{id}/status', [SupportController::class, 'setStatus'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/admin/billing/{id}/verify', [AdminBillingController::class, 'verify'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/admin/billing/{id}/reject', [AdminBillingController::class, 'reject'], ['auth' => true, 'roles' => ['super_admin']]);
+Router::get('/admin/features', [AdminController::class, 'features'], ['auth' => true, 'roles' => ['super_admin']]);
+Router::post('/admin/features/{clinicId}', [AdminController::class, 'saveFeature'], ['auth' => true, 'roles' => ['super_admin'], 'csrf' => false]);
+Router::post('/admin/features/{clinicId}/unset', [AdminController::class, 'unsetFeature'], ['auth' => true, 'roles' => ['super_admin'], 'csrf' => false]);
 
 /* ------------------------------------------------------------- JSON API */
 Router::get('/api/queue/board', [ApiController::class, 'board'], ['auth' => true, 'ability' => 'queue.operate']);
@@ -279,6 +283,7 @@ Router::get('/settings/offline', [ClinicController::class, 'offline'], ['auth' =
 Router::get('/api/track/{token}', [ApiController::class, 'track']);
 Router::get('/api/display/{key}', [ApiController::class, 'display']);
 Router::get('/board/{key}', [DisplayController::class, 'publicScreen']);
+Router::get('/live/{key}', [DisplayController::class, 'live']);
 
 // Online booking: 404 for clinics that have not opted in (see PublicController).
 Router::get('/book/{slug}', [PublicController::class, 'bookForm']);

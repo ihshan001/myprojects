@@ -7,6 +7,7 @@ use App\Core\Auth;
 use App\Core\Db;
 use App\Core\Request;
 use App\Services\AuditService;
+use App\Services\FeatureService;
 use App\Services\LifecycleService;
 
 /** Platform (super admin) console: tenants, plans, revenue. */
@@ -235,5 +236,65 @@ final class AdminController
             flash('success', 'Plan updated.');
         }
         redirect('/admin/plans');
+    }
+
+    /**
+     * Feature entitlement management: the platform operator decides which
+     * clinic gets which feature. Each clinic row shows every known feature
+     * with its effective state and whether the operator has overridden it.
+     */
+    public function features(): void
+    {
+        $clinics = Db::all('SELECT * FROM clinics ORDER BY name');
+        $features = FeatureService::KNOWN;
+
+        $clinicFeatures = [];
+        foreach ($clinics as $clinic) {
+            $clinicFeatures[(int) $clinic['id']] = (new FeatureService())->list((int) $clinic['id']);
+        }
+
+        view('admin/features', [
+            'title' => 'Feature entitlements',
+            'clinics' => $clinics,
+            'features' => $features,
+            'clinicFeatures' => $clinicFeatures,
+        ]);
+    }
+
+    /** Operator sets or clears a feature for a clinic. */
+    public function saveFeature(string $clinicId): void
+    {
+        $feature = Request::string('feature');
+        $enabled = Request::bool('enabled');
+
+        if (!isset(FeatureService::KNOWN[$feature])) {
+            flash('error', 'Unknown feature.');
+            redirect('/admin/features');
+            return;
+        }
+
+        (new FeatureService())->set((int) $clinicId, $feature, $enabled);
+        (new AuditService())->log(null, 'platform.feature_set', 'clinic_feature', $clinicId,
+            ['feature' => $feature, 'enabled' => $enabled]);
+        flash('success', 'Feature updated for clinic ' . $clinicId . '.');
+        redirect('/admin/features');
+    }
+
+    /** Operator removes an override so the plan default applies again. */
+    public function unsetFeature(string $clinicId): void
+    {
+        $feature = Request::string('feature');
+
+        if (!isset(FeatureService::KNOWN[$feature])) {
+            flash('error', 'Unknown feature.');
+            redirect('/admin/features');
+            return;
+        }
+
+        (new FeatureService())->unset((int) $clinicId, $feature);
+        (new AuditService())->log(null, 'platform.feature_unset', 'clinic_feature', $clinicId,
+            ['feature' => $feature]);
+        flash('success', 'Override removed — plan default now applies for clinic ' . $clinicId . '.');
+        redirect('/admin/features');
     }
 }
