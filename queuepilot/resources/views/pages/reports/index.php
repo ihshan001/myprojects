@@ -84,13 +84,16 @@ foreach ($byHour as $h) { $peak = max($peak, (int) $h['total']); }
     <h2 class="text-sm font-bold text-slate-900">Outcomes</h2>
     <div class="mt-4 space-y-3">
       <?php
-      $outcomes = [
+      // Named distinctly from the controller's $outcomes: a local of the same
+      // name shadows it for the rest of the file, which is exactly how the
+      // outcome table below came to read from the wrong array.
+      $outcomeBars = [
           ['Completed', $completed, 'bg-emerald-500'],
           ['No show', $noShow, 'bg-rose-500'],
           ['Skipped', $skipped, 'bg-amber-500'],
           ['Cancelled', (int) ($summary['cancelled'] ?? 0), 'bg-slate-400'],
       ];
-      foreach ($outcomes as [$label, $n, $bar]):
+      foreach ($outcomeBars as [$label, $n, $bar]):
           $pct = $total > 0 ? round($n / $total * 100) : 0;
       ?>
         <div>
@@ -153,9 +156,9 @@ foreach ($byHour as $h) { $peak = max($peak, (int) $h['total']); }
             <td class="numeric hidden md:table-cell"><?= $d['avg_consult'] !== null ? round((float) $d['avg_consult']) . 'm' : '—' ?></td>
             <td class="numeric hidden lg:table-cell"><?= (int) $d['prioritised'] ?></td>
             <td class="numeric hidden lg:table-cell">
-              <?php $delays = (int) ($d['delays'] ?? 0); ?>
-              <?php if ($delays > 0): ?>
-                <span class="badge-amber"><?= $delays ?>×</span>
+              <?php $delayCount = (int) ($d['delays'] ?? 0); ?>
+              <?php if ($delayCount > 0): ?>
+                <span class="badge-amber"><?= $delayCount ?>×</span>
               <?php else: ?>
                 <span class="text-slate-300">—</span>
               <?php endif; ?>
@@ -166,3 +169,136 @@ foreach ($byHour as $h) { $peak = max($peak, (int) $h['total']); }
     </table>
   <?php endif; ?>
 </div>
+
+<!-- ==================== outcomes ==================== -->
+<div class="mt-5 grid gap-5 lg:grid-cols-2">
+  <div class="card overflow-hidden">
+    <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+      <p class="text-xs font-semibold text-slate-600">Outcomes · <?= e($from) ?> to <?= e($to) ?></p>
+    </div>
+    <div class="grid grid-cols-2 gap-3 p-4 sm:grid-cols-4">
+      <?php foreach ([
+          ['completed', 'Completed', 'emerald'],
+          ['no_show', 'Not seen', 'amber'],
+          ['cancelled', 'Cancelled', 'rose'],
+          ['transferred', 'Transferred', 'slate'],
+      ] as [$key, $label, $tone]): ?>
+        <div class="rounded-lg bg-<?= $tone ?>-50 py-2.5 text-center">
+          <p class="text-xl font-bold text-<?= $tone ?>-800"><?= (int) ($outcomeStats['totals'][$key] ?? 0) ?></p>
+          <p class="text-[10px] font-medium uppercase tracking-wide text-<?= $tone ?>-700"><?= e($label) ?></p>
+        </div>
+      <?php endforeach; ?>
+    </div>
+    <p class="border-t border-slate-100 px-4 py-2 text-[11px] text-slate-500">
+      Lost-visit rate <b class="text-slate-700"><?= e((string) $outcomeStats['rate']) ?>%</b>
+      of <?= (int) $outcomeStats['totals']['total'] ?> entries (not seen + cancelled).
+    </p>
+  </div>
+
+  <div class="card overflow-hidden">
+    <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+      <p class="text-xs font-semibold text-slate-600">Waiting time — <?= e($from) ?> to <?= e($to) ?></p>
+    </div>
+    <div class="grid grid-cols-4 gap-2 p-4 text-center">
+      <?php foreach ([['p50', 'Median'], ['p90', '90th'], ['p99', '99th'], ['max', 'Worst']] as [$k, $label]): ?>
+        <div>
+          <p class="text-lg font-bold text-slate-900"><?= (int) round((float) $waits[$k]) ?><span class="text-xs font-normal text-slate-400">m</span></p>
+          <p class="text-[10px] uppercase tracking-wide text-slate-500"><?= e($label) ?></p>
+        </div>
+      <?php endforeach; ?>
+    </div>
+    <p class="border-t border-slate-100 px-4 py-2 text-[10px] leading-relaxed text-slate-400">
+      From <?= (int) $waits['count'] ?> called tokens. Percentiles, not an average — one
+      ninety-minute outlier should not hide a fast queue.
+    </p>
+  </div>
+</div>
+
+<!-- ==================== departments ==================== -->
+<div class="card mt-5 overflow-hidden">
+  <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+    <p class="text-xs font-semibold text-slate-600">By department</p>
+  </div>
+  <?php if ($byDepartment === []): ?>
+    <div class="p-4 text-xs text-slate-500">No visits in this range.</div>
+  <?php else: ?>
+    <table class="table">
+      <thead><tr><th>Department</th><th class="numeric">Seen</th><th class="numeric hidden sm:table-cell">Completed</th><th class="numeric hidden md:table-cell">Avg wait</th></tr></thead>
+      <tbody>
+        <?php foreach ($byDepartment as $d): ?>
+          <tr>
+            <td class="font-medium"><?= e((string) $d['department']) ?></td>
+            <td class="numeric"><?= (int) $d['seen'] ?></td>
+            <td class="numeric hidden sm:table-cell"><?= (int) $d['completed'] ?></td>
+            <td class="numeric hidden md:table-cell"><?= $d['avg_wait_minutes'] !== null ? round((float) $d['avg_wait_minutes']) . 'm' : '—' ?></td>
+          </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+    <p class="border-t border-slate-100 px-4 py-2 text-[10px] text-slate-400">
+      Queues not assigned to a department appear as (unassigned) rather than disappearing.
+    </p>
+  <?php endif; ?>
+</div>
+
+<!-- ==================== delays ==================== -->
+<div class="card mt-5 overflow-hidden">
+  <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+    <p class="text-xs font-semibold text-slate-600">Doctor delays</p>
+  </div>
+  <?php if ($delays === []): ?>
+    <div class="p-4 text-xs text-slate-500">No delays or pauses recorded in this range.</div>
+  <?php else: ?>
+    <table class="table">
+      <thead><tr><th>Doctor</th><th class="numeric">Events</th><th class="numeric">Average</th><th class="numeric">Worst</th></tr></thead>
+      <tbody>
+        <?php foreach ($delays as $d): ?>
+          <tr>
+            <td class="font-medium"><?= e((string) $d['doctor']) ?></td>
+            <td class="numeric"><?= (int) $d['delay_events'] ?></td>
+            <td class="numeric"><?= $d['avg_minutes'] !== null ? (int) round((float) $d['avg_minutes']) . 'm' : '—' ?></td>
+            <td class="numeric"><?= $d['worst_minutes'] !== null ? (int) round((float) $d['worst_minutes']) . 'm' : '—' ?></td>
+          </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  <?php endif; ?>
+</div>
+
+<!-- ==================== staff activity ==================== -->
+<?php if (!empty($staffActivity)): ?>
+  <div class="card mt-5 overflow-hidden">
+    <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+      <p class="text-xs font-semibold text-slate-600">Staff activity</p>
+    </div>
+    <table class="table">
+      <thead>
+        <tr><th>Staff member</th><th>Role</th><th class="numeric">Actions</th>
+        <th class="numeric hidden sm:table-cell">Queue</th><th class="numeric hidden sm:table-cell">Patients</th>
+        <th class="numeric hidden md:table-cell">Cancels / no-shows</th></tr>
+      </thead>
+      <tbody>
+        <?php foreach ($staffActivity as $s): ?>
+          <tr>
+            <td class="font-medium"><?= e((string) $s['name']) ?></td>
+            <td class="text-xs text-slate-500"><?= e(str_replace('_', ' ', (string) $s['role'])) ?></td>
+            <td class="numeric font-semibold"><?= (int) $s['actions'] ?></td>
+            <td class="numeric hidden sm:table-cell"><?= (int) $s['queue_actions'] ?></td>
+            <td class="numeric hidden sm:table-cell"><?= (int) $s['patient_actions'] ?></td>
+            <td class="numeric hidden md:table-cell">
+              <?php if ((int) $s['destructive'] > 0): ?>
+                <span class="badge-amber"><?= (int) $s['destructive'] ?></span>
+              <?php else: ?>
+                <span class="text-slate-300">—</span>
+              <?php endif; ?>
+            </td>
+          </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+    <p class="border-t border-slate-100 px-4 py-2 text-[10px] leading-relaxed text-slate-400">
+      Built from the audit log, so it shows only actions the system records — every queue
+      transition, patient edit and settings change. Reading a page is not an action.
+    </p>
+  </div>
+<?php endif; ?>

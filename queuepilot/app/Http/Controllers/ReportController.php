@@ -38,6 +38,11 @@ final class ReportController
             'summary' => $service->daySummary($clinicId, $date),
             'byHour' => $service->byHour($clinicId, $date),
             'byDoctor' => $service->byDoctor($clinicId, $from, $to),
+            'byDepartment' => $service->byDepartment($clinicId, $from, $to),
+            'outcomeStats' => $service->outcomes($clinicId, $from, $to),
+            'staffActivity' => Auth::can('clinic.manage') ? $service->staffActivity($clinicId, $from, $to) : [],
+            'delays' => $service->delays($clinicId, $from, $to),
+            'waits' => $service->waitPercentiles($clinicId, $from, $to),
         ]);
     }
 

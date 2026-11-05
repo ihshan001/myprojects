@@ -48,10 +48,10 @@
         <input type="hidden" name="doctor_id" value="<?= (int) $selectedDoctor['id'] ?>">
 
         <?php foreach ($dayNames as $dow => $dayName): ?>
-          <?php $ranges = $week[$dow] ?? []; ?>
-          <?php $slots = max(1, count($ranges) + 1); ?>
-          <?php for ($i = 0; $i < $slots; $i++): ?>
-            <?php $from = $ranges[$i][0] ?? ''; $to = $ranges[$i][1] ?? ''; ?>
+          <?php $shiftRanges = $week[$dow] ?? []; ?>
+          <?php $rowCount = max(1, count($shiftRanges) + 1); ?>
+          <?php for ($i = 0; $i < $rowCount; $i++): ?>
+            <?php $shiftFrom = $shiftRanges[$i][0] ?? ''; $shiftTo = $shiftRanges[$i][1] ?? ''; ?>
             <div class="grid grid-cols-[7rem_1fr_1fr] items-center gap-2">
               <?php if ($i === 0): ?>
                 <span class="text-xs font-medium text-slate-600"><?= e($dayName) ?></span>
@@ -59,10 +59,10 @@
                 <span class="text-[10px] text-slate-400 pl-1">+ shift</span>
               <?php endif; ?>
               <input class="input py-1.5 text-xs" type="time" name="day_<?= $dow ?>_from[]"
-                     value="<?= e($from) ?>" aria-label="<?= e($dayName) ?> shift <?= $i + 1 ?> start"
+                     value="<?= e($shiftFrom) ?>" aria-label="<?= e($dayName) ?> shift <?= $i + 1 ?> start"
                      <?= $canManage ? '' : 'disabled' ?>>
               <input class="input py-1.5 text-xs" type="time" name="day_<?= $dow ?>_to[]"
-                     value="<?= e($to) ?>" aria-label="<?= e($dayName) ?> shift <?= $i + 1 ?> end"
+                     value="<?= e($shiftTo) ?>" aria-label="<?= e($dayName) ?> shift <?= $i + 1 ?> end"
                      <?= $canManage ? '' : 'disabled' ?>>
             </div>
           <?php endfor; ?>
