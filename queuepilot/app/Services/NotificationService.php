@@ -62,7 +62,10 @@ final class NotificationService
             'SELECT track_token FROM queue_entries WHERE id = ?', [$entryId]
         );
 
-        $body = strtr(self::TEMPLATES[$template], [
+        // The clinic's own wording if it has any, otherwise the shipped copy.
+        // Read here rather than at construction: a template edited while a
+        // worker is running takes effect on its next pass, not after a restart.
+        $body = strtr((new TemplateService())->body($clinicId, $template), [
             '{token}'  => (string) $entry['token_label'],
             '{queue}'  => (string) $entry['queue_name'],
             '{clinic}' => (string) $entry['clinic_name'],
@@ -203,7 +206,7 @@ final class NotificationService
             // phone call, which is the thing patients actually complain about.
             $link = rtrim((string) Env::get('app.url', 'http://localhost:8080'), '/')
                 . \App\Services\AppointmentService::manageUrl((int) $a['id'], (string) $a['scheduled_for']);
-            $body = strtr(self::TEMPLATES['appointment_reminder'], [
+            $body = strtr((new TemplateService())->body((int) $a['clinic_id'], 'appointment_reminder'), [
                 '{clinic}' => (string) $a['clinic_name'],
                 '{when}'   => $when,
                 '{token}'  => '',

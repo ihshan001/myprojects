@@ -82,7 +82,7 @@
     <div class="bar-inner">
       <div class="progress">
         <div class="progress-top">
-          <span><b id="doneCount">0</b> / 124 reviewed</span>
+          <span><b id="doneCount">0</b> / 125 reviewed</span>
           <span><b id="pct">0%</b></span>
         </div>
         <div class="track"><div class="fill" id="fill"></div></div>
@@ -113,7 +113,7 @@
   </div>
 
   <div class="legend">
-    <span><i class="dot built"></i> 120 built</span>
+    <span><i class="dot built"></i> 121 built</span>
     <span><i class="dot partial"></i> 4 partial</span>
     <span><i class="dot missing"></i> 0 not built</span>
   </div>
@@ -911,6 +911,15 @@
         </label>
         <p class="note">New: <code>/notifications</code> — staff notices and patient messages, masked numbers, failure reasons.</p>
       </li>
+
+      <li class="item" data-status="built">
+        <label class="row">
+          <input type="checkbox" class="tick" data-id="Communication|Per-clinic message wording">
+          <span class="name">Per-clinic message wording</span>
+          <span class="pill built">Built</span>
+        </label>
+        <p class="note"><code>/settings/templates</code> edits each of the six patient messages in place — no deploy. It is an <b>override, not a copy</b>: a clinic that has edited nothing keeps the shipped wording and still gets later improvements, and editing one message leaves the other five alone. Validated on save rather than in the 03:00 worker: an undeclared placeholder is refused and the valid ones listed, a template that drops <code>{token}</code> is refused, an unmatched brace is caught, and anything over 480 characters is refused as a surprise multi-part bill. Verified live: overrode "token issued" in Sinhala, a real queued message came out as <code>ඔබගේ අංකය A022…</code> while "your turn now" stayed default.</p>
+      </li>
     </ul>
   </section>
   <section class="group" data-group="Reports and analytics">
@@ -1133,7 +1142,7 @@
           <span class="name">Security testing</span>
           <span class="pill partial">Partial</span>
         </label>
-        <p class="note">227 automated checks, adversarial curl probes each session, and <code>npm run security</code> — a standing check of dependency advisories (136 packages, 0 known), runtime settings, secrets in the tree, every unauthenticated route, and whether a finished notification still holds a patient's number. It found a real leak while being written. <strong>Still no external penetration test — that is a person's engagement, not code.</strong></p>
+        <p class="note">241 automated checks, adversarial curl probes each session, and <code>npm run security</code> — a standing check of dependency advisories (136 packages, 0 known), runtime settings, secrets in the tree, every unauthenticated route, and whether a finished notification still holds a patient's number. It found a real leak while being written. <strong>Still no external penetration test — that is a person's engagement, not code.</strong></p>
       </li>
     </ul>
   </section>
@@ -1204,7 +1213,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (227 automated checks, 164 files lint-clean, healthcheck green).
+    application (241 automated checks, 175 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.

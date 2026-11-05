@@ -6,8 +6,10 @@ namespace App\Http\Controllers;
 use App\Core\Auth;
 use App\Core\Db;
 use App\Core\Request;
+use App\Core\Session;
 use App\Services\AuditService;
 use App\Services\BranchService;
+use App\Services\TemplateService;
 use App\Services\ClinicService;
 use App\Services\DoctorService;
 
@@ -312,6 +314,60 @@ final class ClinicController
      * actually asks, and it makes an accidental grant visible as a person's
      * name in the wrong column.
      */
+    /**
+     * Edit the wording patients actually receive.
+     *
+     * Sits under Settings rather than under Notifications because the person
+     * who owns it is the practice manager, and the question they ask is
+     * "can we say this in our own words?" — not "where is the notification
+     * subsystem".
+     */
+    public function templates(): void
+    {
+        $clinicId = $this->clinicId();
+        $service = new TemplateService();
+
+        view('settings/templates', [
+            'title' => 'Message wording',
+            'active' => 'settings',
+            'templates' => $service->all($clinicId),
+            'saved' => Session::takeFlash('template_saved'),
+            'error' => Session::takeFlash('template_error'),
+            'errors' => Session::takeFlash('template_errors') ?? [],
+            'old' => Session::takeFlash('template_old') ?? [],
+        ]);
+    }
+
+    public function saveTemplate(): void
+    {
+        $clinicId = $this->clinicId();
+        $template = Request::string('template');
+        $body = Request::payload()['body'] ?? '';
+
+        try {
+            (new TemplateService())->save($clinicId, $template, (string) $body, (int) Auth::id());
+        } catch (\InvalidArgumentException $e) {
+            Session::flash('template_error', $e->getMessage());
+            Session::flash('template_old', ['template' => $template, 'body' => (string) $body]);
+            redirect('/settings/templates#' . $template);
+            return;
+        }
+
+        flash('success', 'Saved. New messages will use your wording from now on.');
+        redirect('/settings/templates');
+    }
+
+    public function resetTemplate(): void
+    {
+        $clinicId = $this->clinicId();
+        $template = Request::string('template');
+        $done = (new TemplateService())->reset($clinicId, $template);
+        flash($done ? 'success' : 'warn', $done
+            ? 'Back to the default wording.'
+            : 'That message was already using the default.');
+        redirect('/settings/templates');
+    }
+
     public function branches(): void
     {
         $clinicId = $this->clinicId();

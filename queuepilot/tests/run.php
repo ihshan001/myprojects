@@ -4374,6 +4374,92 @@ Assert::test('an override rate with no denominator is reported as unknown, not a
 });
 
 /* ------------------------------------------------------------------ */
+/* 63. Per-clinic message wording                                      */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a clinic can change one message without changing the others', function (): void {
+    seedTenant(108, 'templates', 'Templates Clinic');
+    $templates = new App\Services\TemplateService();
+
+    Assert::same(
+        App\Services\NotificationService::TEMPLATES['token_issued'],
+        $templates->body(108, 'token_issued'),
+        'a clinic that has edited nothing gets the shipped wording'
+    );
+
+    $templates->save(108, 'token_issued', 'ඔබගේ අංකය {token}. {queue} රැඳී සිටින්න.', null);
+    Assert::same('ඔබගේ අංකය {token}. {queue} රැඳී සිටින්න.', $templates->body(108, 'token_issued'),
+        'their own wording is used from then on');
+    Assert::same(
+        App\Services\NotificationService::TEMPLATES['entry_called'],
+        $templates->body(108, 'entry_called'),
+        'and every message they did not edit keeps receiving the default'
+    );
+    Assert::same(
+        App\Services\NotificationService::TEMPLATES['token_issued'],
+        $templates->body(1, 'token_issued'),
+        "another clinic's message is untouched"
+    );
+
+    // The message a patient actually receives is the one the clinic wrote.
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 108 ORDER BY id LIMIT 1');
+    $patient = Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (108,?,?,?,?)',
+        ['T1', 'Wording Patient', '0771237401', Db::now()]
+    );
+    $issued = (new App\Domain\Queue\QueueService())->issueToken(108, $queueId, $patient, ['source' => 'walkin']);
+    $payload = Db::scalar(
+        "SELECT payload_json FROM notifications WHERE entry_id = ? AND template = 'token_issued' ORDER BY id DESC LIMIT 1",
+        [(int) $issued['entry_id']]
+    );
+    Assert::true($payload !== null, 'issuing a token queued a message');
+    $body = (string) (json_decode((string) $payload, true)['body'] ?? '');
+    Assert::contains('ඔබගේ අංකය ', $body, 'the queued message opens with the clinic\'s own words');
+    Assert::contains((string) $issued['token'], $body, 'with the real token filled in, not a brace');
+    Assert::false(str_contains($body, '{'), 'and no unreplaced placeholder survives');
+
+    // Resetting returns to the default rather than to an empty string.
+    Assert::true($templates->reset(108, 'token_issued'), 'the override can be removed');
+    Assert::same(
+        App\Services\NotificationService::TEMPLATES['token_issued'],
+        $templates->body(108, 'token_issued'),
+        'and the clinic is back on the default wording'
+    );
+});
+
+Assert::test('a template that would reach a patient wrong is refused on save', function (): void {
+    seedTenant(109, 'templates-two', 'Templates Two');
+    $templates = new App\Services\TemplateService();
+
+    $cases = [
+        // [template, body, fragment the refusal must contain, why]
+        ['token_issued', 'You are {toke} at {clinic}', 'toke', 'a placeholder that does not exist would be sent as braces'],
+        ['token_issued', 'Please wait at {clinic} until called.', 'token', 'the token itself cannot be dropped'],
+        ['token_issued', 'You are {token at {clinic}', null, 'an unmatched brace is caught'],
+        ['token_issued', '   ', 'Write the message', 'an empty message is not a message'],
+        ['not_a_template', 'Hello {token}', 'not a message', 'only real templates can be edited'],
+        ['token_issued', str_repeat('a', 500) . ' {token}', 'under 480', 'a message that becomes four texts is a surprise bill'],
+    ];
+
+    foreach ($cases as [$template, $body, $fragment, $why]) {
+        $threw = false;
+        try {
+            $templates->save(109, $template, $body, null);
+        } catch (\InvalidArgumentException $e) {
+            $threw = true;
+            if ($fragment !== null) {
+                Assert::contains($fragment, $e->getMessage(), $why);
+            }
+        }
+        Assert::true($threw, 'refused: ' . $why);
+    }
+
+    // Nothing refused was written.
+    Assert::same(0, (int) Db::scalar('SELECT COUNT(*) FROM notification_templates WHERE clinic_id = 109'),
+        'no refused message was stored, so the clinic still has the default');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

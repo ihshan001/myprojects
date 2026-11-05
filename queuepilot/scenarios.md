@@ -130,7 +130,7 @@ lint-clean, healthcheck all-good, all five demo logins re-checked).
 | The patient is told when it is their turn | ✅ | On `call` |
 | Delivery failure is visible to staff | ✅ | **Built.** `/notifications?tab=patients` lists every message with masked number, template, token, attempt count, status and the failure reason. Three states are distinguished: `sent` (a provider accepted it), `logged` (the development transport recorded it — counted separately and labelled "recorded, not sent"), and `abandoned` with a reason |
 | Credentials are never logged | ✅ | Numbers are redacted before they reach a log line, and stored notification rows now hold only the last three digits — found during this audit, when a queue dump showed every patient's full number |
-| Templates are per clinic | ◐ | Templates are a code-level map with Sinhala/Tamil/English copy; the per-clinic override I previously claimed does not exist. Changing the wording is a deploy |
+| Templates are per clinic | ✅ | **Built.** `/settings/templates` edits each of the six patient messages in place — no deploy, no support ticket. It is an **override, not a copy**: a clinic that has edited nothing keeps the shipped wording and still receives improvements, and editing one message leaves the other five on the default. Validated on save rather than at 03:00 in the worker: an undeclared placeholder (`{toke}`) is refused and the available ones listed, a template that drops `{token}` is refused because the patient would never be told their number, an unmatched brace is caught, empty is not a message, and anything over 480 characters is refused as a surprise multi-part bill. The worker reads the clinic's wording on its next pass, so an edit takes effect without a restart. Verified live: overrode "token issued" in Sinhala, watched a real queued message come out as `ඔබගේ අංකය A022. OPD — …` while "your turn now" stayed default, then reset it back |
 | Appointment reminders go out on a schedule | ✅ | See section 2. The worker owns the schedule; nothing is tied to a page load |
 | A WhatsApp message is sent the way Meta actually expects | ✅ | **Verified against a real HTTP sink.** Bearer auth, `94771234567` normalisation, `type: text` inside the 24-hour window and a proper `type: template` object with a body parameter outside it, with Meta's own error text surfaced on a 4xx. The previous adapter returned `simulated` when credentials were missing and the worker filed it as a send — replaced: `http` without credentials now fails loudly, and the log transport reports "recorded, not sent". **Not exercised against a live Business account**: that needs a template approved in Meta Business Manager |
 
@@ -307,7 +307,7 @@ first clinic goes live — the automated suite does not replace it.
 | 6. Transfers between services | 4 | 0 | 1 | 0 |
 | 7. Patient-facing tracking | 6 | 0 | 0 | 0 |
 | 8. Displays and signage | 5 | 0 | 0 | 0 |
-| 9. Notifications — SMS and WhatsApp | 6 | 1 | 0 | 0 |
+| 9. Notifications — SMS and WhatsApp | 7 | 0 | 0 | 0 |
 | 10. Accounts, onboarding and access | 10 | 0 | 0 | 0 |
 | 11. Multi-tenancy and organisations | 7 | 0 | 0 | 0 |
 | 12. Doctors and scheduling | 7 | 0 | 0 | 1 |
@@ -316,7 +316,7 @@ first clinic goes live — the automated suite does not replace it.
 | 15. Money | 2 | 0 | 3 | 0 |
 | 16. Hardware and physical space | 4 | 1 | 0 | 0 |
 | 17. Other verticals | 5 | 0 | 3 | 0 |
-| **Total (122 scenarios)** | **109** | **4** | **7** | **2** |
+| **Total (122 scenarios)** | **110** | **3** | **7** | **2** |
 
 **What is genuinely finished.** The queue engine holds up under adversarial
 input: issuing, calling, transferring, prioritising, pausing, closing,
