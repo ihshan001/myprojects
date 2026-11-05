@@ -103,8 +103,8 @@
   </div>
 
   <div class="legend">
-    <span><i class="dot built"></i> 112 built</span>
-    <span><i class="dot partial"></i> 11 partial</span>
+    <span><i class="dot built"></i> 113 built</span>
+    <span><i class="dot partial"></i> 10 partial</span>
     <span><i class="dot missing"></i> 0 not built</span>
   </div>
 
@@ -162,7 +162,7 @@
         </label>
         <p class="note">New: unpaid → claimed → paid/rejected. Only a super admin matching the bank can activate. Verified end to end.</p>
       </li>
-      <li class="item" data-status="partial">
+      <li class="item" data-status="built">
         <label class="row">
           <input type="checkbox" class="tick" data-id="Platform and business|Invoices and renewals">
           <span class="name">Invoices and renewals</span>
@@ -234,7 +234,7 @@
         </label>
         <p class="note">New: <code>/departments</code> with lead doctor, code, floor, deactivation. Assigns queues and doctors. Case-insensitive duplicate names refused.</p>
       </li>
-      <li class="item" data-status="partial">
+      <li class="item" data-status="built">
         <label class="row">
           <input type="checkbox" class="tick" data-id="Clinic administration|Consultation room management">
           <span class="name">Consultation room management</span>
@@ -274,7 +274,7 @@
         </label>
         <p class="note">New: weekday shift grid per doctor, intersected with clinic hours. No roster = follows clinic hours, and the UI says so.</p>
       </li>
-      <li class="item" data-status="partial">
+      <li class="item" data-status="built">
         <label class="row">
           <input type="checkbox" class="tick" data-id="Clinic administration|Queue configuration">
           <span class="name">Queue configuration</span>
@@ -478,9 +478,9 @@
         <label class="row">
           <input type="checkbox" class="tick" data-id="Doctor operations|Break management">
           <span class="name">Break management</span>
-          <span class="pill partial">Partial</span>
+          <span class="pill built">Built</span>
         </label>
-        <p class="note">A pause carries a reason and is visible on the board. There is no named break type or scheduled break calendar.</p>
+        <p class="note"><code>/breaks</code> with eight categories (lunch, tea, prayer, unscheduled, emergency, equipment, end of day, other), a measured duration written on end, a weekly plan per weekday and doctor, and a 7-day total by type. A second break on one queue is refused; an open break is never counted as zero minutes.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
@@ -1183,7 +1183,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (179 automated checks, 142 files lint-clean, healthcheck green).
+    application (185 automated checks, 145 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.

@@ -42,6 +42,7 @@ if ($u) {
                 ['/doctors', 'stethoscope', t('nav.doctors', 'Doctors & rooms'), $isActive('/doctors')],
                 ['/rooms', 'building', 'Rooms', $isActive('/rooms')],
                 ['/queues/config', 'switch', 'Queue settings', $isActive('/queues/config')],
+                ['/breaks', 'pause', 'Breaks', $isActive('/breaks')],
                 // Departments and the operating calendar are clinic structure;
                 // a doctor does not need to see them, reception does not edit
                 // them, and the page itself hides the write controls by role.

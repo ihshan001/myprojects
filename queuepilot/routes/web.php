@@ -28,6 +28,7 @@ use App\Http\Controllers\PatientController;
 use App\Http\Controllers\PublicController;
 use App\Http\Controllers\QueueController;
 use App\Http\Controllers\ReportController;
+use App\Http\Controllers\BreakController;
 use App\Http\Controllers\QueueConfigController;
 use App\Http\Controllers\RoomController;
 
@@ -105,6 +106,13 @@ Router::get('/doctors', [ClinicController::class, 'doctors'], ['auth' => true]);
 Router::post('/doctors', [ClinicController::class, 'storeDoctor'], ['auth' => true, 'ability' => 'doctor.manage']);
 // Rooms. Previously created only by signup and never editable.
 // Queue settings: the pattern tomorrow's queues are created from.
+// Breaks: operational start/end, plus the weekly plan an owner sets.
+Router::get('/breaks', [BreakController::class, 'index'], ['auth' => true]);
+Router::post('/breaks/start', [BreakController::class, 'start'], ['auth' => true, 'ability' => 'queue.operate']);
+Router::post('/breaks/end', [BreakController::class, 'end'], ['auth' => true, 'ability' => 'queue.operate']);
+Router::post('/breaks/schedule', [BreakController::class, 'schedule'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/breaks/schedule/{id}/remove', [BreakController::class, 'unschedule'], ['auth' => true, 'ability' => 'clinic.manage']);
+
 Router::get('/queues/config', [QueueConfigController::class, 'index'], ['auth' => true]);
 Router::post('/queues/config', [QueueConfigController::class, 'save'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/queues/{id}/rename', [QueueConfigController::class, 'rename'], ['auth' => true, 'ability' => 'clinic.manage']);

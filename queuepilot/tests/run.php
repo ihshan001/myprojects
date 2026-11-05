@@ -2856,6 +2856,105 @@ Assert::test('a queue that has issued a token cannot be renamed', function (): v
 });
 
 /* ------------------------------------------------------------------ */
+/* 46. breaks                                                          */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a break pauses the queue, blocks tokens and records a measured duration', function (): void {
+    seedTenant(70, 'break-clinic', 'Break Clinic');
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 70');
+    $service = new App\Services\BreakService();
+
+    $started = $service->start(70, $queueId, 'lunch', 'Consultant lunch');
+    Assert::true($started['ok'], 'the break starts');
+    Assert::same('paused', (string) Db::scalar('SELECT status FROM queues WHERE id = ?', [$queueId]));
+
+    // Token issuing must be refused while paused.
+    $patient = Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (70,?,?,?,?)',
+        ['BK' . bin2hex(random_bytes(2)), 'Paused Patient', '+94771300001', Db::now()]
+    );
+    $message = '';
+    try {
+        (new App\Domain\Queue\QueueService())->issueToken(70, $queueId, $patient, ['source' => 'walkin']);
+    } catch (\Throwable $e) {
+        $message = $e->getMessage();
+    }
+    Assert::contains('paused', $message, 'the refusal names the pause');
+
+    // Backdate so the measured length is not zero, then end it.
+    Db::run('UPDATE queue_breaks SET started_at = ? WHERE queue_id = ? AND ended_at IS NULL',
+        [date('Y-m-d H:i:s', time() - 900), $queueId]);
+    Db::run('UPDATE queues SET break_started_at = ? WHERE id = ?', [date('Y-m-d H:i:s', time() - 900), $queueId]);
+
+    $ended = $service->end(70, $queueId);
+    Assert::true($ended['ok'], 'the break ends');
+    Assert::same(15, (int) $ended['minutes'], 'fifteen minutes, measured');
+    Assert::same('open', (string) Db::scalar('SELECT status FROM queues WHERE id = ?', [$queueId]));
+
+    $row = Db::one('SELECT MINUTES FROM queue_breaks WHERE queue_id = ? ORDER BY id DESC LIMIT 1', [$queueId]);
+    Assert::same(15, (int) $row['minutes'], 'the duration is persisted');
+});
+
+Assert::test('a second break cannot open on the same queue', function (): void {
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 70');
+    $service = new App\Services\BreakService();
+
+    $service->start(70, $queueId, 'tea', 'First');
+    $second = $service->start(70, $queueId, 'emergency', 'Second');
+
+    Assert::false($second['ok'], 'the second start is refused');
+    Assert::contains('already has a break open', (string) $second['error'], 'and says so');
+    Assert::same(1, (int) Db::scalar('SELECT COUNT(*) FROM queue_breaks WHERE queue_id = ? AND ended_at IS NULL', [$queueId]), 'one open break, not two');
+
+    $service->end(70, $queueId);
+});
+
+Assert::test('ending a break that is not open is refused', function (): void {
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 70');
+    $service = new App\Services\BreakService();
+
+    $result = $service->end(70, $queueId);
+    Assert::false($result['ok']);
+    Assert::contains('not on a break', (string) $result['error']);
+});
+
+Assert::test('a break type outside the allowed set is refused', function (): void {
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 70');
+    $result = (new App\Services\BreakService())->start(70, $queueId, 'nap', '');
+    Assert::false($result['ok'], 'an unknown type is refused rather than coerced to unspecified');
+});
+
+Assert::test('the weekly summary adds only completed breaks', function (): void {
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 70');
+    $service = new App\Services\BreakService();
+
+    // One completed lunch of 15 minutes (from the first test) plus a new open
+    // one, which must not be counted as zero.
+    $service->start(70, $queueId, 'emergency', 'Still going');
+
+    $summary = $service->summary(70, date('Y-m-d', strtotime('-7 days')), Db::today());
+    Assert::same(15, $summary['total_minutes'], 'only the completed break contributes');
+
+    $service->end(70, $queueId);
+    Assert::same(0, (int) Db::scalar('SELECT COUNT(*) FROM queue_breaks WHERE queue_id = ? AND ended_at IS NULL', [$queueId]), 'nothing left open');
+});
+
+Assert::test('a planned break is validated and is not an actual break', function (): void {
+    $service = new App\Services\BreakService();
+
+    Assert::true($service->addScheduled(70, null, 1, '13:00', '13:30', 'lunch')['ok'], 'Monday lunch planned');
+    Assert::false($service->addScheduled(70, null, 1, '14:00', '13:00', 'lunch')['ok'], 'a backwards window is refused');
+    Assert::false($service->addScheduled(70, null, 9, '13:00', '13:30', 'lunch')['ok'], 'day 9 is not a weekday');
+
+    // A plan is not an event: the actual-break table is untouched.
+    Assert::same(0, (int) Db::scalar("SELECT COUNT(*) FROM queue_breaks WHERE clinic_id = 70 AND kind = 'lunch' AND substr(started_at,1,10) > ?", [Db::today()]), 'a plan never appears as history');
+
+    $monday = $service->scheduledFor(70, 1);
+    Assert::same(1, count($monday));
+    Assert::same(0, count($service->scheduledFor(70, 2)), 'not on Tuesday');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);
