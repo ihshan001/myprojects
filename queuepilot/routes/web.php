@@ -56,7 +56,7 @@ Router::get('/sw.js', [PublicController::class, 'serviceWorker']);
 
 /* ----------------------------------------------------------------- auth */
 Router::get('/login', [AuthController::class, 'showLogin']);
-Router::post('/login', [AuthController::class, 'login']);
+Router::post('/login', [AuthController::class, 'login'], ['csrf' => false]);
 // Step-up (second factor). Public by necessity: the session is deliberately
 // not authenticated until these succeed.
 Router::get('/login/2fa', [AuthController::class, 'showTwoFactor']);
