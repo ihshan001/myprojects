@@ -3880,6 +3880,63 @@ Assert::test('a patient can move their own booking, and the day-cancel returns e
 });
 
 /* ------------------------------------------------------------------ */
+/* 57. The waiting-room kiosk                                          */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a kiosk credential is separate from the display key and never sets a priority', function (): void {
+    seedTenant(93, 'kiosk', 'Kiosk Clinic');
+    $kiosk = new App\Services\KioskService();
+
+    Assert::same(null, $kiosk->keyFor(93), 'a clinic starts with no kiosk');
+    $key = $kiosk->rotate(93);
+    Assert::same(48, strlen($key), 'the key is 192 bits, not a short code somebody can guess');
+    Assert::same(93, $kiosk->clinicForKey($key), 'and it resolves to its clinic');
+
+    $rotated = $kiosk->rotate(93);
+    Assert::false($rotated === $key, 'issuing again replaces the key');
+    Assert::same(null, $kiosk->clinicForKey($key), 'so the old one stops working, which is the point of rotating');
+    Assert::same(93, $kiosk->clinicForKey($rotated), 'and the new one works');
+
+    // The kiosk key must not be the display key: a leaked lobby screen would
+    // otherwise let a stranger issue tokens.
+    $display = Db::scalar("SELECT value FROM settings WHERE scope='clinic' AND owner_id=93 AND key_name='display_token'");
+    Assert::true($display === null || $display !== $rotated, 'the kiosk key is not the display key');
+
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 93 ORDER BY id LIMIT 1');
+    $result = $kiosk->issue(93, $queueId, 'Kiosk Patient', '0771238888');
+    Assert::true($result['ok'], 'a walk-in gets a token');
+    Assert::true(strlen((string) $result['token']) > 0, 'with a token label');
+
+    $entry = Db::one(
+        'SELECT e.priority, e.priority_reason, e.source FROM queue_entries e
+           JOIN patients p ON p.id = e.patient_id
+          WHERE e.queue_id = ? ORDER BY e.id DESC LIMIT 1',
+        [$queueId]
+    );
+    Assert::same('kiosk', (string) $entry['source'], 'the arrival is recorded as a kiosk arrival');
+    Assert::same(0, (int) $entry['priority'], 'and the kiosk cannot raise its own priority');
+    Assert::same(null, $entry['priority_reason'], 'nor invent a reason for one');
+
+    $kiosk->revoke(93);
+    Assert::same(null, $kiosk->clinicForKey($rotated), 'switching the kiosk off invalidates the key outright');
+});
+
+Assert::test('a kiosk refuses a session that is not open today', function (): void {
+    seedTenant(94, 'kiosk-closed', 'Kiosk Closed Clinic');
+    $kiosk = new App\Services\KioskService();
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 94 ORDER BY id LIMIT 1');
+
+    // A session closed for the day must not appear in the kiosk's choices, and
+    // must not issue even if the id is posted by hand.
+    Db::run("UPDATE queues SET status = 'closed' WHERE id = ?", [$queueId]);
+    Assert::same([], $kiosk->openQueues(94), 'a closed session is not offered');
+
+    $refused = $kiosk->issue(94, $queueId, 'Too Late', '');
+    Assert::false($refused['ok'], 'and posting its id directly is refused');
+    Assert::contains('not open', (string) $refused['message'], 'with a sentence a patient can act on, not a stack trace');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

@@ -5,8 +5,10 @@ namespace App\Http\Controllers;
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Core\Session;
 use App\Core\Str;
 use App\Services\AuditService;
+use App\Services\KioskService;
 
 /**
  * Waiting-room screen.
@@ -41,6 +43,8 @@ final class DisplayController
                 [$clinicId, Db::today()]
             ),
             'canRotate' => Auth::can('clinic.manage'),
+            'kioskKey' => (new KioskService())->keyFor($clinicId),
+            'kioskNewKey' => Session::takeFlash('kiosk_new_key'),
         ], false);
     }
 
@@ -96,6 +100,40 @@ final class DisplayController
             'publicScreen' => true,
             'departmentName' => $departmentName,
         ], false);
+    }
+
+    /**
+     * Turn the kiosk on for this clinic and show the address to open on the
+     * tablet.
+     *
+     * Issuing twice rotates: the second call replaces the key the first one
+     * printed. That is the intended repair when a tablet is replaced or a key
+     * is suspected to have been photographed, and it is why this action says
+     * so rather than quietly succeeding.
+     */
+    public function kioskIssuing(): void
+    {
+        $clinicId = Auth::clinicId();
+        if ($clinicId === null) {
+            abort(403, 'Not available.');
+        }
+        $key = (new KioskService())->rotate($clinicId);
+        (new AuditService())->log($clinicId, 'kiosk.key_issued', 'setting', null);
+        flash('success', 'Kiosk ready. Open the address below on the tablet — the previous code, if any, has stopped working.');
+        Session::flash('kiosk_new_key', $key);
+        redirect('/display');
+    }
+
+    public function kioskRevoke(): void
+    {
+        $clinicId = Auth::clinicId();
+        if ($clinicId === null) {
+            abort(403, 'Not available.');
+        }
+        (new KioskService())->revoke($clinicId);
+        (new AuditService())->log($clinicId, 'kiosk.key_revoked', 'setting', null);
+        flash('success', 'Kiosk switched off. Any tablet holding the old address can no longer issue tokens.');
+        redirect('/display');
     }
 
     public function rotate(): void

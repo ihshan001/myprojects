@@ -212,6 +212,10 @@ foreach ($public as $route) {
 $expectedPublicPosts = [
     '/login', '/register', '/book/{slug}', '/t/{token}/cancel', '/t/{token}/reschedule',
     '/a/{token}/reschedule', '/a/{token}/cancel',
+    // The lobby kiosk: a 192-bit key, CSRF enforced by the router, and it can
+    // only add a walk-in at the default weight — it cannot read, call, move or
+    // prioritise anything that already exists.
+    '/kiosk/{key}',
     '/forgot-password', '/reset-password/{token}', '/invite/{token}',
     '/login/2fa', '/login/2fa/cancel', '/logout', '/locale',
 ];

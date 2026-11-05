@@ -554,7 +554,7 @@
           <span class="name">Token display</span>
           <span class="pill built">Built</span>
         </label>
-        <p class="note"><code>/display/{key}</code> board plus <code>/api/display/{key}</code> poll.</p>
+        <p class="note"><code>/display/{key}</code> board plus <code>/api/display/{key}</code> poll. Under it, the same page sets up the <b>self check-in kiosk</b>: a lobby tablet at <code>/kiosk/{key}</code> that issues its own walk-in numbers, offers only sessions open today, cannot set a priority, never lists another patient, and clears its receipt after 45 seconds. Its 192-bit key is deliberately separate from the display's, so a photographed board cannot mint tokens. Verified live — issued A008 with a correct ahead-count and refreshing the receipt minted nothing further.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">

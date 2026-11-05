@@ -25,6 +25,7 @@ use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\SupportController;
 use App\Http\Controllers\PatientController;
+use App\Http\Controllers\KioskController;
 use App\Http\Controllers\PublicController;
 use App\Http\Controllers\QueueController;
 use App\Http\Controllers\ReportController;
@@ -98,6 +99,9 @@ Router::post('/queue/step', [QueueController::class, 'markStep'], ['auth' => tru
 Router::post('/queue/session', [QueueController::class, 'sessionControl'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/delay', [QueueController::class, 'announceDelay'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::get('/display', [DisplayController::class, 'screen'], ['auth' => true]);
+Router::post('/display/rotate', [DisplayController::class, 'rotate'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/display/kiosk', [DisplayController::class, 'kioskIssuing'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/display/kiosk/off', [DisplayController::class, 'kioskRevoke'], ['auth' => true, 'ability' => 'clinic.manage']);
 
 /* ------------------------------------------------------- patients, appts */
 Router::get('/patients', [PatientController::class, 'index'], ['auth' => true, 'ability' => 'patient.manage']);
@@ -253,6 +257,11 @@ Router::get('/board/{key}', [DisplayController::class, 'publicScreen']);
 // Online booking: 404 for clinics that have not opted in (see PublicController).
 Router::get('/book/{slug}', [PublicController::class, 'bookForm']);
 Router::post('/book/{slug}', [PublicController::class, 'book']);
+// The waiting-room kiosk. The 48-hex segment is the credential (see
+// KioskService); CSRF stays on, because the screen is a public terminal and a
+// page on the same network must not be able to mint tokens through it.
+Router::get('/kiosk/{key}', [KioskController::class, 'show'], ['csrf' => false]);
+Router::post('/kiosk/{key}', [KioskController::class, 'issue']);
 // A booked patient's own link, signed over the id and the current time (see
 // AppointmentService::manageUrl). No login: the signature is the credential.
 Router::get('/a/{token}', [PublicController::class, 'manageAppointment'], ['csrf' => false]);
