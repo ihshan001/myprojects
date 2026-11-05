@@ -5,7 +5,7 @@ codebase actually does. It is deliberately blunt: a feature is **Built** only
 if I ran it against the live server, **Partial** if something exists but does
 not meet the scenario as written, and **Not built** otherwise.
 
-Verified on 2026-11-05 against commit `HEAD` (188 automated checks, 145 files
+Verified on 2026-11-05 against commit `HEAD` (194 automated checks, 148 files
 lint-clean, healthcheck all-good, all five demo logins re-checked).
 
 > **Read this first.** The blueprint describes a mature product with billing,
@@ -88,6 +88,7 @@ lint-clean, healthcheck all-good, all five demo logins re-checked).
 | The reason is mandatory and recorded | ✅ | Blank reason is refused; reason lands in the audit log |
 | The queue reorders immediately | ✅ | Sort weight recomputed in the same transaction |
 | Overuse is visible | ◐ | Every override is audited, but there is no dashboard that summarises override frequency per staff member |
+| A standing rule reorders arrivals without a human flagging each one | ✅ | **Built.** `/queues/priority-rules`. A rule matches on source, queue kind, doctor, patient age and hour of day and carries a boost or a penalty with the clinical reason. Verified live: an under-fives rule put two later children (`A002`, `A003`) ahead of an earlier adult (`A001`, −2 from a routine-review penalty). The strongest match wins and does not stack, a hand-set priority at the desk still overrides (7 beats the rule's 5), a rule can be turned off or deleted while the entries it already decided keep their recorded reason, and a patient with no birth year never matches an age rule |
 
 ## 6. Transfers between services
 
@@ -272,7 +273,7 @@ first clinic goes live — the automated suite does not replace it.
 | Appointments | 8 | 0 | 1 |
 | Call & consult | 7 | 1 | 0 |
 | Disruption | 6 | 0 | 0 |
-| Priority | 4 | 1 | 0 |
+| Priority | 5 | 1 | 0 |
 | Transfers | 4 | 0 | 1 |
 | Tracking | 5 | 0 | 1 |
 | Displays | 5 | 0 | 0 |
@@ -284,7 +285,7 @@ first clinic goes live — the automated suite does not replace it.
 | Data & ops | 6 | 1 | 0 |
 | Money | 2 | 0 | 3 |
 | Hardware | 2 | 1 | 2 |
-| **Total** | **89** | **7** | **10** |
+| **Total** | **90** | **7** | **10** |
 
 **What is genuinely finished.** The queue engine holds up under adversarial
 input: issuing, calling, transferring, prioritising, pausing, closing,
@@ -292,7 +293,8 @@ cancelling and auditing. Around it, the administration layer is now real rather
 than sketched — departments, per-doctor rosters, holidays, room management,
 support tickets with a platform queue, monthly invoicing, a group roll-up,
 retention and purge, email verification, per-department displays, thermal slips,
-and a reporting page that answers the questions a clinic manager asks.
+priority rules that reorder arrivals without anyone flagging each patient, and a
+reporting page that answers the questions a clinic manager asks.
 
 **What is honestly partial, and why.** Four kinds of thing remain:
 

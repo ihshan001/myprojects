@@ -43,9 +43,19 @@
         <?php endforeach; ?>
       </dl>
       <?php if (!empty($entry['priority_reason'])): ?>
-        <div class="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-800">
-          <b>Priority reason:</b> <?= e($entry['priority_reason']) ?>
-        </div>
+        <?php if (!empty($entry['priority_rule_id'])): ?>
+          <!-- A standing rule decided this, not a person. Say so; staff who
+               see a red alert on a routine patient will look for an emergency
+               that does not exist. -->
+          <div class="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-[11px] text-indigo-900">
+            <b>Priority set by rule:</b> <?= e($entry['priority_reason']) ?>
+            <div class="mt-0.5 text-indigo-700">A standing rule at this clinic. Staff can still override it on this patient.</div>
+          </div>
+        <?php else: ?>
+          <div class="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-800">
+            <b>Priority reason:</b> <?= e($entry['priority_reason']) ?>
+          </div>
+        <?php endif; ?>
       <?php endif; ?>
       <?php if (!empty($entry['note'])): ?>
         <div class="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-slate-600">

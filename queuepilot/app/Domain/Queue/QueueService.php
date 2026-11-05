@@ -30,6 +30,7 @@ final class QueueService
         private readonly QueueRepository $repo = new QueueRepository(),
         private readonly AuditService $audit = new AuditService(),
         private readonly NotificationService $notifications = new NotificationService(),
+        private readonly \App\Services\PriorityRuleService $priorityRules = new \App\Services\PriorityRuleService(),
     ) {}
 
     /* ------------------------------------------------------------------ */
@@ -114,8 +115,40 @@ final class QueueService
 
             Db::run('UPDATE queues SET last_token_no = ? WHERE id = ? AND clinic_id = ?', [$next, $queueId, $clinicId]);
 
-            $priority = (int) ($opts['priority'] ?? 0);
             $source = (string) ($opts['source'] ?? 'walkin');
+
+            // Priority rules. A clinic that always sees under-fives first
+            // writes the rule once instead of flagging every child by hand;
+            // the rule's reason is copied onto the entry so an ordering
+            // nobody typed is still explainable afterwards. A priority passed
+            // explicitly by staff always wins — the rule engine fills a gap,
+            // it does not overrule a clinician standing at the desk.
+            $ruleId = null;
+            $ruleReason = null;
+            if (array_key_exists('priority', $opts) && $opts['priority'] !== null) {
+                $priority = (int) $opts['priority'];
+            } else {
+                $birthYear = Db::scalar('SELECT birth_year FROM patients WHERE id = ? AND clinic_id = ?', [$patientId, $clinicId]);
+                $matched = $this->priorityRules->evaluate($clinicId, [
+                    'queue_id'  => $queueId,
+                    'kind'      => $queue['kind'] ?? null,
+                    'doctor_id' => $queue['doctor_id'] ?? null,
+                    'source'    => $source,
+                    'age'       => $this->priorityRules->ageOf($birthYear !== null ? (int) $birthYear : null),
+                    'hour'      => (int) date('G'),
+                ]);
+                $priority = $matched['priority'];
+                $ruleId = $matched['rule_id'];
+                $ruleReason = $matched['rule_id'] !== null
+                    ? $matched['reason'] . ' (' . $matched['rule_name'] . ')'
+                    : null;
+                if ($ruleId !== null) {
+                    $this->audit->log($clinicId, 'queue.priority_rule_applied', 'queue_entry', null, [
+                        'rule_id' => $ruleId, 'rule' => $matched['rule_name'],
+                        'priority' => $priority, 'source' => $source,
+                    ]);
+                }
+            }
             // Ordering policy is clinic-defined (Settings -> queue policy) and
             // lives on the clinic row. Callers may override per call; otherwise
             // the clinic's own weights apply, so a clinic that treats walk-ins
@@ -134,14 +167,14 @@ final class QueueService
             $entryId = Db::insert(
                 'INSERT INTO queue_entries
                    (clinic_id, queue_id, patient_id, appointment_id, token_no, token_label, status,
-                    priority, priority_reason, sort_weight, source, joined_at, note, created_by,
-                    track_token, track_expires_at, version)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)',
+                    priority, priority_reason, priority_rule_id, sort_weight, source, joined_at,
+                    note, created_by, track_token, track_expires_at, version)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)',
                 [
                     $clinicId, $queueId, $patientId,
                     $opts['appointment_id'] ?? null,
                     $next, $label, QueueStateMachine::WAITING,
-                    $priority, $opts['priority_reason'] ?? null,
+                    $priority, $opts['priority_reason'] ?? $ruleReason, $ruleId,
                     $weight, $source, Db::now(),
                     $opts['note'] ?? null, Auth::id(),
                     $token, $expires,

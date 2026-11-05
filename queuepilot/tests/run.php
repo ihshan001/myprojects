@@ -3015,6 +3015,134 @@ Assert::test('a patient already seen is not messaged about a delay', function ()
 });
 
 /* ------------------------------------------------------------------ */
+/* 48. priority rules                                                  */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a standing rule reorders a new token and records its reason', function (): void {
+    seedTenant(81, 'rule-clinic', 'Rule Clinic');
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 81');
+    $rules = new App\Services\PriorityRuleService();
+
+    $rules->create(81, ['name' => 'Under-fives first', 'effect' => 5, 'max_age' => 5,
+        'reason' => 'Child under five — see before adults'], null);
+
+    $kid = Db::insert('INSERT INTO patients (clinic_id, code, full_name, birth_year, created_at) VALUES (81,?,?,?,?)',
+        ['RK1', 'Kid One', (int) date('Y') - 3, Db::now()]);
+    $adult = Db::insert('INSERT INTO patients (clinic_id, code, full_name, birth_year, created_at) VALUES (81,?,?,?,?)',
+        ['RA1', 'Adult One', (int) date('Y') - 40, Db::now()]);
+
+    $queue = new App\Domain\Queue\QueueService();
+    $first = $queue->issueToken(81, $queueId, $adult, []);
+    $second = $queue->issueToken(81, $queueId, $kid, []);
+
+    $kidRow = Db::one('SELECT priority, priority_reason, priority_rule_id FROM queue_entries WHERE id = ?', [$second['entry_id']]);
+    Assert::same(5, (int) $kidRow['priority'], 'the child carries the rule priority');
+    Assert::contains('Child under five', (string) $kidRow['priority_reason'], 'the rule reason is copied onto the entry');
+    Assert::same((int) Db::scalar('SELECT id FROM priority_rules WHERE clinic_id = 81'), (int) $kidRow['priority_rule_id'], 'the entry names the rule that decided it');
+
+    $adultRow = Db::one('SELECT priority, priority_rule_id FROM queue_entries WHERE id = ?', [$first['entry_id']]);
+    Assert::same(0, (int) $adultRow['priority'], 'an adult matches no rule');
+    Assert::same(null, $adultRow['priority_rule_id'], 'and names no rule');
+
+    Assert::same(1, $queue->positionFor(Db::one('SELECT * FROM queue_entries WHERE id = ?', [$second['entry_id']]), 81),
+        'the later child sorts ahead of the earlier adult');
+});
+
+Assert::test('the strongest boost wins and boosts never stack', function (): void {
+    $rules = new App\Services\PriorityRuleService();
+    $rules->create(81, ['name' => 'Morning boost', 'effect' => 3, 'max_age' => 5,
+        'from_hour' => 0, 'to_hour' => 24, 'reason' => 'Morning squeeze'], null);
+
+    $match = $rules->evaluate(81, ['source' => 'walkin', 'kind' => 'consultation', 'age' => 4, 'hour' => 9]);
+    Assert::same(5, $match['priority'], 'two matching boosts resolve to the stronger one, not their sum');
+    Assert::contains('Child under five', $match['reason'], 'and the winning rule supplies the reason');
+});
+
+Assert::test('a hand-set priority and a penalty both behave', function (): void {
+    $rules = new App\Services\PriorityRuleService();
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 81');
+
+    // A penalty is a clinical decision too: routine reviews may wait.
+    $rules->create(81, ['name' => 'Routine last', 'effect' => -2, 'source' => 'walkin',
+        'reason' => 'Routine review — may wait'], null);
+    $routine = Db::insert('INSERT INTO patients (clinic_id, code, full_name, birth_year, created_at) VALUES (81,?,?,?,?)',
+        ['RR1', 'Routine One', (int) date('Y') - 30, Db::now()]);
+    $queue = new App\Domain\Queue\QueueService();
+    $penalised = $queue->issueToken(81, $queueId, $routine, []);
+    Assert::same(-2, (int) Db::scalar('SELECT priority FROM queue_entries WHERE id = ?', [$penalised['entry_id']]),
+        'a negative rule pushes a routine patient behind');
+
+    // A clinician standing at the desk outranks any rule.
+    $override = Db::insert('INSERT INTO patients (clinic_id, code, full_name, birth_year, created_at) VALUES (81,?,?,?,?)',
+        ['RO1', 'Override One', (int) date('Y') - 4, Db::now()]);
+    $manual = $queue->issueToken(81, $queueId, $override, ['priority' => 7, 'priority_reason' => 'Bleeding']);
+    $row = Db::one('SELECT priority, priority_reason, priority_rule_id FROM queue_entries WHERE id = ?', [$manual['entry_id']]);
+    Assert::same(7, (int) $row['priority'], 'the manual priority wins over the under-fives rule');
+    Assert::same(null, $row['priority_rule_id'], 'and no rule is credited with it');
+});
+
+Assert::test('a rule stops applying when it is turned off or deleted', function (): void {
+    $rules = new App\Services\PriorityRuleService();
+    $ruleId = (int) Db::scalar("SELECT id FROM priority_rules WHERE clinic_id = 81 AND name = 'Under-fives first'");
+
+    $rules->setActive(81, $ruleId, false);
+    $match = $rules->evaluate(81, ['source' => 'walkin', 'age' => 4, 'hour' => 9]);
+    Assert::true($match['rule_id'] !== $ruleId, 'an inactive rule stops deciding, even if another rule still matches');
+
+    $rules->setActive(81, $ruleId, true);
+    Assert::same($ruleId, $rules->evaluate(81, ['source' => 'walkin', 'age' => 4, 'hour' => 9])['rule_id'],
+        'turning it back on makes it decide again');
+
+    Assert::true($rules->delete(81, $ruleId), 'the rule is deleted');
+    Assert::same(0, (int) Db::scalar('SELECT COUNT(*) FROM priority_rules WHERE id = ?', [$ruleId]), 'and is gone');
+});
+
+Assert::test('a rule cannot be saved half-written or pointed at another clinic', function (): void {
+    $rules = new App\Services\PriorityRuleService();
+    $bad = [
+        ['name' => '', 'effect' => 2, 'reason' => 'x'],
+        ['name' => 'No reason', 'effect' => 2, 'reason' => ''],
+        ['name' => 'Zero effect', 'effect' => 0, 'reason' => 'x'],
+        ['name' => 'Backwards hours', 'effect' => 2, 'reason' => 'x', 'from_hour' => 15, 'to_hour' => 9],
+        ['name' => 'Half a window', 'effect' => 2, 'reason' => 'x', 'from_hour' => 9],
+        ['name' => 'Backwards ages', 'effect' => 2, 'reason' => 'x', 'min_age' => 40, 'max_age' => 5],
+        ['name' => 'Unknown source', 'effect' => 2, 'reason' => 'x', 'source' => 'fax'],
+    ];
+    foreach ($bad as $i => $input) {
+        $refused = false;
+        try {
+            $rules->create(81, $input, null);
+        } catch (\InvalidArgumentException) {
+            $refused = true;
+        }
+        Assert::true($refused, 'input ' . $i . ' (' . ($input['name'] ?: 'unnamed') . ') is refused');
+    }
+
+    $foreignQueue = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 1 LIMIT 1');
+    $refused = false;
+    try {
+        $rules->create(81, ['name' => 'Foreign', 'effect' => 2, 'reason' => 'x', 'queue_id' => $foreignQueue], null);
+    } catch (\InvalidArgumentException) {
+        $refused = true;
+    }
+    Assert::true($refused, "another clinic's queue cannot be targeted");
+});
+
+Assert::test('a patient with no birth year never matches an age rule', function (): void {
+    $rules = new App\Services\PriorityRuleService();
+    $rules->create(81, ['name' => 'Seniors', 'effect' => 4, 'min_age' => 65, 'reason' => 'Senior patient'], null);
+
+    $seniors = (int) Db::scalar("SELECT id FROM priority_rules WHERE clinic_id = 81 AND name = 'Seniors'");
+
+    Assert::same(null, $rules->ageOf(null), 'no birth year means no age');
+    Assert::same($seniors, $rules->evaluate(81, ['source' => 'appointment', 'age' => 70, 'hour' => 9])['rule_id'],
+        'a known 70-year-old matches');
+    Assert::same(null, $rules->evaluate(81, ['source' => 'appointment', 'age' => null, 'hour' => 9])['rule_id'],
+        'an unknown age matches nothing');
+    Assert::same(70, (int) (new App\Services\PriorityRuleService())->ageOf((int) date('Y') - 70), 'age is derived from the birth year');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

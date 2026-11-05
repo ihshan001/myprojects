@@ -29,6 +29,7 @@ use App\Http\Controllers\PublicController;
 use App\Http\Controllers\QueueController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\BreakController;
+use App\Http\Controllers\PriorityRuleController;
 use App\Http\Controllers\QueueConfigController;
 use App\Http\Controllers\RoomController;
 
@@ -116,6 +117,12 @@ Router::post('/breaks/schedule/{id}/remove', [BreakController::class, 'unschedul
 Router::get('/queues/config', [QueueConfigController::class, 'index'], ['auth' => true]);
 Router::post('/queues/config', [QueueConfigController::class, 'save'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/queues/{id}/rename', [QueueConfigController::class, 'rename'], ['auth' => true, 'ability' => 'clinic.manage']);
+
+// Priority rules — the standing clinical decisions the desk used to retype.
+Router::get('/queues/priority-rules', [PriorityRuleController::class, 'index'], ['auth' => true]);
+Router::post('/queues/priority-rules', [PriorityRuleController::class, 'save'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/queues/priority-rules/{id}/toggle', [PriorityRuleController::class, 'toggle'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/queues/priority-rules/{id}/delete', [PriorityRuleController::class, 'delete'], ['auth' => true, 'ability' => 'clinic.manage']);
 
 Router::get('/rooms', [RoomController::class, 'index'], ['auth' => true]);
 Router::post('/rooms', [RoomController::class, 'store'], ['auth' => true, 'ability' => 'doctor.manage']);

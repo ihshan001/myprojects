@@ -42,6 +42,7 @@ if ($u) {
                 ['/doctors', 'stethoscope', t('nav.doctors', 'Doctors & rooms'), $isActive('/doctors')],
                 ['/rooms', 'building', 'Rooms', $isActive('/rooms')],
                 ['/queues/config', 'switch', 'Queue settings', $isActive('/queues/config')],
+                ['/queues/priority-rules', 'alert', 'Priority rules', $isActive('/queues/priority-rules')],
                 ['/breaks', 'pause', 'Breaks', $isActive('/breaks')],
                 // Departments and the operating calendar are clinic structure;
                 // a doctor does not need to see them, reception does not edit

@@ -474,7 +474,7 @@
         </label>
         <p class="note"><code>paused</code> with the pause interval excluded from the wait average.</p>
       </li>
-      <li class="item" data-status="partial">
+      <li class="item" data-status="built">
         <label class="row">
           <input type="checkbox" class="tick" data-id="Doctor operations|Break management">
           <span class="name">Break management</span>
@@ -642,13 +642,13 @@
         </label>
         <p class="note">Both feed one sort weight (<code>appointment_weight</code> / <code>walkin_weight</code>). There is no per-service rule beyond those two numbers.</p>
       </li>
-      <li class="item" data-status="partial">
+      <li class="item" data-status="built">
         <label class="row">
           <input type="checkbox" class="tick" data-id="Queue engine|Configurable priority rules">
           <span class="name">Configurable priority rules</span>
-          <span class="pill partial">Partial</span>
+          <span class="pill built">Built</span>
         </label>
-        <p class="note">Priority is a manual override with a reason. Sort weights are configurable; there is no rule builder.</p>
+        <p class="note"><code>/queues/priority-rules</code>: rules match on source, queue kind, doctor, patient age and hour of day, and carry a boost (+9 ahead) or a penalty (&minus;5 behind). The strongest match wins and never stacks, the reason is copied onto the entry, a hand-set priority still overrides, and a rule can be turned off without erasing entries it already decided.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
@@ -1183,7 +1183,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (188 automated checks, 145 files lint-clean, healthcheck green).
+    application (194 automated checks, 148 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.
