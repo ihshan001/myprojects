@@ -2561,6 +2561,65 @@ Assert::test('the service worker never serves a cached api response', function (
 });
 
 /* ------------------------------------------------------------------ */
+/* 42. organisations                                                   */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a group is created with a unique slug and its creation is audited', function (): void {
+    $service = new App\Services\OrganisationService();
+    $name = 'Test Group ' . bin2hex(random_bytes(2));
+
+    $first = $service->create($name, 'owner@example.lk', 'probe');
+    Assert::true($first['ok'], 'the group is created');
+
+    $again = $service->create($name, null, null);
+    Assert::false($again['ok'], 'the same name is refused');
+    Assert::contains('already exists', (string) $again['error'], 'and says why');
+
+    Assert::same(1, (int) Db::scalar(
+        "SELECT COUNT(*) FROM audit_logs WHERE action = 'organisation.created' AND entity_id = ?",
+        [(int) $first['id']]
+    ), 'creation is audited');
+});
+
+Assert::test('attaching a clinic gives it a branch row and a roll-up', function (): void {
+    $service = new App\Services\OrganisationService();
+    $created = $service->create('Rollup Probe ' . bin2hex(random_bytes(2)));
+    $orgId = (int) $created['id'];
+
+    Db::run('UPDATE clinics SET organisation_id = NULL WHERE id = 1');
+    $attached = $service->attachClinic($orgId, 1);
+    Assert::true($attached['ok'], 'the clinic is attached');
+
+    $branches = $service->branches($orgId);
+    Assert::same(1, count($branches), 'one branch listed');
+    Assert::same(1, (int) $branches[0]['id']);
+
+    $rollup = $service->rollup($orgId);
+    Assert::same(1, (int) $rollup['branches'], 'the roll-up counts the branch');
+    Assert::true(array_key_exists('seen_today', $rollup), 'and carries the day counts');
+
+    // Put it back so later tests see the fixture they expect.
+    Db::run('UPDATE clinics SET organisation_id = NULL WHERE id = 1');
+});
+
+Assert::test('a clinic in one group is not listed under another', function (): void {
+    $service = new App\Services\OrganisationService();
+    $a = $service->create('Alpha Group ' . bin2hex(random_bytes(2)));
+    $b = $service->create('Beta Group ' . bin2hex(random_bytes(2)));
+
+    Db::run('UPDATE clinics SET organisation_id = NULL WHERE id = 2');
+    $service->attachClinic((int) $a['id'], 2);
+
+    $inA = array_map(static fn (array $r): int => (int) $r['id'], $service->branches((int) $a['id']));
+    $inB = array_map(static fn (array $r): int => (int) $r['id'], $service->branches((int) $b['id']));
+
+    Assert::same([2], $inA, 'clinic 2 is a branch of A');
+    Assert::same([], $inB, 'and invisible to B');
+
+    Db::run('UPDATE clinics SET organisation_id = NULL WHERE id = 2');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

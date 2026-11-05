@@ -8,6 +8,7 @@ declare(strict_types=1);
 
 use App\Core\Router;
 use App\Http\Controllers\AdminController;
+use App\Http\Controllers\AdminOrganisationController;
 use App\Http\Controllers\AdminBillingController;
 use App\Http\Controllers\ApiController;
 use App\Http\Controllers\AppointmentController;
@@ -172,6 +173,12 @@ Router::get('/admin/billing', [AdminBillingController::class, 'index'], ['auth' 
 // The platform side of support. Separate paths from the clinic view: a super
 // admin has no clinic, and sharing one path would mean every method guarding
 // against its own audience.
+// Groups: the screen that creates an organisation, which /organisation reads.
+Router::get('/admin/organisations', [AdminOrganisationController::class, 'index'], ['auth' => true, 'roles' => ['super_admin']]);
+Router::post('/admin/organisations', [AdminOrganisationController::class, 'store'], ['auth' => true, 'roles' => ['super_admin']]);
+Router::post('/admin/organisations/{id}/attach', [AdminOrganisationController::class, 'attach'], ['auth' => true, 'roles' => ['super_admin']]);
+Router::post('/admin/organisations/{id}/detach', [AdminOrganisationController::class, 'detach'], ['auth' => true, 'roles' => ['super_admin']]);
+
 Router::get('/admin/support', [SupportController::class, 'index'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::get('/admin/support/{id}', [SupportController::class, 'show'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/admin/support/{id}/reply', [SupportController::class, 'reply'], ['auth' => true, 'roles' => ['super_admin']]);

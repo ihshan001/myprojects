@@ -22,6 +22,8 @@ if ($u) {
                 ['/admin/clinics', 'building', 'Clinics', $isActive('/admin/clinics')],
                 ['/admin/plans', 'card', 'Plans & billing', $isActive('/admin/plans')],
                 ['/admin/billing', 'check-circle', 'Payment verification', $isActive('/admin/billing')],
+                ['/admin/support', 'lifebuoy', 'Support queue', $isActive('/admin/support')],
+                ['/admin/organisations', 'users', 'Groups', $isActive('/admin/organisations')],
             ],
         ];
     } else {

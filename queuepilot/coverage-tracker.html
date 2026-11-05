@@ -103,8 +103,8 @@
   </div>
 
   <div class="legend">
-    <span><i class="dot built"></i> 105 built</span>
-    <span><i class="dot partial"></i> 18 partial</span>
+    <span><i class="dot built"></i> 107 built</span>
+    <span><i class="dot partial"></i> 16 partial</span>
     <span><i class="dot missing"></i> 0 not built</span>
   </div>
 
@@ -294,9 +294,9 @@
         <label class="row">
           <input type="checkbox" class="tick" data-id="Clinic administration|Multi-branch organisation support">
           <span class="name">Multi-branch organisation support</span>
-          <span class="pill partial">Partial</span>
+          <span class="pill built">Built</span>
         </label>
-        <p class="note"><code>organisations</code> table, owner roll-up at <code>/organisation</code>, clinics carry <code>organisation_id</code>. <strong>No admin UI to create an organisation</strong> — seeded by tool.</p>
+        <p class="note">Groups are created and branches attached from <code>/admin/organisations</code>. Each branch stays a separate tenant — the roll-up shows counts, never another branch's patients.</p>
       </li>
     </ul>
   </section>
@@ -1126,9 +1126,9 @@
         <label class="row">
           <input type="checkbox" class="tick" data-id="Future business expansion|Multi-branch organisations">
           <span class="name">Multi-branch organisations</span>
-          <span class="pill partial">Partial</span>
+          <span class="pill built">Built</span>
         </label>
-        <p class="note">Data model, roll-up and org-scoped clinics exist. No admin UI to create or edit an organisation.</p>
+        <p class="note"><code>/admin/organisations</code> creates groups, attaches and detaches branches with audit rows. Branch admins get the read-only roll-up at <code>/organisation</code> — counts only, verified that a branch admin sees zero identifiers from another group.</p>
       </li>
       <li class="item" data-status="partial">
         <label class="row">
@@ -1183,7 +1183,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (164 automated checks, 133 files lint-clean, healthcheck green).
+    application (167 automated checks, 135 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.
