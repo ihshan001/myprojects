@@ -164,6 +164,13 @@ Router::post('/admin/plans', [AdminController::class, 'savePlan'], ['auth' => tr
 // Payment verification. A clinic's claim is only money-in-the-bank once a
 // platform administrator matches it; this is that screen.
 Router::get('/admin/billing', [AdminBillingController::class, 'index'], ['auth' => true, 'roles' => ['super_admin']]);
+// The platform side of support. Separate paths from the clinic view: a super
+// admin has no clinic, and sharing one path would mean every method guarding
+// against its own audience.
+Router::get('/admin/support', [SupportController::class, 'index'], ['auth' => true, 'roles' => ['super_admin']]);
+Router::get('/admin/support/{id}', [SupportController::class, 'show'], ['auth' => true, 'roles' => ['super_admin']]);
+Router::post('/admin/support/{id}/reply', [SupportController::class, 'reply'], ['auth' => true, 'roles' => ['super_admin']]);
+Router::post('/admin/support/{id}/status', [SupportController::class, 'setStatus'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/admin/billing/{id}/verify', [AdminBillingController::class, 'verify'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/admin/billing/{id}/reject', [AdminBillingController::class, 'reject'], ['auth' => true, 'roles' => ['super_admin']]);
 

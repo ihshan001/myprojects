@@ -31,8 +31,76 @@ final class SupportController
         return $id;
     }
 
+    /** A super admin is the platform, not a tenant. */
+    private function isPlatform(): bool
+    {
+        return Auth::clinicId() === null && Auth::can('platform.manage');
+    }
+
+    /**
+     * Change a ticket's status. Platform-only: a clinic closing its own ticket
+     * is fine, reopening one we closed is not.
+     */
+    public function setStatus(string $id): void
+    {
+        if (!$this->isPlatform()) {
+            abort(403, 'Only the platform team can change a ticket status.');
+        }
+
+        $ticket = Db::one('SELECT * FROM support_tickets WHERE id = ?', [(int) $id]);
+        if (!$ticket) {
+            abort(404, 'That ticket does not exist.');
+            return;
+        }
+
+        $status = Request::string('status');
+        if (!in_array($status, ['open', 'waiting', 'resolved', 'closed'], true)) {
+            flash('error', 'That is not a valid ticket status.');
+            redirect('/admin/support/' . (int) $id);
+            return;
+        }
+
+        Db::run('UPDATE support_tickets SET status = ?, updated_at = ? WHERE id = ?', [$status, Db::now(), (int) $id]);
+        (new AuditService())->log((int) $ticket['clinic_id'], 'support.status_changed', 'support_ticket', (int) $id, ['to' => $status]);
+        flash('success', 'Ticket marked ' . $status . '.');
+        redirect('/admin/support/' . (int) $id);
+    }
+
     public function index(): void
     {
+        // A super admin has no clinic, so the page branches before the tenant
+        // guard runs rather than after it. The two audiences need genuinely
+        // different lists: a clinic sees its own tickets, the platform sees
+        // every clinic's, newest activity first.
+        if ($this->isPlatform()) {
+            view('support/platform_index', [
+                'title' => 'Support queue',
+                'tickets' => Db::all(
+                    "SELECT t.*, c.name AS clinic_name, u.name AS opened_by,
+                            (SELECT COUNT(*) FROM support_replies r WHERE r.ticket_id = t.id AND r.is_staff = 0) AS patient_replies
+                       FROM support_tickets t
+                       JOIN clinics c ON c.id = t.clinic_id
+                       LEFT JOIN users u ON u.id = t.user_id
+                      ORDER BY CASE t.status WHEN 'open' THEN 0 WHEN 'waiting' THEN 1 WHEN 'resolved' THEN 2 ELSE 3 END,
+                               t.updated_at DESC, t.id DESC
+                      LIMIT 200"
+                ),
+                'counts' => [
+                    'open'    => (int) Db::scalar("SELECT COUNT(*) FROM support_tickets WHERE status = 'open'"),
+                    'waiting' => (int) Db::scalar("SELECT COUNT(*) FROM support_tickets WHERE status = 'waiting'"),
+                    'unanswered' => (int) Db::scalar(
+                        "SELECT COUNT(*) FROM support_tickets t
+                          WHERE t.status IN ('open','waiting')
+                            AND NOT EXISTS (SELECT 1 FROM support_replies r
+                                             WHERE r.ticket_id = t.id AND r.is_staff = 1)"
+                    ),
+                ],
+                'platform' => true,
+                'active' => 'support',
+            ]);
+            return;
+        }
+
         $clinicId = $this->clinicId();
 
         view('support/index', [
@@ -105,6 +173,35 @@ final class SupportController
 
     public function show(string $id): void
     {
+        if ($this->isPlatform()) {
+            $ticket = Db::one(
+                'SELECT t.*, u.name AS opened_by, c.name AS clinic_name
+                   FROM support_tickets t
+                   JOIN clinics c ON c.id = t.clinic_id
+                   LEFT JOIN users u ON u.id = t.user_id
+                  WHERE t.id = ?',
+                [(int) $id]
+            );
+            if (!$ticket) {
+                abort(404, 'That ticket does not exist.');
+                return;
+            }
+
+            view('support/platform_show', [
+                'title' => 'Ticket #' . $ticket['id'],
+                'ticket' => $ticket,
+                'replies' => Db::all(
+                    'SELECT r.*, u.name AS author_name FROM support_replies r
+                       LEFT JOIN users u ON u.id = r.user_id
+                      WHERE r.ticket_id = ? ORDER BY r.created_at, r.id',
+                    [(int) $id]
+                ),
+                'platform' => true,
+                'active' => 'support',
+            ]);
+            return;
+        }
+
         $clinicId = $this->clinicId();
         $ticket = Db::one(
             'SELECT t.*, u.name AS opened_by FROM support_tickets t
@@ -132,10 +229,12 @@ final class SupportController
 
     public function reply(string $id): void
     {
-        $clinicId = $this->clinicId();
-        $ticket = Db::one('SELECT * FROM support_tickets WHERE id = ? AND clinic_id = ?', [(int) $id, $clinicId]);
+        $platform = $this->isPlatform();
+        $ticket = $platform
+            ? Db::one('SELECT * FROM support_tickets WHERE id = ?', [(int) $id])
+            : Db::one('SELECT * FROM support_tickets WHERE id = ? AND clinic_id = ?', [(int) $id, $this->clinicId()]);
         if (!$ticket) {
-            abort(404, 'That ticket does not exist for this clinic.');
+            abort(404, 'That ticket does not exist.');
             return;
         }
         if (in_array((string) $ticket['status'], ['resolved', 'closed'], true)) {
@@ -152,12 +251,25 @@ final class SupportController
         }
 
         Db::insert(
-            'INSERT INTO support_replies (ticket_id, user_id, body, is_staff, created_at) VALUES (?,?,?,0,?)',
-            [(int) $id, Auth::id(), mb_substr($body, 0, 5000), Db::now()]
+            'INSERT INTO support_replies (ticket_id, user_id, body, is_staff, created_at) VALUES (?,?,?,?,?)',
+            [(int) $id, Auth::id(), mb_substr($body, 0, 5000), $platform ? 1 : 0, Db::now()]
         );
-        Db::run("UPDATE support_tickets SET status = 'waiting', updated_at = ? WHERE id = ?", [Db::now(), (int) $id]);
 
-        flash('success', 'Reply added.');
+        // Status follows who spoke. A clinic replying moves the ticket to
+        // `waiting` (on us); the platform replying moves it back to `open`
+        // (on them). Without this the queue stops meaning anything.
+        Db::run(
+            'UPDATE support_tickets SET status = ?, updated_at = ? WHERE id = ?',
+            [$platform ? 'open' : 'waiting', Db::now(), (int) $id]
+        );
+        (new AuditService())->log(
+            $platform ? (int) $ticket['clinic_id'] : $this->clinicId(),
+            $platform ? 'support.staff_reply' : 'support.clinic_reply',
+            'support_ticket',
+            (int) $id
+        );
+
+        flash('success', $platform ? 'Reply sent to the clinic.' : 'Reply added.');
         redirect('/support/' . (int) $id);
     }
 }

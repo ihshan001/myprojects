@@ -2206,6 +2206,92 @@ Assert::test('a reminder names the real appointment time', function (): void {
 });
 
 /* ------------------------------------------------------------------ */
+/* 38. support tickets, both sides of the conversation                 */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a clinic ticket is private to its clinic', function (): void {
+    seedTenant(20, 'alpha-support', 'Alpha Support');
+    seedTenant(21, 'beta-support', 'Beta Support');
+
+    $aAdmin = (int) Db::scalar("SELECT id FROM users WHERE email = 'admin20@alpha.example'");
+    $bAdmin = (int) Db::scalar("SELECT id FROM users WHERE email = 'admin21@alpha.example'");
+
+    $ticket = Db::insert(
+        'INSERT INTO support_tickets (clinic_id, user_id, subject, body, category, priority, status, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?)',
+        [20, $aAdmin, 'SMS down', 'No messages since 09:00.', 'technical', 'high', 'open', Db::now(), Db::now()]
+    );
+
+    // The other tenant cannot read it.
+    Assert::true(
+        Db::one('SELECT id FROM support_tickets WHERE id = ? AND clinic_id = ?', [$ticket, 21]) === null,
+        'another clinic sees nothing'
+    );
+    Assert::same(
+        $ticket,
+        (int) Db::scalar('SELECT id FROM support_tickets WHERE id = ? AND clinic_id = ?', [$ticket, 20])
+    );
+});
+
+Assert::test('a staff reply is flagged and flips the ticket to open', function (): void {
+    seedTenant(22, 'gamma-support', 'Gamma Support');
+    $adminId = (int) Db::scalar("SELECT id FROM users WHERE email = 'admin22@alpha.example'");
+    $superId = (int) $GLOBALS['superAdminId'];
+
+    $ticket = Db::insert(
+        'INSERT INTO support_tickets (clinic_id, user_id, subject, body, category, priority, status, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?)',
+        [22, $adminId, 'Export blank', 'Department column is empty.', 'technical', 'normal', 'waiting', Db::now(), Db::now()]
+    );
+
+    // What SupportController::reply() does for a platform account.
+    Db::insert(
+        'INSERT INTO support_replies (ticket_id, user_id, body, is_staff, created_at) VALUES (?,?,?,?,?)',
+        [$ticket, $superId, 'Queues created before the feature have no department.', 1, Db::now()]
+    );
+    Db::run("UPDATE support_tickets SET status = 'open', updated_at = ? WHERE id = ?", [Db::now(), $ticket]);
+
+    Assert::same(1, (int) Db::scalar('SELECT is_staff FROM support_replies WHERE ticket_id = ? ORDER BY id DESC LIMIT 1', [$ticket]));
+    Assert::same('open', (string) Db::scalar('SELECT status FROM support_tickets WHERE id = ?', [$ticket]));
+
+    // A clinic reply flips it back to waiting-on-us.
+    Db::insert(
+        'INSERT INTO support_replies (ticket_id, user_id, body, is_staff, created_at) VALUES (?,?,?,?,?)',
+        [$ticket, $adminId, 'Thanks, that worked.', 0, Db::now()]
+    );
+    Db::run("UPDATE support_tickets SET status = 'waiting', updated_at = ? WHERE id = ?", [Db::now(), $ticket]);
+    Assert::same('waiting', (string) Db::scalar('SELECT status FROM support_tickets WHERE id = ?', [$ticket]));
+});
+
+Assert::test('the unanswered count ignores tickets the platform has replied to', function (): void {
+    seedTenant(23, 'delta-support', 'Delta Support');
+    $adminId = (int) Db::scalar("SELECT id FROM users WHERE email = 'admin23@alpha.example'");
+
+    $make = static function (string $subject) use ($adminId): int {
+        return Db::insert(
+            'INSERT INTO support_tickets (clinic_id, user_id, subject, body, category, priority, status, created_at, updated_at)
+             VALUES (?,?,?,?,?,?,?,?,?)',
+            [23, $adminId, $subject, 'body', 'general', 'normal', 'open', Db::now(), Db::now()]
+        );
+    };
+    $answered = $make('Answered');
+    $silent   = $make('Unanswered');
+
+    Db::insert(
+        'INSERT INTO support_replies (ticket_id, user_id, body, is_staff, created_at) VALUES (?,?,?,?,?)',
+        [$answered, (int) $GLOBALS['superAdminId'], 'On it.', 1, Db::now()]
+    );
+
+    $rows = Db::all(
+        "SELECT t.id FROM support_tickets t
+          WHERE t.clinic_id = 23 AND t.status IN ('open','waiting')
+            AND NOT EXISTS (SELECT 1 FROM support_replies r WHERE r.ticket_id = t.id AND r.is_staff = 1)",
+        []
+    );
+    Assert::same([$silent], array_map(static fn (array $r): int => (int) $r['id'], $rows), 'only the ticket nobody answered');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);
