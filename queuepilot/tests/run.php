@@ -1993,7 +1993,9 @@ Assert::test('verification records who did it', function (): void {
     $invoiceId = Db::insert(
         'INSERT INTO invoices (clinic_id, number, period_from, period_to, amount, currency, status, created_at)
          VALUES (1,?,?,?,?,?,?,?)',
-        ['INV-UNIT-' . bin2hex(random_bytes(3)), Db::today(), date('Y-m-d', strtotime('+1 month')), 1000, 'LKR', 'claimed', Db::now()]
+        // A period no generator would pick, so this fixture cannot collide with
+        // the unique index on (clinic_id, period_from) that invoicing now adds.
+        ['INV-UNIT-' . bin2hex(random_bytes(3)), '2001-01-01', '2001-01-31', 1000, 'LKR', 'claimed', Db::now()]
     );
     $adminId = (int) $GLOBALS['superAdminId'];
 
@@ -2617,6 +2619,91 @@ Assert::test('a clinic in one group is not listed under another', function (): v
     Assert::same([], $inB, 'and invisible to B');
 
     Db::run('UPDATE clinics SET organisation_id = NULL WHERE id = 2');
+});
+
+/* ------------------------------------------------------------------ */
+/* 43. monthly invoicing                                               */
+/* ------------------------------------------------------------------ */
+
+Assert::test('an invoice is raised for a clinic that has reached its renewal date', function (): void {
+    seedTenant(40, 'billing-clinic', 'Billing Clinic');
+    Db::run("UPDATE clinics SET billing_status='active', renews_on='2026-12-02' WHERE id = 40");
+
+    $service = new App\Services\InvoiceService();
+    $due = $service->generateDue(false, '2026-12-02');
+
+    $mine = array_values(array_filter($due, static fn (array $r): bool => $r['clinic_id'] === 40));
+    Assert::same(1, count($mine), 'one invoice for this clinic');
+    Assert::same('2026-11-02', $mine[0]['period_from'], 'the period is the month that ended');
+    Assert::same('2026-12-02', $mine[0]['period_to']);
+
+    Assert::same(1, (int) Db::scalar('SELECT COUNT(*) FROM invoices WHERE clinic_id = 40'), 'the row exists');
+});
+
+Assert::test('running the generator again bills nobody twice', function (): void {
+    $service = new App\Services\InvoiceService();
+
+    // Three more passes on the same date.
+    $service->generateDue(false, '2026-12-02');
+    $service->generateDue(false, '2026-12-02');
+    $service->generateDue(false, '2026-12-02');
+
+    Assert::same(1, (int) Db::scalar('SELECT COUNT(*) FROM invoices WHERE clinic_id = 40'), 'still one invoice');
+});
+
+Assert::test('the unique index forbids a second live invoice for one period', function (): void {
+    // The application check has a gap between read and write; the index is what
+    // actually holds under concurrency, so assert on the index itself.
+    $threw = false;
+    try {
+        Db::insert(
+            'INSERT INTO invoices (clinic_id, number, period_from, period_to, amount, currency, status, created_at)
+             VALUES (?,?,?,?,?,?,?,?)',
+            [40, 'INV-DUP-' . bin2hex(random_bytes(2)), '2026-11-02', '2026-12-02', 3500, 'LKR', 'unpaid', Db::now()]
+        );
+    } catch (\PDOException $e) {
+        $threw = true;
+    }
+    Assert::true($threw, 'the database refuses the duplicate');
+});
+
+Assert::test('a trial clinic is not invoiced', function (): void {
+    seedTenant(41, 'trial-clinic', 'Trial Clinic');
+    Db::run("UPDATE clinics SET billing_status='trial', renews_on='2026-12-02' WHERE id = 41");
+
+    (new App\Services\InvoiceService())->generateDue(false, '2026-12-02');
+    Assert::same(0, (int) Db::scalar('SELECT COUNT(*) FROM invoices WHERE clinic_id = 41'), 'a trial is not a debt');
+});
+
+Assert::test('generating an invoice does not extend the subscription', function (): void {
+    $before = (string) Db::scalar('SELECT renews_on FROM clinics WHERE id = 40');
+    (new App\Services\InvoiceService())->generateDue(false, '2026-12-20');
+    $after = (string) Db::scalar('SELECT renews_on FROM clinics WHERE id = 40');
+    Assert::same($before, $after, 'only a verified payment moves renews_on');
+});
+
+Assert::test('invoice numbers are unique and readable', function (): void {
+    // Make sure the generator has run in this database: the suite's own DB is
+    // fresh per run, and an assertion about generated numbers must not depend
+    // on a probe having populated the demo file.
+    seedTenant(42, 'numbering-clinic', 'Numbering Clinic');
+    Db::run("UPDATE clinics SET billing_status='active', renews_on='2026-12-02' WHERE id = 42");
+    (new App\Services\InvoiceService())->generateDue(false, '2026-12-02');
+    (new App\Services\InvoiceService())->generateDue(false, '2027-01-02');
+
+    $numbers = array_map(
+        static fn (array $r): string => (string) $r['number'],
+        Db::all('SELECT number FROM invoices ORDER BY id')
+    );
+    Assert::same(count($numbers), count(array_unique($numbers)), 'no duplicates');
+    // Only the numbers this generator produced: the table also carries seeded
+    // invoices and test fixtures, and asserting a format over those is not a
+    // statement about the generator.
+    $generated = array_filter($numbers, static fn (string $n): bool => preg_match('/^INV-\d{6}-\d{4}$/', $n) === 1);
+    Assert::true(count($generated) >= 2, 'the generator produced period-stamped numbers');
+    foreach ($generated as $n) {
+        Assert::true(preg_match('/^INV-\d{6}-\d{4}$/', $n) === 1, 'readable form: ' . $n);
+    }
 });
 
 /* ------------------------------------------------------------------ */

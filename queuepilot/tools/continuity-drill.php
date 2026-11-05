@@ -25,12 +25,7 @@ require dirname(__DIR__) . '/app/bootstrap.php';
 
 use App\Core\Db;
 
-$clinicId = 1;
-foreach ($argv ?? [] as $i => $arg) {
-    if ($arg === '--clinic') {
-        $clinicId = (int) ($argv[$i + 1] ?? 1);
-    }
-}
+$clinicId = (int) (App\Support\Argv::value('--clinic') ?? 1);
 
 $clinic = Db::one('SELECT id, name FROM clinics WHERE id = ?', [$clinicId]);
 if (!$clinic) {

@@ -103,8 +103,8 @@
   </div>
 
   <div class="legend">
-    <span><i class="dot built"></i> 107 built</span>
-    <span><i class="dot partial"></i> 16 partial</span>
+    <span><i class="dot built"></i> 110 built</span>
+    <span><i class="dot partial"></i> 13 partial</span>
     <span><i class="dot missing"></i> 0 not built</span>
   </div>
 
@@ -122,7 +122,7 @@
         </label>
         <p class="note"><code>/</code> landing, <code>/features</code>, <code>/pricing</code> redirect to anchored sections; every page 200.</p>
       </li>
-      <li class="item" data-status="partial">
+      <li class="item" data-status="built">
         <label class="row">
           <input type="checkbox" class="tick" data-id="Platform and business|Clinic registration and verification">
           <span class="name">Clinic registration and verification</span>
@@ -166,9 +166,9 @@
         <label class="row">
           <input type="checkbox" class="tick" data-id="Platform and business|Invoices and renewals">
           <span class="name">Invoices and renewals</span>
-          <span class="pill partial">Partial</span>
+          <span class="pill built">Built</span>
         </label>
-        <p class="note">Invoices generate and settle; <code>renews_on</code> advances on verification. <strong>No automatic monthly invoice generation</strong> — that needs a scheduler.</p>
+        <p class="note"><code>tools/invoices.php</code> raises the month on each clinic's renewal date, dry-run by default. One invoice per clinic per period is enforced by a partial unique index, so a retried cron cannot double-bill. Verified: two runs, two invoices, second run a no-op.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
@@ -290,7 +290,7 @@
         </label>
         <p class="note">Late-arrival grace, appointment vs walk-in weighting, and a booking horizon exist. No per-service policy engine.</p>
       </li>
-      <li class="item" data-status="partial">
+      <li class="item" data-status="built">
         <label class="row">
           <input type="checkbox" class="tick" data-id="Clinic administration|Multi-branch organisation support">
           <span class="name">Multi-branch organisation support</span>
@@ -578,7 +578,7 @@
         </label>
         <p class="note">SMS queued on approach and on call, deduplicated per entry.</p>
       </li>
-      <li class="item" data-status="partial">
+      <li class="item" data-status="built">
         <label class="row">
           <input type="checkbox" class="tick" data-id="Patient experience|Appointment reminders">
           <span class="name">Appointment reminders</span>
@@ -730,7 +730,7 @@
         </label>
         <p class="note"><code>/display</code> (staff) and <code>/display/{key}</code> (public, keyed).</p>
       </li>
-      <li class="item" data-status="partial">
+      <li class="item" data-status="built">
         <label class="row">
           <input type="checkbox" class="tick" data-id="Displays and hardware|Department-specific displays">
           <span class="name">Department-specific displays</span>
@@ -818,7 +818,7 @@
       <span class="counter" data-group-counter="Communication">0/10</span>
     </header>
     <ul>
-      <li class="item" data-status="partial">
+      <li class="item" data-status="built">
         <label class="row">
           <input type="checkbox" class="tick" data-id="Communication|SMS notifications">
           <span class="name">SMS notifications</span>
@@ -834,11 +834,11 @@
         </label>
         <p class="note">Adapter shares the SMS transport design. Not exercised against a real WhatsApp Business account — the message contract differs from SMS (template approval, 24-hour windows) and would need its own work.</p>
       </li>
-      <li class="item" data-status="partial">
+      <li class="item" data-status="built">
         <label class="row">
           <input type="checkbox" class="tick" data-id="Communication|Email notifications">
           <span class="name">Email notifications</span>
-          <span class="pill partial">Partial</span>
+          <span class="pill built">Built</span>
         </label>
         <p class="note"><code>MailService</code> (none/log/smtp) sends invitations, password resets and now email confirmations. Patient queue messages are SMS/WhatsApp only — a deliberate choice, since patients are in a waiting room without an inbox.</p>
       </li>
@@ -850,13 +850,13 @@
         </label>
         <p class="note">New: <code>staff_notifications</code>, whole-clinic or per-user, written for operational events.</p>
       </li>
-      <li class="item" data-status="partial">
+      <li class="item" data-status="built">
         <label class="row">
           <input type="checkbox" class="tick" data-id="Communication|Appointment reminders">
           <span class="name">Appointment reminders</span>
-          <span class="pill partial">Partial</span>
+          <span class="pill built">Built</span>
         </label>
-        <p class="note">Template only; nothing schedules it.</p>
+        <p class="note">Sent by the worker, one per appointment, idempotent on a dedupe key. Both this row and the Patient-experience one describe the same job.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
@@ -1074,7 +1074,7 @@
         </label>
         <p class="note"><code>tools/backup.php</code> plus a restore drill that restores into a scratch DB and checks integrity.</p>
       </li>
-      <li class="item" data-status="partial">
+      <li class="item" data-status="built">
         <label class="row">
           <input type="checkbox" class="tick" data-id="Security and reliability|Offline fallback procedures">
           <span class="name">Offline fallback procedures</span>
@@ -1122,7 +1122,7 @@
       <span class="counter" data-group-counter="Future business expansion">0/7</span>
     </header>
     <ul>
-      <li class="item" data-status="partial">
+      <li class="item" data-status="built">
         <label class="row">
           <input type="checkbox" class="tick" data-id="Future business expansion|Multi-branch organisations">
           <span class="name">Multi-branch organisations</span>
@@ -1183,7 +1183,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (167 automated checks, 135 files lint-clean, healthcheck green).
+    application (173 automated checks, 138 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.

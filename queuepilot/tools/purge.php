@@ -17,7 +17,11 @@ require __DIR__ . '/../app/bootstrap.php';
 use App\Core\Db;
 use App\Services\LifecycleService;
 
-$dryRun = in_array('--dry-run', $argv ?? [], true) || !in_array('--yes', $argv ?? [], true);
+// $argv is empty under the php-wasm harness, so this goes through the helper.
+// That mattered: with no argument ever arriving, --yes was ignored and the
+// purge tool could only run dry, which made a working retention sweep look
+// like an unimplemented one.
+$dryRun = App\Support\Argv::has('--dry-run') || !App\Support\Argv::has('--yes');
 
 $service = new LifecycleService();
 $due = $service->purgeable();
