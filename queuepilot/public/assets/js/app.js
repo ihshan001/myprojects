@@ -108,8 +108,19 @@
         return;
       }
     }
-    if (action === 'cancel' || action === 'transfer') {
+    if (action === 'cancel') {
       reason = window.prompt('Reason (optional):', '');
+      if (reason === null) return;
+    }
+
+    // Transfer must name a destination: without one the patient would be
+    // closed out with no live token anywhere.
+    let toQueueId = null;
+    if (action === 'transfer') {
+      const target = await pickTransferTarget();
+      if (!target) return;
+      toQueueId = target.id;
+      reason = window.prompt('Reason for transfer (recorded in the audit log):', '');
       if (reason === null) return;
     }
 
@@ -121,7 +132,7 @@
     try {
       const data = await api('/api/queue/action', {
         method: 'POST',
-        body: { entry_id: entry.id, action, version: entry.version, reason },
+        body: { entry_id: entry.id, action, version: entry.version, reason, to_queue_id: toQueueId },
       });
       toast(data.message || 'Updated', 'success', 2200);
       if (window.qpRefreshQueue) window.qpRefreshQueue();
@@ -132,6 +143,34 @@
       row.classList.remove('opacity-60');
     }
   });
+
+  /**
+   * Ask for the destination queue. Uses the same-origin summary endpoint so no
+   * extra markup has to be embedded in every board row.
+   */
+  async function pickTransferTarget() {
+    let queues = [];
+    try {
+      const data = await api('/api/summary', { timeout: 9000 });
+      queues = (data.queues || []).filter((q) => q.id !== null);
+    } catch {
+      toast('Could not load the other queues. Try again.', 'error');
+      return null;
+    }
+    if (!queues.length) {
+      toast('There is no other queue open today to transfer to.', 'warn');
+      return null;
+    }
+    const list = queues.map((q, i) => `${i + 1}. ${q.name} (${q.waiting} waiting)`).join('\n');
+    const answer = window.prompt('Transfer to which queue?\n\n' + list, '1');
+    if (answer === null) return null;
+    const index = parseInt(answer, 10) - 1;
+    if (Number.isNaN(index) || !queues[index]) {
+      toast('Enter one of the listed numbers.', 'warn');
+      return null;
+    }
+    return queues[index];
+  }
 
   /* ------------------------------------------------------- copy buttons */
   document.addEventListener('click', async (ev) => {

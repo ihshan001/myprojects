@@ -77,6 +77,7 @@ $GLOBALS['doctorUserId'] = Db::insert(
 );
 
 $alphaQueue = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 1');
+$GLOBALS['alphaQueue'] = $alphaQueue;
 $betaQueue  = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 2');
 
 /* ------------------------------------------------------------------ */
@@ -217,6 +218,151 @@ Assert::test('every mutation writes a queue event with from/to', function () use
     for ($i = 1; $i < count($events); $i++) {
         Assert::same($events[$i - 1]['to_status'], $events[$i]['from_status'], "chain break at event {$i}");
     }
+});
+
+/* ------------------------------------------------------------------ */
+/* 2b. duplicate-prevention constraints                                */
+/* ------------------------------------------------------------------ */
+
+echo "\nQueue integrity\n";
+
+// A dedicated patient so these checks do not depend on what earlier tests did
+$dupePatient = (new App\Services\PatientService())->findOrCreate(1, ['full_name' => 'Duplicate Probe', 'phone' => '0779990001']);
+$dupeFirst = $service->issueToken(1, $alphaQueue, (int) $dupePatient['id'], []);
+$GLOBALS['dupeEntryId'] = (int) $dupeFirst['entry_id'];
+
+Assert::test('a patient cannot hold two live tokens in one queue', function () use ($service, $alphaQueue, $dupePatient): void {
+    Assert::throws(
+        static fn () => $service->issueToken(1, $alphaQueue, (int) $dupePatient['id'], []),
+        \RuntimeException::class,
+        'second live token must be refused'
+    );
+});
+
+Assert::test('the database refuses a duplicate even if the service is bypassed', function () use ($dupePatient): void {
+    try {
+        Db::insert(
+            "INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status,
+                priority, sort_weight, source, joined_at, track_token, track_expires_at, version)
+             VALUES (1, ?, ?, 9001, 'ZZ901', 'waiting', 0, 3, 'walkin', ?, ?, '2030-01-01', 0)",
+            [(int) $GLOBALS['alphaQueue'], (int) $dupePatient['id'], Db::now(), bin2hex(random_bytes(16))]
+        );
+        Assert::true(false, 'raw insert must be rejected by the unique index');
+    } catch (\PDOException $e) {
+        Assert::contains('UNIQUE', strtoupper($e->getMessage()), 'constraint violation');
+    }
+});
+
+Assert::test('a returning patient may be issued a new token after their visit closes', function () use ($service, $alphaQueue, $dupePatient): void {
+    // close the live entry, then the same patient is welcome back
+    Db::run("UPDATE queue_entries SET status = 'completed', finished_at = ? WHERE id = ?", [Db::now(), (int) $GLOBALS['dupeEntryId']]);
+    $fresh = $service->issueToken(1, $alphaQueue, (int) $dupePatient['id'], []);
+    Assert::true((string) $fresh['token'] !== '', 'new token issued');
+    Db::run("UPDATE queue_entries SET status = 'cancelled', finished_at = ? WHERE id = ?", [Db::now(), (int) $fresh['entry_id']]);
+});
+
+Assert::test('the same doctor slot cannot be double booked', function () use ($p1): void {
+    $appts = new App\Services\AppointmentService();
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1 LIMIT 1');
+    $when = date('Y-m-d', strtotime('+3 days')) . ' 09:45:00';
+
+    $first = $appts->create(1, $doctorId, (int) $p1['id'], $when);
+    Assert::throws(
+        static fn () => $appts->create(1, (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1 LIMIT 1'), (int) $p1['id'], $when),
+        \RuntimeException::class,
+        'second booking at the same slot must be refused'
+    );
+    Db::run("UPDATE appointments SET status = 'cancelled' WHERE id = ?", [$first]);
+    $again = $appts->create(1, $doctorId, (int) $p1['id'], $when);
+    Assert::true($again > 0, 'cancelled slot is reusable');
+});
+
+Assert::test('a transfer really moves the patient and leaves one live token', function () use ($service): void {
+    $repo = new App\Domain\Queue\QueueRepository();
+    $ps = new App\Services\PatientService();
+    $patient = $ps->findOrCreate(1, ['full_name' => 'Transfer Case', 'phone' => '0771119999']);
+
+    // the fixture creates one queue per clinic; add a second for clinic 1
+    $existing = Db::all('SELECT id FROM queues WHERE clinic_id = 1 ORDER BY id LIMIT 1');
+    $from = (int) $existing[0]['id'];
+    $to = (int) Db::scalar("SELECT id FROM queues WHERE clinic_id = 1 AND id <> ? LIMIT 1", [$from]);
+    if ($to === 0) {
+        $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1 LIMIT 1');
+        $to = (int) Db::insert(
+            'INSERT INTO queues (clinic_id, doctor_id, name, token_prefix, session_date, status, last_token_no, created_at)
+             VALUES (1, ?, ?, ?, ?, ?, 0, ?)',
+            [$doctorId, 'Second Service', 'B', Db::today(), 'open', Db::now()]
+        );
+    }
+    Assert::true($to > 0 && $to !== $from, 'have two distinct queues');
+
+    $entry = $service->issueToken(1, (int) $from, (int) $patient['id'], []);
+    $before = (int) Db::scalar(
+        "SELECT COUNT(*) FROM queue_entries WHERE patient_id = ? AND status IN ('waiting','called','in_consultation')",
+        [(int) $patient['id']]
+    );
+    Assert::same(1, $before, 'exactly one live token before transfer');
+
+    $res = $service->apply(1, (int) $entry['entry_id'], 'transfer', [
+        'reason' => 'needs another specialty',
+        'to_queue_id' => (int) $to,
+        'version' => 0,
+    ]);
+
+    Assert::true($res['ok'], 'transfer accepted: ' . ($res['message'] ?? ''));
+    Assert::same('transferred', $res['status']);
+    Assert::true(!empty($res['transferred_to']['token']), 'replacement token issued');
+
+    $after = (int) Db::scalar(
+        "SELECT COUNT(*) FROM queue_entries WHERE patient_id = ? AND status IN ('waiting','called','in_consultation')",
+        [(int) $patient['id']]
+    );
+    Assert::same(1, $after, 'still exactly one live token after transfer');
+
+    Assert::same(
+        'transferred',
+        Db::one('SELECT status FROM queue_entries WHERE id = ?', [(int) $entry['entry_id']])['status'],
+        'original entry is closed, not left live'
+    );
+    Assert::same(
+        (int) $to,
+        (int) Db::scalar(
+            "SELECT queue_id FROM queue_entries WHERE patient_id = ? AND status = 'waiting' ORDER BY id DESC LIMIT 1",
+            [(int) $patient['id']]
+        ),
+        'the live token is in the destination queue'
+    );
+});
+
+Assert::test('a transfer cannot target another tenant queue', function () use ($service): void {
+    $ps = new App\Services\PatientService();
+    $patient = $ps->findOrCreate(1, ['full_name' => 'Cross Tenant Transfer']);
+    $queue = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 1 LIMIT 1');
+    $entry = $service->issueToken(1, $queue, (int) $patient['id'], []);
+
+    $foreign = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 2 LIMIT 1');
+    Assert::true($foreign > 0, 'clinic 2 has a queue');
+
+    $res = $service->apply(1, (int) $entry['entry_id'], 'transfer', [
+        'reason' => 'leak attempt', 'to_queue_id' => $foreign, 'version' => 0,
+    ]);
+    Assert::false($res['ok'], 'cross-tenant transfer refused');
+    Assert::same(
+        'waiting',
+        Db::one('SELECT status FROM queue_entries WHERE id = ?', [(int) $entry['entry_id']])['status'],
+        'nothing changed'
+    );
+});
+
+Assert::test('a transfer must name a destination', function () use ($service): void {
+    $ps = new App\Services\PatientService();
+    $patient = $ps->findOrCreate(1, ['full_name' => 'No Target Transfer']);
+    $queue = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 1 ORDER BY id DESC LIMIT 1');
+    $entry = $service->issueToken(1, $queue, (int) $patient['id'], []);
+
+    $res = $service->apply(1, (int) $entry['entry_id'], 'transfer', ['reason' => 'nowhere', 'version' => 0]);
+    Assert::false($res['ok'], 'missing to_queue_id refused');
+    Assert::contains('queue', strtolower((string) $res['message']), 'message explains it');
 });
 
 /* ------------------------------------------------------------------ */
@@ -410,6 +556,49 @@ Assert::test('a patient without a phone number is never messaged', function (): 
     }
     $count = (int) Db::scalar('SELECT COUNT(*) FROM notifications WHERE entry_id = ?', [(int) $anon['id']]);
     Assert::same(0, $count, 'no SMS without a number');
+});
+
+/* ------------------------------------------------------------------ */
+/* 5b. late-arrival policy                                             */
+/* ------------------------------------------------------------------ */
+
+echo "\nLate arrivals\n";
+
+Assert::test('inside the grace period the booked order is kept', function (): void {
+    $svc = new App\Services\AppointmentService();
+    $appt = ['clinic_id' => 1, 'scheduled_for' => '2030-01-01 10:00:00'];
+    $clinic = ['late_grace_minutes' => 15];
+
+    $early = $svc->arrivalPolicy($appt, $clinic, '2030-01-01 09:58:00');
+    Assert::same('early', $early['status']);
+    Assert::same(1, $early['weight']);
+
+    $onTime = $svc->arrivalPolicy($appt, $clinic, '2030-01-01 10:00:00');
+    Assert::same('on_time', $onTime['status']);
+    Assert::same(1, $onTime['weight']);
+
+    $within = $svc->arrivalPolicy($appt, $clinic, '2030-01-01 10:14:00');
+    Assert::same('on_time', $within['status'], 'inside grace is still on time');
+});
+
+Assert::test('beyond the grace period the patient joins as a walk-in', function (): void {
+    $svc = new App\Services\AppointmentService();
+    $appt = ['clinic_id' => 1, 'scheduled_for' => '2030-01-01 10:00:00'];
+    $late = $svc->arrivalPolicy($appt, ['late_grace_minutes' => 15], '2030-01-01 10:40:00');
+
+    Assert::same('late', $late['status']);
+    Assert::same(3, $late['weight'], 'walk-in weight, so booked patients still precede them');
+    Assert::contains('40 min late', $late['message']);
+    Assert::contains('walk-in', $late['message'], 'the policy is explained, not silent');
+});
+
+Assert::test('the grace period comes from the clinic, not a hard-coded value', function (): void {
+    $svc = new App\Services\AppointmentService();
+    $appt = ['clinic_id' => 1, 'scheduled_for' => '2030-01-01 10:00:00'];
+    $arrival = '2030-01-01 10:20:00';
+
+    Assert::same('late', $svc->arrivalPolicy($appt, ['late_grace_minutes' => 10], $arrival)['status']);
+    Assert::same('on_time', $svc->arrivalPolicy($appt, ['late_grace_minutes' => 30], $arrival)['status']);
 });
 
 /* ------------------------------------------------------------------ */

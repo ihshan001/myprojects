@@ -80,7 +80,13 @@ final class AppointmentController
         }
 
         $when = $date . ' ' . $time . ':00';
-        $id = (new AppointmentService())->create($clinicId, $doctorId, $patientId, $when, 'phone');
+        try {
+            $id = (new AppointmentService())->create($clinicId, $doctorId, $patientId, $when, 'phone');
+        } catch (\RuntimeException $e) {
+            flash('error', $e->getMessage());
+            redirect('/appointments?date=' . urlencode($date));
+            return;
+        }
 
         (new AuditService())->log($clinicId, 'appointment.created', 'appointment', $id, [
             'doctor' => $doctor['name'], 'when' => $when,
@@ -112,15 +118,19 @@ final class AppointmentController
             return;
         }
 
+        // Apply the clinic's late-arrival policy before ordering the patient.
+        $policy = $service->arrivalPolicy($appointment, Auth::clinic());
+
         try {
             $result = (new QueueService())->issueToken($clinicId, (int) $queue['id'], (int) $appointment['patient_id'], [
                 'source' => 'appointment',
                 'appointment_id' => (int) $appointment['id'],
-                'appointment_weight' => 1,
+                'appointment_weight' => $policy['weight'],
                 'walkin_weight' => 3,
+                'note' => $policy['message'],
             ]);
             $service->markCheckedIn($clinicId, (int) $appointment['id']);
-            flash('success', 'Checked in — token ' . $result['token'] . ' issued to ' . $appointment['full_name'] . '.');
+            flash('success', 'Checked in — token ' . $result['token'] . ' issued to ' . $appointment['full_name'] . '. ' . $policy['message']);
         } catch (\Throwable $e) {
             flash('error', $e->getMessage());
         }

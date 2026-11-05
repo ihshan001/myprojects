@@ -116,6 +116,11 @@ namespace Tests {
             $pdo->exec('PRAGMA journal_mode = WAL');
             $pdo->exec('PRAGMA foreign_keys = ON');
             $pdo->exec(file_get_contents($schema));
+            // apply dialect migrations so the suite runs against the same
+            // constraints production will have
+            foreach (glob(QP_ROOT . '/database/migrations/*.sqlite.sql') ?: [] as $migration) {
+                $pdo->exec(file_get_contents($migration));
+            }
             $pdo = null;
 
             \App\Core\Db::init(['driver' => 'sqlite', 'sqlite' => $path]);

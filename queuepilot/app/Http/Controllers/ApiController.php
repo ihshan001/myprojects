@@ -149,6 +149,8 @@ final class ApiController
         $version = isset($payload['version']) ? (int) $payload['version'] : null;
         $reason = isset($payload['reason']) && $payload['reason'] !== null
             ? mb_substr((string) $payload['reason'], 0, 180) : null;
+        $toQueueId = isset($payload['to_queue_id']) && $payload['to_queue_id'] !== null
+            ? (int) $payload['to_queue_id'] : null;
 
         if ($entryId <= 0 || $action === '') {
             json(['ok' => false, 'error' => 'bad_request', 'message' => 'Missing entry or action.'], 422);
@@ -178,6 +180,7 @@ final class ApiController
         $result = $service->apply($clinicId, $entryId, $action, [
             'version' => $version,
             'reason' => $reason,
+            'to_queue_id' => $toQueueId,
         ]);
 
         $status = $result['ok']
@@ -319,10 +322,26 @@ final class ApiController
             json(['ok' => false, 'error' => 'unauthenticated'], 401);
             return;
         }
+        // Today's open queues, for the transfer picker. Scoped by clinic id
+        // like every other read — the front end never supplies a clinic.
+        $queues = [];
+        foreach ((new QueueRepository())->liveQueues($clinicId) as $q) {
+            if (($q['status'] ?? 'open') !== 'open') {
+                continue;
+            }
+            $queues[] = [
+                'id' => (int) $q['id'],
+                'name' => (string) $q['name'],
+                'doctor' => (string) ($q['doctor_name'] ?? ''),
+                'waiting' => (int) ($q['waiting_count'] ?? 0),
+            ];
+        }
+
         json([
             'ok' => true,
             'summary' => (new \App\Services\ReportService())->daySummary($clinicId),
             'notifications' => (new \App\Services\NotificationService())->stats($clinicId),
+            'queues' => $queues,
         ]);
     }
 }

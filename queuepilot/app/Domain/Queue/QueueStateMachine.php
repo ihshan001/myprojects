@@ -105,8 +105,8 @@ final class QueueStateMachine
     public static function actions(string $status): array
     {
         return match ($status) {
-            self::WAITING => ['call', 'skip', 'no_show', 'cancel', 'priority'],
-            self::CALLED => ['start', 'recall', 'skip', 'no_show', 'cancel'],
+            self::WAITING => ['call', 'skip', 'no_show', 'cancel', 'priority', 'transfer'],
+            self::CALLED => ['start', 'recall', 'skip', 'no_show', 'cancel', 'transfer'],
             self::IN_CONSULTATION => ['complete', 'transfer', 'cancel'],
             self::SKIPPED => ['requeue', 'cancel'],
             self::NO_SHOW => ['requeue', 'cancel'],

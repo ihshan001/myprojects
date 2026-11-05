@@ -53,6 +53,25 @@ final class QueueService
                 throw new \RuntimeException('This queue is closed for the day.');
             }
 
+            // A patient must not hold two live tokens in the same queue. The
+            // database enforces this too (unique active-entry index), but the
+            // check happens first so reception sees a sentence rather than a
+            // constraint violation. Both are needed: this one gives the clear
+            // message, the index closes the race between two devices.
+            $already = Db::one(
+                "SELECT token_label FROM queue_entries
+                  WHERE clinic_id = ? AND queue_id = ? AND patient_id = ?
+                    AND status IN ('waiting','called','in_consultation')
+                  LIMIT 1",
+                [$clinicId, $queueId, $patientId]
+            );
+            if ($already) {
+                throw new \RuntimeException(
+                    'This patient already holds token ' . $already['token_label']
+                    . ' in this queue. Recall or complete that entry first.'
+                );
+            }
+
             // Lock the queue row, then allocate the next number.
             $suffix = Env::isSqlite() ? '' : ' FOR UPDATE';
             $locked = Db::one('SELECT * FROM queues WHERE id = ? AND clinic_id = ?' . $suffix, [$queueId, $clinicId]);
@@ -167,6 +186,28 @@ final class QueueService
 
                 QueueStateMachine::assert($entry['status'], $to);
 
+                // A transfer must know where it is going. Resolve the target
+                // queue up front so a bad id fails before anything is written.
+                $transferTarget = null;
+                if ($action === 'transfer') {
+                    $targetId = (int) ($ctx['to_queue_id'] ?? 0);
+                    if ($targetId <= 0 || $targetId === (int) $entry['queue_id']) {
+                        return [
+                            'ok' => false,
+                            'status' => $entry['status'],
+                            'message' => 'Choose a different queue to transfer this patient to.',
+                        ];
+                    }
+                    $transferTarget = $this->repo->queue($clinicId, $targetId);
+                    if (!$transferTarget) {
+                        return [
+                            'ok' => false,
+                            'status' => $entry['status'],
+                            'message' => 'That queue does not belong to this clinic.',
+                        ];
+                    }
+                }
+
                 // The transition target is the single authority for the new
                 // status; plan() must never be trusted to restate it. Doing it
                 // here means a new action cannot forget to move the row.
@@ -198,6 +239,26 @@ final class QueueService
                     'reason' => $ctx['reason'] ?? null,
                 ]);
 
+                // Issue the replacement token in the same transaction. If this
+                // fails the transfer rolls back, so a patient can never end up
+                // 'transferred' with no live token anywhere.
+                if ($action === 'transfer' && $transferTarget !== null) {
+                    $issued = $this->issueToken($clinicId, (int) $transferTarget['id'], (int) $entry['patient_id'], [
+                        'note' => 'Transferred from ' . $entry['token_label'],
+                        'source' => 'walkin',
+                    ]);
+                    $message = sprintf(
+                        '%s transferred to %s as %s.',
+                        $entry['token_label'],
+                        $transferTarget['name'],
+                        $issued['token']
+                    );
+                    $this->audit->log($clinicId, 'queue.transferred_out', 'queue_entry', $entryId, [
+                        'to_queue' => (int) $transferTarget['id'],
+                        'new_token' => $issued['token'],
+                    ]);
+                }
+
                 if (in_array($to, [QueueStateMachine::CALLED], true)) {
                     $this->notifications->queue($clinicId, $entryId, 'entry_called', [
                         'token' => $entry['token_label'],
@@ -210,12 +271,21 @@ final class QueueService
                     ]);
                 }
 
-                return [
+                $result = [
                     'ok' => true,
                     'status' => $to,
                     'message' => $message,
                     'entry' => $this->repo->entry($clinicId, $entryId),
                 ];
+                if (isset($issued)) {
+                    $result['transferred_to'] = [
+                        'queue_id' => (int) $transferTarget['id'],
+                        'queue_name' => $transferTarget['name'],
+                        'token' => $issued['token'],
+                        'track_url' => $issued['track_url'],
+                    ];
+                }
+                return $result;
             });
         } catch (InvalidTransition $e) {
             Log::warn('queue.invalid_transition', [
@@ -298,6 +368,10 @@ final class QueueService
                 $entry['token_label'] . ' is back in the waiting list.',
             ],
 
+            // Transfer is a real move, not a dead end: the original entry is
+            // closed as `transferred` (history preserved, no duplicate active
+            // token) and a fresh token is issued in the target queue. The
+            // target must be resolved by the caller and passed in.
             'transfer' => [
                 QueueStateMachine::TRANSFERRED,
                 ['finished_at' => $now, 'note' => (string) ($ctx['reason'] ?? 'Transferred')],

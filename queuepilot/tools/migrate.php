@@ -26,8 +26,17 @@ $schemaFile = $root . '/database/schema/' . ($driver === 'mysql' ? 'mysql' : 'sq
 if (is_file($schemaFile)) {
     $files['0000_schema'] = $schemaFile;
 }
+// Migrations may be dialect-specific: `foo.sqlite.sql` applies only to SQLite,
+// `foo.mysql.sql` only to MySQL, and a plain `foo.sql` applies to both.
 foreach (glob($root . '/database/migrations/*.sql') ?: [] as $f) {
-    $files['1_' . basename($f, '.sql')] = $f;
+    $base = basename($f, '.sql');
+    if (str_ends_with($base, '.sqlite') && $driver !== 'sqlite') {
+        continue;
+    }
+    if (str_ends_with($base, '.mysql') && $driver !== 'mysql') {
+        continue;
+    }
+    $files['1_' . $base] = $f;
 }
 ksort($files);
 
@@ -38,7 +47,7 @@ foreach ($files as $name => $file) {
     }
     $sql = file_get_contents($file);
     if ($sql === false) {
-        fwrite(STDERR, "Cannot read {$file}\n");
+        fwrite(defined('STDERR') ? STDERR : fopen('php://stderr','w'), "Cannot read {$file}\n");
         exit(1);
     }
 
@@ -58,7 +67,7 @@ foreach ($files as $name => $file) {
             if (str_contains($e->getMessage(), 'already exists')) {
                 continue;
             }
-            fwrite(STDERR, "FAILED in {$name}: {$e->getMessage()}\nSQL: " . substr($clean, 0, 300) . "\n");
+            fwrite(defined('STDERR') ? STDERR : fopen('php://stderr','w'), "FAILED in {$name}: {$e->getMessage()}\nSQL: " . substr($clean, 0, 300) . "\n");
             exit(1);
         }
     }

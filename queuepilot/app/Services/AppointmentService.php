@@ -36,13 +36,92 @@ final class AppointmentService
         return Db::all($sql, $params);
     }
 
+    /**
+     * Book an appointment.
+     *
+     * Double-booking protection is layered: the SELECT below produces a
+     * sentence the receptionist understands, and the uq_appointment_slot
+     * index makes the window between check and insert impossible to exploit.
+     *
+     * @throws \RuntimeException when the slot is already taken
+     */
     public function create(int $clinicId, int $doctorId, int $patientId, string $when, string $source = 'online', int $duration = 15): int
     {
+        $clash = Db::one(
+            "SELECT a.id, p.full_name FROM appointments a
+               JOIN patients p ON p.id = a.patient_id
+              WHERE a.clinic_id = ? AND a.doctor_id = ? AND a.scheduled_for = ?
+                AND a.status IN ('booked','checked_in')
+              LIMIT 1",
+            [$clinicId, $doctorId, $when]
+        );
+        if ($clash) {
+            throw new \RuntimeException(sprintf(
+                'That time is already booked for this doctor (%s). Choose another slot.',
+                $clash['full_name']
+            ));
+        }
+
         return Db::insert(
             'INSERT INTO appointments (clinic_id, doctor_id, patient_id, scheduled_for, duration_minutes, status, source, created_at)
              VALUES (?,?,?,?,?,?,?,?)',
             [$clinicId, $doctorId, $patientId, $when, $duration, 'booked', $source, Db::now()]
         );
+    }
+
+    /**
+     * How late is this booking, and what should happen?
+     *
+     * The clinic sets `late_grace_minutes` (Settings → queue policy). Inside
+     * the grace period a late patient keeps their appointment's place in the
+     * order. Beyond it they are still seen — a patient who travelled across
+     * Colombo does not get sent home by software — but they join as a walk-in,
+     * behind the people who arrived on time.
+     *
+     * The software never decides *medical* priority and never turns a patient
+     * away; it only decides queue order, and it says which rule it applied.
+     *
+     * @return array{status: 'on_time'|'late'|'very_late'|'early', minutes: int, weight: int, message: string}
+     */
+    public function arrivalPolicy(array $appointment, ?array $clinic = null, ?string $now = null): array
+    {
+        $now ??= Db::now();
+        $scheduled = strtotime((string) $appointment['scheduled_for']);
+        $actual = strtotime($now);
+        $delayMinutes = (int) round(($actual - $scheduled) / 60);
+
+        $grace = 15;
+        if ($clinic === null) {
+            $clinic = Db::one('SELECT late_grace_minutes FROM clinics WHERE id = ?', [(int) $appointment['clinic_id']]);
+        }
+        if (is_array($clinic) && isset($clinic['late_grace_minutes'])) {
+            $grace = max(0, (int) $clinic['late_grace_minutes']);
+        }
+
+        // Arrived ahead of schedule: no penalty, but do not let them jump the
+        // queue earlier than their slot either.
+        if ($delayMinutes <= -1) {
+            return [
+                'status' => 'early', 'minutes' => abs($delayMinutes), 'weight' => 1,
+                'message' => 'Checked in ' . abs($delayMinutes) . ' min early — keeps the booked order.',
+            ];
+        }
+
+        if ($delayMinutes <= $grace) {
+            return [
+                'status' => 'on_time', 'minutes' => max(0, $delayMinutes), 'weight' => 1,
+                'message' => 'Checked in on time — keeps the booked order.',
+            ];
+        }
+
+        return [
+            'status' => 'late', 'minutes' => $delayMinutes, 'weight' => 3,
+            'message' => sprintf(
+                'Arrived %d min late (grace is %d min) — added as a walk-in, behind patients who arrived on time.',
+                $delayMinutes,
+                $grace
+            ),
+        ];
     }
 
     public function markCheckedIn(int $clinicId, int $appointmentId): bool
