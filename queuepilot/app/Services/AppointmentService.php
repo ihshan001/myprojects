@@ -89,11 +89,34 @@ final class AppointmentService
         $actual = strtotime($now);
         $delayMinutes = (int) round(($actual - $scheduled) / 60);
 
-        $grace = 15;
+        // Per-service policy first, then the clinic default. A laboratory
+        // can accept a sample later than a ten-minute consultation can; one
+        // number on the clinic row cannot describe both.
+        // Not every caller has a doctor (a bare clinic/scheduled_for pair is
+        // enough to ask "is this patient late?"). Without one there is no
+        // service to look up, so the clinic default answers — which is what
+        // happened before per-service policies existed.
+        $doctorId = isset($appointment['doctor_id']) && (int) $appointment['doctor_id'] > 0
+            ? (int) $appointment['doctor_id']
+            : null;
+        $kind = $doctorId !== null
+            ? Db::scalar(
+                'SELECT kind FROM queues WHERE doctor_id = ? AND clinic_id = ? ORDER BY id DESC LIMIT 1',
+                [$doctorId, (int) $appointment['clinic_id']]
+            )
+            : null;
+        $policy = (new AppointmentPolicyService())->resolve(
+            (int) $appointment['clinic_id'],
+            $kind !== null ? (string) $kind : null,
+            $doctorId
+        );
+        $grace = $policy['late_grace_minutes'];
         if ($clinic === null) {
             $clinic = Db::one('SELECT late_grace_minutes FROM clinics WHERE id = ?', [(int) $appointment['clinic_id']]);
         }
-        if (is_array($clinic) && isset($clinic['late_grace_minutes'])) {
+        if ($policy['source'] === 'clinic' && is_array($clinic) && isset($clinic['late_grace_minutes'])) {
+            // No override configured: the clinic row remains the authority,
+            // exactly as before this service existed.
             $grace = max(0, (int) $clinic['late_grace_minutes']);
         }
 

@@ -118,6 +118,22 @@ final class QueueService
 
             $source = (string) ($opts['source'] ?? 'walkin');
 
+            // A service can refuse walk-ins. Enforced here, where every entry
+            // point funnels through, so a setting on a screen cannot be
+            // bypassed by posting to the API instead of the desk form.
+            if ($source === 'walkin') {
+                $policy = (new \App\Services\AppointmentPolicyService())->resolve(
+                    $clinicId,
+                    isset($queue['kind']) ? (string) $queue['kind'] : null,
+                    isset($queue['doctor_id']) ? (int) $queue['doctor_id'] : null
+                );
+                if (!$policy['allow_walkins']) {
+                    throw new \RuntimeException(
+                        'This service takes booked patients only. Book an appointment, or choose a service that accepts walk-ins.'
+                    );
+                }
+            }
+
             // Priority rules. A clinic that always sees under-fives first
             // writes the rule once instead of flagging every child by hand;
             // the rule's reason is copied onto the entry so an ordering

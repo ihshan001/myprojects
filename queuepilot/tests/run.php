@@ -3453,6 +3453,111 @@ Assert::test("one clinic's checklist says nothing about another", function (): v
 });
 
 /* ------------------------------------------------------------------ */
+/* 52. appointment policies per service                                */
+/* ------------------------------------------------------------------ */
+
+Assert::test('with no policy configured a service behaves exactly as before', function (): void {
+    seedTenant(87, 'policy-clinic', 'Policy Clinic');
+    $policies = new App\Services\AppointmentPolicyService();
+
+    $resolved = $policies->resolve(87, 'consultation');
+    Assert::same('clinic', $resolved['source'], 'the clinic default answers');
+    Assert::same(15, $resolved['late_grace_minutes'], 'grace is the clinic row value');
+    Assert::same((new App\Services\SlotService())->horizonDays(87), $resolved['horizon_days'], 'horizon is the clinic setting');
+    Assert::true($resolved['allow_walkins'], 'walk-ins are accepted');
+
+    Assert::same('clinic', $policies->resolve(87, null)['source'], 'no kind also means the clinic default');
+    Assert::same([], $policies->all(87), 'and nothing was invented');
+});
+
+Assert::test('a service policy overrides only what it names', function (): void {
+    $policies = new App\Services\AppointmentPolicyService();
+    $policies->save(87, ['kind' => 'lab', 'late_grace_minutes' => 45, 'horizon_days' => 90, 'allow_walkins' => '0'], null);
+
+    $lab = $policies->resolve(87, 'lab');
+    Assert::same('kind', $lab['source'], 'the lab policy answers');
+    Assert::same(45, $lab['late_grace_minutes'], 'with the lab grace');
+    Assert::same(90, $lab['horizon_days'], 'and the lab horizon');
+    Assert::false($lab['allow_walkins'], 'and no walk-ins');
+
+    $consult = $policies->resolve(87, 'consultation');
+    Assert::same(15, $consult['late_grace_minutes'], 'a consultation is untouched');
+    Assert::same('clinic', $consult['source'], 'and still says so');
+});
+
+Assert::test('a doctor row overrides the service but a blank field inherits it', function (): void {
+    $policies = new App\Services\AppointmentPolicyService();
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 87');
+
+    $policies->save(87, ['kind' => 'lab', 'doctor_id' => $doctorId, 'horizon_days' => 7], null);
+    $resolved = $policies->resolve(87, 'lab', $doctorId);
+
+    Assert::same('doctor', $resolved['source'], 'the doctor row answers');
+    Assert::same(7, $resolved['horizon_days'], 'with the doctor horizon');
+    Assert::same(45, $resolved['late_grace_minutes'], 'and the lab grace, inherited from the service row');
+    Assert::false($resolved['allow_walkins'], 'and the service walk-in rule, not silently re-opened');
+});
+
+Assert::test('saving the same service twice replaces its policy instead of stacking', function (): void {
+    $policies = new App\Services\AppointmentPolicyService();
+    $policies->save(87, ['kind' => 'lab', 'late_grace_minutes' => 30, 'horizon_days' => 90, 'allow_walkins' => '0'], null);
+
+    Assert::same(1, (int) Db::scalar(
+        "SELECT COUNT(*) FROM appointment_policies WHERE clinic_id = 87 AND kind = 'lab' AND doctor_id IS NULL"
+    ), 'there is one kind-wide lab policy');
+    Assert::same(30, $policies->resolve(87, 'lab')['late_grace_minutes'], 'and the newer number won');
+});
+
+Assert::test('the walk-in rule and late grace actually change behaviour', function (): void {
+    // A lab queue for this clinic.
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 87');
+    $queueId = Db::insert('INSERT INTO queues (clinic_id, doctor_id, name, kind, token_prefix, session_date, status, last_token_no, created_at) VALUES (87,?,?,?,?,?,?,0,?)',
+        [$doctorId, 'Lab', 'lab', 'L', Db::today(), 'open', Db::now()]);
+    $patient = Db::insert('INSERT INTO patients (clinic_id, code, full_name, created_at) VALUES (87,?,?,?)',
+        ['PWL1', 'Policy Walkin', Db::now()]);
+
+    $queue = new App\Domain\Queue\QueueService();
+    $refused = false;
+    try {
+        $queue->issueToken(87, $queueId, $patient, ['source' => 'walkin']);
+    } catch (\RuntimeException $e) {
+        $refused = str_contains($e->getMessage(), 'booked patients only');
+    }
+    Assert::true($refused, 'a walk-in is refused by the service, not just hidden in the UI');
+
+    $booked = $queue->issueToken(87, $queueId, $patient, ['source' => 'appointment']);
+    Assert::true(isset($booked['token']), 'a booked patient is still accepted');
+
+    // Late arrival: the same 20 minutes is inside the lab's 45-minute grace
+    // and outside the clinic's 15.
+    $appointments = new App\Services\AppointmentService();
+    $appt = ['clinic_id' => 87, 'doctor_id' => $doctorId, 'scheduled_for' => date('Y-m-d H:i:s', time() - 20 * 60)];
+    Assert::same('on_time', $appointments->arrivalPolicy($appt)['status'], '20 min late is on time for the lab');
+
+    Db::run("DELETE FROM appointment_policies WHERE clinic_id = 87 AND kind = 'lab'");
+    Assert::same('late', $appointments->arrivalPolicy($appt)['status'], 'and late once the lab policy is gone');
+});
+
+Assert::test('a policy that changes nothing is refused', function (): void {
+    $policies = new App\Services\AppointmentPolicyService();
+    $refused = 0;
+    foreach ([
+        ['kind' => ''],
+        ['kind' => 'lab'],
+        ['kind' => 'lab', 'late_grace_minutes' => 500],
+        ['kind' => 'lab', 'horizon_days' => 0],
+        ['kind' => 'lab', 'late_grace_minutes' => 10, 'doctor_id' => 999999],
+    ] as $bad) {
+        try {
+            $policies->save(87, $bad, null);
+        } catch (\InvalidArgumentException) {
+            $refused++;
+        }
+    }
+    Assert::same(5, $refused, 'all five malformed policies are refused');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

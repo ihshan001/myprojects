@@ -28,6 +28,7 @@ use App\Http\Controllers\PatientController;
 use App\Http\Controllers\PublicController;
 use App\Http\Controllers\QueueController;
 use App\Http\Controllers\ReportController;
+use App\Http\Controllers\AppointmentPolicyController;
 use App\Http\Controllers\BreakController;
 use App\Http\Controllers\OnboardingController;
 use App\Http\Controllers\PriorityRuleController;
@@ -135,6 +136,11 @@ Router::post('/queues/workflows/{id}/delete', [WorkflowController::class, 'delet
 // Getting started — a checklist measured from clinic data, not ticks.
 Router::get('/getting-started', [OnboardingController::class, 'index'], ['auth' => true]);
 Router::get('/getting-started/display', [OnboardingController::class, 'seenDisplay'], ['auth' => true]);
+
+// Appointment policies — per-service grace, horizon and walk-in acceptance.
+Router::get('/queues/appointment-policies', [AppointmentPolicyController::class, 'index'], ['auth' => true]);
+Router::post('/queues/appointment-policies', [AppointmentPolicyController::class, 'save'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/queues/appointment-policies/{id}/delete', [AppointmentPolicyController::class, 'delete'], ['auth' => true, 'ability' => 'clinic.manage']);
 
 Router::get('/rooms', [RoomController::class, 'index'], ['auth' => true]);
 Router::post('/rooms', [RoomController::class, 'store'], ['auth' => true, 'ability' => 'doctor.manage']);

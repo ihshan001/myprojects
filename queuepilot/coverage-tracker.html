@@ -282,13 +282,13 @@
         </label>
         <p class="note"><code>/queues/config</code> sets the name pattern (<code>{doctor}</code>, <code>{n}</code>), the queue type (consultation/lab/pharmacy/general), the token prefix and the digit count. Verified the settings flow through creation: "Lab Bench 1", kind=lab, prefix L, padding 4. A queue that has issued a token is locked against renaming.</p>
       </li>
-      <li class="item" data-status="partial">
+      <li class="item" data-status="built">
         <label class="row">
           <input type="checkbox" class="tick" data-id="Clinic administration|Appointment policies">
           <span class="name">Appointment policies</span>
-          <span class="pill partial">Partial</span>
+          <span class="pill built">Built</span>
         </label>
-        <p class="note">Late-arrival grace, appointment vs walk-in weighting, and a booking horizon exist. No per-service policy engine.</p>
+        <p class="note"><code>/queues/appointment-policies</code>: late grace, booking horizon and walk-in acceptance, set per service or per doctor, with blank fields inheriting the clinic default. Both the walk-in refusal and the grace are enforced in the service layer. Verified live: a lab policy of 45-minute grace made a 20-minute late arrival <em>on time</em> where the clinic's 15 made it late; walk-ins refused with an explanation while booked patients were still accepted.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
@@ -1183,7 +1183,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (209 automated checks, 154 files lint-clean, healthcheck green).
+    application (215 automated checks, 157 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.

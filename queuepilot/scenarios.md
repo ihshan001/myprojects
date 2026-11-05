@@ -5,7 +5,7 @@ codebase actually does. It is deliberately blunt: a feature is **Built** only
 if I ran it against the live server, **Partial** if something exists but does
 not meet the scenario as written, and **Not built** otherwise.
 
-Verified on 2026-11-05 against commit `HEAD` (209 automated checks, 154 files
+Verified on 2026-11-05 against commit `HEAD` (215 automated checks, 157 files
 lint-clean, healthcheck all-good, all five demo logins re-checked).
 
 > **Read this first.** The blueprint describes a mature product with billing,
@@ -169,6 +169,7 @@ lint-clean, healthcheck all-good, all five demo logins re-checked).
 | Working days and hours per doctor | ✅ | **Built.** `/calendar` has a per-doctor weekday shift grid, intersected with clinic hours. A doctor with no roster follows clinic hours and the screen says so. Verified that a roster of Tue only produces a Tue-only grid |
 | A clinic edits its opening hours | ✅ | Settings → Opening hours: seven weekday rows plus a booking horizon. Verified end to end — saving Mon–Fri 09:00–13:00 changed the public booking grid to 09:00…12:45 and closing Sunday made the page say so |
 | Leave is recorded and blocks booking | ✅ | Leave rows block new appointments for the window |
+| A service sets its own late grace, horizon and walk-in rule | ✅ | **Built.** `/queues/appointment-policies`, per queue kind or per doctor, blank inheriting the clinic default. Verified live: a laboratory policy of 45-minute grace made a 20-minute late arrival read `on_time` where the clinic's 15-minute default reads `late`; walk-ins were refused at token issue (in the service, so the API obeys it too) while booked patients were still accepted |
 | Doctor cancels a session | ◐ | A queue can be paused and closed with the unseen-patient acknowledgement, and leave blocks new bookings. Cancelling a day's booked appointments in bulk is still not one action |
 | Payroll, rosters, commissions | ⛔ | Not a queue problem |
 
@@ -307,13 +308,13 @@ first clinic goes live — the automated suite does not replace it.
 | Notifications | 5 | 1 | 0 |
 | Accounts | 9 | 0 | 1 |
 | Tenancy | 7 | 0 | 0 |
-| Doctors | 5 | 1 | 0 |
+| Doctors | 6 | 1 | 0 |
 | Reporting | 8 | 1 | 1 |
 | Data & ops | 6 | 1 | 0 |
 | Money | 2 | 0 | 3 |
 | Hardware | 2 | 1 | 2 |
 | Other verticals | 5 | 0 | 3 |
-| **Total** | **97** | **7** | **13** |
+| **Total** | **98** | **7** | **13** |
 
 **What is genuinely finished.** The queue engine holds up under adversarial
 input: issuing, calling, transferring, prioritising, pausing, closing,

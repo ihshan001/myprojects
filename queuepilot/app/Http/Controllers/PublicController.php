@@ -383,9 +383,20 @@ final class PublicController
         }
         // The horizon is a rule, not a UI hint: thirty days is enough for a
         // patient and short enough that the clinic's schedule is not frozen
-        // months ahead by bookings nobody remembers making.
-        if (strtotime($date) > strtotime('+' . (new \App\Services\SlotService())->horizonDays($clinicId) . ' days')) {
-            $fail('Appointments can only be booked ' . (new \App\Services\SlotService())->horizonDays($clinicId) . ' days ahead.');
+        // months ahead by bookings nobody remembers making. A service can
+        // set its own — a physio course is booked six weeks out, a flu
+        // clinic wants nothing beyond tomorrow.
+        $doctorKind = Db::scalar(
+            'SELECT kind FROM queues WHERE clinic_id = ? AND doctor_id = ? ORDER BY id DESC LIMIT 1',
+            [$clinicId, $doctorId]
+        );
+        $policy = (new \App\Services\AppointmentPolicyService())->resolve(
+            $clinicId,
+            $doctorKind !== null ? (string) $doctorKind : null,
+            $doctorId
+        );
+        if (strtotime($date) > strtotime('+' . $policy['horizon_days'] . ' days')) {
+            $fail('Appointments can only be booked ' . $policy['horizon_days'] . ' days ahead for this service.');
             return;
         }
         if (preg_match('/^\d{2}:\d{2}$/', $time) !== 1) {
