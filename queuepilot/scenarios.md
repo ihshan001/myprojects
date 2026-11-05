@@ -88,7 +88,7 @@ lint-clean, healthcheck all-good, all five demo logins re-checked).
 | Only clinical staff may set priority | ✅ | Enforced in the **service**, not just the UI — every entry point obeys it |
 | The reason is mandatory and recorded | ✅ | Blank reason is refused; reason lands in the audit log |
 | The queue reorders immediately | ✅ | Sort weight recomputed in the same transaction |
-| Overuse is visible | ◐ | Every override is audited, but there is no dashboard that summarises override frequency per staff member |
+| Overuse is visible | ✅ | **Built.** A section on `/queues/priority-rules` shows manual overrides, the clinic rate, and **automated rule hits counted separately** — a policy that flags over-70s is not a person exercising judgement. Per-staff rows divide each person's overrides by **their own** token count, never the clinic's: dividing one person's decisions by everybody's work makes a busy receptionist look restrained and a quiet one reckless. A person with no tokens gets a rate of `null` and shows `—`, not a reassuring `0%`, and no flag is invented without a denominator. Flags start at three overrides (small numbers produce wild percentages) and quote both numbers so the reader judges rather than receives a verdict. The screen says a high rate may be entirely correct for an urgent-care service |
 | A standing rule reorders arrivals without a human flagging each one | ✅ | **Built.** `/queues/priority-rules`. A rule matches on source, queue kind, doctor, patient age and hour of day and carries a boost or a penalty with the clinical reason. Verified live: an under-fives rule put two later children (`A002`, `A003`) ahead of an earlier adult (`A001`, −2 from a routine-review penalty). The strongest match wins and does not stack, a hand-set priority at the desk still overrides (7 beats the rule's 5), a rule can be turned off or deleted while the entries it already decided keep their recorded reason, and a patient with no birth year never matches an age rule |
 
 ## 6. Transfers between services
@@ -303,7 +303,7 @@ first clinic goes live — the automated suite does not replace it.
 | 2. Appointment booking | 9 | 0 | 0 | 0 |
 | 3. Calling, consultation and completion | 8 | 0 | 0 | 0 |
 | 4. Queue disruption — delays, pauses, closure | 6 | 0 | 0 | 0 |
-| 5. Priority and clinical override | 5 | 1 | 0 | 0 |
+| 5. Priority and clinical override | 6 | 0 | 0 | 0 |
 | 6. Transfers between services | 4 | 0 | 1 | 0 |
 | 7. Patient-facing tracking | 6 | 0 | 0 | 0 |
 | 8. Displays and signage | 5 | 0 | 0 | 0 |
@@ -316,7 +316,7 @@ first clinic goes live — the automated suite does not replace it.
 | 15. Money | 2 | 0 | 3 | 0 |
 | 16. Hardware and physical space | 4 | 1 | 0 | 0 |
 | 17. Other verticals | 5 | 0 | 3 | 0 |
-| **Total (122 scenarios)** | **108** | **5** | **7** | **2** |
+| **Total (122 scenarios)** | **109** | **4** | **7** | **2** |
 
 **What is genuinely finished.** The queue engine holds up under adversarial
 input: issuing, calling, transferring, prioritising, pausing, closing,

@@ -56,6 +56,16 @@ final class PriorityRuleController
             'kinds'    => PriorityRuleService::KINDS,
             'old'      => [],
             'errors'   => [],
+            // The rules decide who gets seen first; the overuse report is what
+            // shows whether they are still being used as intended. Both on one
+            // screen so a rule and its consequences are read together.
+            'overuse'  => (new \App\Services\PriorityAuditService())->report(
+                $clinicId,
+                Request::string('from', date('Y-m-d', strtotime('-30 days'))),
+                Request::string('to', Db::today())
+            ),
+            'from'     => Request::string('from', date('Y-m-d', strtotime('-30 days'))),
+            'to'       => Request::string('to', Db::today()),
         ]);
     }
 

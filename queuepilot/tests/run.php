@@ -4273,6 +4273,107 @@ Assert::test('a session that has not been started refuses to call anybody into t
 });
 
 /* ------------------------------------------------------------------ */
+/* 62. Priority overuse is measurable, not just audited                */
+/* ------------------------------------------------------------------ */
+
+Assert::test('priority overuse is reported per person against their own token count', function (): void {
+    seedTenant(106, 'overuse', 'Overuse Clinic');
+    $clinicId = 106;
+    $adminId = (int) Db::scalar("SELECT id FROM users WHERE email = 'admin106@alpha.example'");
+    $heavy = Db::insert(
+        'INSERT INTO users (clinic_id, name, email, password_hash, role, is_active, created_at, email_verified_at)
+         VALUES (106, ?, ?, ?, ?, 1, ?, ?)',
+        ['Heavy Overrider', 'heavy@overuse.example', password_hash('Heavy#2026', PASSWORD_DEFAULT), 'receptionist', Db::now(), Db::now()]
+    );
+
+    // Two people: one prioritises half of what they issue, one never does.
+    // The report must separate them rather than produce a clinic-wide blur.
+    $audit = static function (int $actor, string $action, array $meta = []) use ($clinicId): void {
+        Db::insert(
+            'INSERT INTO audit_logs (clinic_id, actor_id, action, entity, entity_id, meta_json, created_at)
+             VALUES (?,?,?,?,?,?,?)',
+            [$clinicId, $actor, $action, 'queue_entry', null, $meta === [] ? null : json_encode($meta), Db::now()]
+        );
+    };
+    for ($i = 0; $i < 6; $i++) {
+        $audit($heavy, 'queue.token_issued', ['token' => 'A00' . $i]);
+    }
+    for ($i = 0; $i < 4; $i++) {
+        $audit($heavy, 'queue.priority', ['reason' => 'Elderly patient']);
+    }
+    for ($i = 0; $i < 6; $i++) {
+        $audit($adminId, 'queue.token_issued', ['token' => 'B00' . $i]);
+    }
+    // An automated rule hit is not a person exercising judgement.
+    $audit(0, 'queue.priority_rule_applied', ['rule' => 'Over 70', 'priority' => 1]);
+
+    $report = (new App\Services\PriorityAuditService())->report($clinicId, Db::today(), Db::today());
+
+    Assert::same(4, (int) $report['overrides'], 'four manual overrides are counted');
+    Assert::same(1, (int) $report['rule_hits'], 'and the automated rule hit is counted apart, not as a person');
+    Assert::same(33.3, (float) $report['rate'], 'the clinic rate is overrides over the 12 tokens issued');
+
+    $byName = [];
+    foreach ($report['per_staff'] as $row) {
+        $byName[(string) $row['name']] = $row;
+    }
+    Assert::same(4, (int) $byName['Heavy Overrider']['overrides'], 'the heavy overrider has four');
+    Assert::same(6, (int) $byName['Heavy Overrider']['tokens'], 'against their own six tokens');
+    Assert::same(66.7, (float) $byName['Heavy Overrider']['rate'], 'so their rate is 66.7%');
+    Assert::true(!isset($byName['Admin 106']), 'a person with no overrides is not listed as an overrider');
+
+    // The reason is what makes an override reviewable, so it is grouped.
+    Assert::true($report['reasons'] !== [], 'the reasons given are grouped');
+    
+    Assert::same('Elderly patient', (string) $report['reasons'][0]['reason'], 'and the commonest is named');
+    Assert::same(4, (int) $report['reasons'][0]['count'], 'with its count');
+
+    // 2 of 4 is 50%, which crosses the "high" threshold — and the flag must
+    // quote both numbers so the reader can judge rather than take a verdict.
+    Assert::true($report['flags'] !== [], 'a 50% rate raises a flag');
+    $high = array_values(array_filter($report['flags'], static fn (array $f): bool => $f['severity'] === 'high'));
+    Assert::true($high !== [], 'at the high severity');
+    Assert::contains('6', (string) $high[0]['message'], 'the message carries the denominator');
+    Assert::contains('of the', (string) $high[0]['message'], 'in words a manager can read');
+
+    // A rate built on two overrides must not raise a flag: small numbers make
+    // wild percentages, and a finding of "50%" from one person's afternoon is
+    // how a report loses its credibility.
+    $tiny = (new App\Services\PriorityAuditService())->report($clinicId, '2000-01-01', '2000-01-01');
+    Assert::same([], $tiny['flags'], 'a period with no data raises nothing');
+});
+
+Assert::test('an override rate with no denominator is reported as unknown, not as zero', function (): void {
+    seedTenant(107, 'overuse-nod', 'Overuse No Denominator');
+    $clinicId = 107;
+    $surgeon = Db::insert(
+        'INSERT INTO users (clinic_id, name, email, password_hash, role, is_active, created_at, email_verified_at)
+         VALUES (107, ?, ?, ?, ?, 1, ?, ?)',
+        ['Visiting Surgeon', 'surgeon@nod.example', password_hash('Surgeon#2026', PASSWORD_DEFAULT), 'doctor', Db::now(), Db::now()]
+    );
+    // Two overrides but no tokens issued by this account: a visiting clinician
+    // who only ever adjusts the order of a list somebody else created.
+    for ($i = 0; $i < 2; $i++) {
+        Db::insert(
+            'INSERT INTO audit_logs (clinic_id, actor_id, action, entity, entity_id, meta_json, created_at)
+             VALUES (107,?,?,?,?,?,?)',
+            [$surgeon, 'queue.priority', 'queue_entry', null, json_encode(['reason' => 'Post-op bleeding']), Db::now()]
+        );
+    }
+
+    $report = (new App\Services\PriorityAuditService())->report($clinicId, Db::today(), Db::today());
+    $row = $report['per_staff'][0];
+
+    Assert::same(2, (int) $row['overrides'], 'their overrides are counted');
+    Assert::same(0, (int) $row['tokens'], 'they issued no tokens');
+    Assert::same(null, $row['rate'], 'so the rate is null — unknown — rather than a reassuring 0%');
+    // And no percentage flag is raised against them, because there is nothing
+    // to divide by: a finding built on no denominator would be a fabrication.
+    $personal = array_values(array_filter($report['flags'], static fn (array $f): bool => $f['who'] === 'Visiting Surgeon'));
+    Assert::same([], $personal, 'no per-person flag is invented without a denominator');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

@@ -207,3 +207,113 @@
     </form>
   </div>
 </div>
+
+<!-- ==================== overuse ==================== -->
+<?php
+// Framed as a conversation, not a charge sheet. Every number here is paired
+// with what it was divided by, because "12 overrides" means nothing without
+// "out of how many tokens".
+$severityTone = static fn (string $s): string => match ($s) {
+    'high' => 'border-rose-200 bg-rose-50 text-rose-900',
+    'watch' => 'border-amber-200 bg-amber-50 text-amber-900',
+    default => 'border-slate-200 bg-slate-50 text-slate-700',
+};
+?>
+<div class="card mt-5 overflow-hidden">
+  <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+    <div>
+      <p class="text-xs font-semibold text-slate-600">Who is overriding priority</p>
+      <p class="text-[11px] text-slate-400"><?= e($from) ?> to <?= e($to) ?></p>
+    </div>
+    <form method="get" action="/queues/priority-rules" class="flex items-end gap-1.5">
+      <input class="input !py-1.5 text-xs" type="date" name="from" value="<?= e($from) ?>">
+      <input class="input !py-1.5 text-xs" type="date" name="to" value="<?= e($to) ?>">
+      <button class="btn-secondary !py-1.5 text-xs">Show</button>
+    </form>
+  </div>
+
+  <div class="grid grid-cols-3 divide-x divide-slate-100 border-b border-slate-100 text-center">
+    <div class="px-3 py-3">
+      <p class="text-xl font-bold text-slate-900"><?= (int) $overuse['overrides'] ?></p>
+      <p class="text-[10px] uppercase tracking-wide text-slate-500">manual overrides</p>
+    </div>
+    <div class="px-3 py-3">
+      <p class="text-xl font-bold text-slate-900"><?= e((string) $overuse['rate']) ?>%</p>
+      <p class="text-[10px] uppercase tracking-wide text-slate-500">of <?= (int) $overuse['tokens'] ?> tokens</p>
+    </div>
+    <div class="px-3 py-3">
+      <p class="text-xl font-bold text-slate-900"><?= (int) $overuse['rule_hits'] ?></p>
+      <p class="text-[10px] uppercase tracking-wide text-slate-500">by a rule, not a person</p>
+    </div>
+  </div>
+
+  <?php if ($overuse['flags'] !== []): ?>
+    <div class="space-y-2 border-b border-slate-100 p-3">
+      <?php foreach ($overuse['flags'] as $flag): ?>
+        <div class="rounded-lg border <?= $severityTone((string) $flag['severity']) ?> px-3 py-2">
+          <p class="text-[11px] font-semibold"><?= e((string) $flag['who']) ?></p>
+          <p class="mt-0.5 text-[11px] leading-relaxed"><?= e((string) $flag['message']) ?></p>
+        </div>
+      <?php endforeach; ?>
+    </div>
+  <?php endif; ?>
+
+  <?php if ($overuse['per_staff'] === []): ?>
+    <p class="px-4 py-4 text-xs leading-relaxed text-slate-500">
+      Nobody overrode priority in this period. That is the ordinary case — the rules are
+      doing the work and no one is jumping the queue by hand.
+    </p>
+  <?php else: ?>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Staff member</th>
+          <th class="numeric">Overrides</th>
+          <th class="numeric">Tokens issued</th>
+          <th class="numeric">Rate</th>
+        </tr>
+      </thead>
+      <tbody>
+        <?php foreach ($overuse['per_staff'] as $row): ?>
+          <tr>
+            <td class="font-medium"><?= e((string) $row['name']) ?></td>
+            <td class="numeric"><?= (int) $row['overrides'] ?></td>
+            <td class="numeric text-slate-500"><?= (int) $row['tokens'] ?></td>
+            <td class="numeric">
+              <?php if ($row['rate'] === null): ?>
+                <span class="text-[10px] text-slate-400" title="They issued no tokens in this period, so there is no denominator">—</span>
+              <?php else: ?>
+                <span class="font-semibold <?= (float) $row['rate'] >= 40 ? 'text-rose-700' : ((float) $row['rate'] >= 25 ? 'text-amber-700' : 'text-slate-700') ?>">
+                  <?= e((string) $row['rate']) ?>%
+                </span>
+              <?php endif; ?>
+            </td>
+          </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  <?php endif; ?>
+
+  <?php if ($overuse['reasons'] !== []): ?>
+    <details class="border-t border-slate-100">
+      <summary class="cursor-pointer px-4 py-2.5 text-xs font-semibold text-teal-700 hover:bg-slate-50">
+        The reasons given (<?= count($overuse['reasons']) ?>)
+      </summary>
+      <ul class="divide-y divide-slate-100">
+        <?php foreach ($overuse['reasons'] as $r): ?>
+          <li class="flex items-center justify-between gap-3 px-4 py-2">
+            <span class="min-w-0 text-xs text-slate-700"><?= e((string) $r['reason']) ?></span>
+            <span class="shrink-0 text-[11px] tabular text-slate-400"><?= (int) $r['count'] ?>×</span>
+          </li>
+        <?php endforeach; ?>
+      </ul>
+    </details>
+  <?php endif; ?>
+
+  <p class="border-t border-slate-100 px-4 py-2.5 text-[10px] leading-relaxed text-slate-400">
+    A high rate is not automatically wrong — an urgent-care service will legitimately override far
+    more than a family OPD. Read it as a question to ask, not a verdict. Overrides are attributed to
+    the signed-in account, so a shared login shows as one person; automated rule hits are counted
+    separately because a policy is not a judgement.
+  </p>
+</div>

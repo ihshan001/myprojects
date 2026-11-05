@@ -668,7 +668,8 @@
           <span class="name">Urgent queue overrides</span>
           <span class="pill built">Built</span>
         </label>
-        <p class="note"><code>priority</code> with mandatory clinical reason; <code>queue.priority</code> ability.</p>
+        <p class="note"><code>priority</code> with mandatory clinical reason; <code>queue.priority</code> ability.
+          <b>Overuse is measurable:</b> a section on <code>/queues/priority-rules</code> reports manual overrides per person against <em>their own</em> token count — never the clinic's, which would make a busy receptionist look restrained and a quiet one reckless. Automated rule hits are counted separately, a person with no tokens shows <code>—</code> rather than a reassuring 0%, and no flag is raised without a denominator or below three overrides. The screen states that a high rate may be entirely correct for an urgent-care service.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
