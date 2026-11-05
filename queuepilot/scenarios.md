@@ -335,8 +335,11 @@ reporting page that answers the questions a clinic manager asks.
    termination in the app — a proxy does that. These are decisions, and calling
    them "built" would be the lie the whole document exists to avoid.
 2. **Operations that need a person.** The continuity drill reconciles the paper
-   log against the system, but somebody still has to write a paper token. A
-   penetration test and a dependency CVE scan are real activities, not code.
+   log against the system, but somebody still has to write a paper token. An
+   external **penetration test** is a real engagement with a real attacker's
+   mindset, and no amount of unit tests substitutes for it. (The dependency
+   scan *is* now automated: `npm run security` runs `npm audit` over all 136
+   packages and reports 0 known advisories — that part is no longer a gap.)
 3. **Genuine product gaps.** A patient cannot reschedule from the tracking link.
    A doctor cannot cancel a day's appointments in bulk. There is no single
    complete data-export archive and no patient satisfaction survey. Service
