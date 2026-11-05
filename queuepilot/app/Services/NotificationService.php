@@ -15,7 +15,7 @@ use App\Core\Log;
  * `dedupe_key` is UNIQUE — that is the idempotency guard.
  *
  * Delivery is pluggable: SmsGateway implements the provider call. Without
- * credentials the worker marks messages 'simulated' so the whole pipeline stays
+ * credentials the log transport records messages so the whole pipeline stays
  * observable in development. SMS/WhatsApp usage is metered separately from the
  * subscription (see invoices / usage), per the billing rules.
  */
@@ -240,6 +240,7 @@ final class NotificationService
         );
 
         $sent = 0;
+        $logged = 0;
         $failed = 0;
         foreach ($due as $job) {
             $attempts = (int) $job['attempts'] + 1;
@@ -255,26 +256,26 @@ final class NotificationService
                     // number in the column; use it rather than drop the send.
                     $to = (string) $job['to_number'];
                 }
-                $result = $this->gateway($job['channel'])->send($to, $body);
-                if ($result === 'sent') {
+                // Three honest outcomes. `sent` means a provider accepted it.
+                // `logged` means the development transport recorded the message
+                // and nobody was texted — it is terminal, because retrying a
+                // log write forever is pointless, but it is NOT counted as a
+                // send, so a clinic reading the history cannot conclude a
+                // patient was contacted. Anything else throws and is retried.
+                $outcome = $this->gateway($job['channel'])->send($to, $body);
+                if ($outcome === 'logged') {
                     Db::run(
-                        "UPDATE notifications SET status='sent', attempts=?, sent_at=? WHERE id=?",
-                        [$attempts, Db::now(), $job['id']]
+                        "UPDATE notifications SET status='logged', attempts=?, last_error=?, sent_at=NULL WHERE id=?",
+                        [$attempts, 'recorded by the log transport — not sent to the patient', $job['id']]
                     );
-                    $sent++;
-                } else {
-                    // The gateway accepted the job but no provider is wired up.
-                    // Marking this "sent" would tell the clinic a patient was
-                    // notified when nothing left the building, so it stays
-                    // queued with an explicit reason and backs off like a
-                    // failure. Billing/usage meters only count real sends.
-                    $status = $attempts >= 3 ? 'abandoned' : 'queued';
-                    Db::run(
-                        'UPDATE notifications SET status=?, attempts=?, last_error=?, scheduled_at=? WHERE id=?',
-                        [$status, $attempts, 'no gateway provider configured', date('Y-m-d H:i:s', time() + 60 * (2 ** $attempts)), $job['id']]
-                    );
-                    $failed++;
+                    $logged++;
+                    continue;
                 }
+                Db::run(
+                    "UPDATE notifications SET status='sent', attempts=?, sent_at=?, last_error=NULL WHERE id=?",
+                    [$attempts, Db::now(), $job['id']]
+                );
+                $sent++;
             } catch (\Throwable $e) {
                 $status = $attempts >= 3 ? 'abandoned' : 'queued';
                 $retryAt = date('Y-m-d H:i:s', time() + 60 * (2 ** $attempts));
@@ -287,7 +288,7 @@ final class NotificationService
             }
         }
 
-        return ['processed' => count($due), 'sent' => $sent, 'failed' => $failed];
+        return ['processed' => count($due), 'sent' => $sent, 'logged' => $logged, 'failed' => $failed];
     }
 
     private function gateway(string $channel): Gateway
@@ -322,10 +323,13 @@ final class NotificationService
             "SELECT
                 SUM(CASE WHEN status='queued' THEN 1 ELSE 0 END) AS queued,
                 SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) AS sent,
+                -- Recorded by the log transport: never reached a patient, so it
+                -- is counted separately from a real send.
+                SUM(CASE WHEN status='logged' THEN 1 ELSE 0 END) AS logged,
                 SUM(CASE WHEN status IN ('failed','abandoned') THEN 1 ELSE 0 END) AS failed,
                 COUNT(*) AS total
              FROM notifications WHERE clinic_id = ?",
             [$clinicId]
-        ) ?? ['queued' => 0, 'sent' => 0, 'failed' => 0, 'total' => 0];
+        ) ?? ['queued' => 0, 'sent' => 0, 'logged' => 0, 'failed' => 0, 'total' => 0];
     }
 }

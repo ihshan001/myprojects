@@ -103,8 +103,8 @@
   </div>
 
   <div class="legend">
-    <span><i class="dot built"></i> 103 built</span>
-    <span><i class="dot partial"></i> 20 partial</span>
+    <span><i class="dot built"></i> 104 built</span>
+    <span><i class="dot partial"></i> 19 partial</span>
     <span><i class="dot missing"></i> 0 not built</span>
   </div>
 
@@ -822,9 +822,9 @@
         <label class="row">
           <input type="checkbox" class="tick" data-id="Communication|SMS notifications">
           <span class="name">SMS notifications</span>
-          <span class="pill partial">Partial</span>
+          <span class="pill built">Built</span>
         </label>
-        <p class="note">Queue and delivery pipeline is complete and honest about failure. <strong>No provider account is configured</strong>, so messages are abandoned with <code>no gateway provider configured</code>.</p>
+        <p class="note">Three transports: <code>http</code> posts to a real aggregator (verified against a local sink — correct URL, Basic auth, body), <code>log</code> records the message for development, <code>auto</code> picks http when credentials exist. Failures retry with backoff and end <code>abandoned</code> with the reason.</p>
       </li>
       <li class="item" data-status="partial">
         <label class="row">
@@ -832,7 +832,7 @@
           <span class="name">WhatsApp integration</span>
           <span class="pill partial">Partial</span>
         </label>
-        <p class="note">A gateway adapter exists alongside SMS; same caveat — nothing is provisioned.</p>
+        <p class="note">Adapter shares the SMS transport design. Not exercised against a real WhatsApp Business account — the message contract differs from SMS (template approval, 24-hour windows) and would need its own work.</p>
       </li>
       <li class="item" data-status="partial">
         <label class="row">
@@ -840,7 +840,7 @@
           <span class="name">Email notifications</span>
           <span class="pill partial">Partial</span>
         </label>
-        <p class="note"><code>MailService</code> sends invitations and password resets (log transport in this demo). Patient email notifications are not a channel in the queue pipeline.</p>
+        <p class="note"><code>MailService</code> (none/log/smtp) sends invitations, password resets and now email confirmations. Patient queue messages are SMS/WhatsApp only — a deliberate choice, since patients are in a waiting room without an inbox.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
@@ -1183,7 +1183,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (157 automated checks, 132 files lint-clean, healthcheck green).
+    application (161 automated checks, 132 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.

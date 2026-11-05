@@ -629,9 +629,18 @@ Assert::test('the outbox hands back only work that is due', function () use ($no
 });
 
 Assert::test('a message with no configured provider is never reported as sent', function () use ($notifications): void {
-    // Simulate a pending job with a live phone number and a gateway that has no
-    // credentials. It must stay retryable — a clinic that sees "sent" stops
-    // chasing patients that were never actually contacted.
+    // A pending job with a live phone number and an http transport that has no
+    // URL. It must stay retryable — a clinic that sees "sent" stops chasing
+    // patients that were never actually contacted.
+    //
+    // The default transport is `log`, which records the message and reports it
+    // as `logged` rather than `sent`. That is correct for a development box,
+    // but this test is about a transport that was *meant* to deliver and
+    // cannot, so it sets http explicitly.
+    putenv('SMS_GATEWAY=http');
+    putenv('SMS_PROVIDER_URL=');
+    App\Core\Env::init(require QP_ROOT . '/config/config.php');
+
     $entryId = (int) Db::scalar('SELECT id FROM queue_entries WHERE clinic_id = 1 ORDER BY id LIMIT 1');
     Db::run(
         "INSERT INTO notifications (clinic_id, entry_id, channel, template, to_number, payload_json,
@@ -647,7 +656,11 @@ Assert::test('a message with no configured provider is never reported as sent', 
     Assert::false($row['status'] === 'sent', 'must not claim delivery');
     Assert::same('queued', $row['status'], 'stays queued for retry');
     Assert::true((int) $row['attempts'] >= 1, 'attempt counted');
-    Assert::contains('gateway', (string) $row['last_error'], 'reason recorded');
+    Assert::contains('missing', (string) $row['last_error'], 'reason recorded');
+
+    // Leave the environment as the rest of the suite expects it.
+    putenv('SMS_GATEWAY=log');
+    App\Core\Env::init(require QP_ROOT . '/config/config.php');
 });
 
 Assert::test('a patient without a phone number is never messaged', function (): void {
@@ -2389,6 +2402,87 @@ Assert::test('an already verified address gets no new link', function (): void {
     Db::run('UPDATE users SET email_verified_at = ? WHERE id = ?', [Db::now(), $ownerId]);
 
     Assert::true($service->send($ownerId, true) === null, 'nothing is sent for a confirmed address');
+});
+
+/* ------------------------------------------------------------------ */
+/* 40. sms transport honesty                                           */
+/* ------------------------------------------------------------------ */
+
+Assert::test('the log transport reports a send and writes the message', function (): void {
+    putenv('SMS_GATEWAY=log');
+    App\Core\Env::init(require QP_ROOT . '/config/config.php');
+
+    $gateway = new App\Services\SmsGateway();
+    Assert::same('logged', $gateway->send('+94771234567', 'Pipeline check'), 'the log transport records rather than sends');
+});
+
+Assert::test('http transport without a provider URL fails loudly', function (): void {
+    // The old gateway returned "simulated" here, which the worker treated as a
+    // delivery. A half-configured production install must not look healthy.
+    putenv('SMS_GATEWAY=http');
+    putenv('SMS_PROVIDER_URL=');
+    App\Core\Env::init(require QP_ROOT . '/config/config.php');
+
+    Assert::throws(
+        static fn () => (new App\Services\SmsGateway())->send('+94771234567', 'Should not send'),
+        \RuntimeException::class,
+        'http without a URL is an error'
+    );
+});
+
+Assert::test('auto transport falls back to the log when unconfigured', function (): void {
+    putenv('SMS_GATEWAY=auto');
+    putenv('SMS_PROVIDER_URL=');
+    putenv('SMS_PROVIDER_SID=');
+    putenv('SMS_PROVIDER_TOKEN=');
+    App\Core\Env::init(require QP_ROOT . '/config/config.php');
+
+    Assert::same('logged', (new App\Services\SmsGateway())->send('+94771234567', 'Auto fallback'), 'falls back to the log transport');
+});
+
+Assert::test('a delivered message is marked sent and a failure is retried', function (): void {
+    putenv('SMS_GATEWAY=log');
+    App\Core\Env::init(require QP_ROOT . '/config/config.php');
+
+    $clinicId = 1;
+    $entryId = (int) Db::scalar('SELECT id FROM queue_entries WHERE clinic_id = ? LIMIT 1', [$clinicId]);
+    $service = new App\Services\NotificationService();
+
+    $okId = Db::insert(
+        'INSERT INTO notifications (clinic_id, entry_id, channel, template, to_number, payload_json, dedupe_key, status, attempts, scheduled_at, created_at)
+         VALUES (?,?,?,?,?,?,?,?,0,?,?)',
+        [$clinicId, $entryId, 'sms', 'token_issued', '•••••123',
+         json_encode(['body' => 'Your turn is near.', 'to' => '+94771234567']),
+         'test-delivery-' . bin2hex(random_bytes(4)), 'queued', date('Y-m-d H:i:s', time() - 10), Db::now()]
+    );
+
+    $service->processDue(50);
+    $okRow = Db::one('SELECT status, sent_at, last_error FROM notifications WHERE id = ?', [$okId]);
+    Assert::same('logged', (string) $okRow['status'], 'the log transport is recorded as logged, not sent');
+    Assert::true($okRow['sent_at'] === null, 'no sent_at stamp, because nothing was sent');
+    Assert::contains('not sent', (string) $okRow['last_error'], 'the history says plainly that nobody was texted');
+
+    // Now a transport that throws: the row must go back to queued with a reason.
+    putenv('SMS_GATEWAY=http');
+    putenv('SMS_PROVIDER_URL=');
+    App\Core\Env::init(require QP_ROOT . '/config/config.php');
+
+    $badId = Db::insert(
+        'INSERT INTO notifications (clinic_id, entry_id, channel, template, to_number, payload_json, dedupe_key, status, attempts, scheduled_at, created_at)
+         VALUES (?,?,?,?,?,?,?,?,0,?,?)',
+        [$clinicId, $entryId, 'sms', 'token_issued', '•••••456',
+         json_encode(['body' => 'Second message.', 'to' => '+94771234567']),
+         'test-failure-' . bin2hex(random_bytes(4)), 'queued', date('Y-m-d H:i:s', time() - 10), Db::now()]
+    );
+
+    $service->processDue(50);
+    $row = Db::one('SELECT status, last_error, attempts FROM notifications WHERE id = ?', [$badId]);
+    Assert::same('queued', (string) $row['status'], 'a failure stays queued for retry');
+    Assert::true((int) $row['attempts'] >= 1, 'the attempt is counted');
+    Assert::contains('missing', (string) $row['last_error'], 'the reason is recorded');
+
+    putenv('SMS_GATEWAY=log');
+    App\Core\Env::init(require QP_ROOT . '/config/config.php');
 });
 
 /* ------------------------------------------------------------------ */

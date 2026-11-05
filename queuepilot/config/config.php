@@ -72,6 +72,17 @@ return [
         'encryption' => getenv('MAIL_ENCRYPTION') ?: 'tls',
         'from'       => getenv('MAIL_FROM') ?: 'no-reply@queuepilot.local',
     ],
+    'sms' => [
+        // log | http | auto. "log" exercises the whole pipeline and writes the
+        // message to the application log so a fresh install cannot text a real
+        // patient; "http" posts to the aggregator and fails loudly when the
+        // credentials are missing; "auto" uses http when they are present.
+        'gateway'        => getenv('SMS_GATEWAY') ?: 'log',
+        'provider_url'   => getenv('SMS_PROVIDER_URL') ?: '',
+        'provider_sid'   => getenv('SMS_PROVIDER_SID') ?: '',
+        'provider_token' => getenv('SMS_PROVIDER_TOKEN') ?: '',
+        'from'           => getenv('SMS_FROM') ?: 'QueuePilot',
+    ],
     'queue' => [
         // default policy; clinics can override per-workspace
         'call_timeout_minutes' => 5,

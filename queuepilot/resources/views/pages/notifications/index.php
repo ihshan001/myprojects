@@ -65,7 +65,12 @@
   </div>
 <?php else: ?>
   <div class="mt-4 grid gap-3 sm:grid-cols-3">
-    <?php foreach ([['queued', 'Queued', 'slate'], ['sent', 'Sent', 'emerald'], ['failed', 'Failed', 'rose']] as [$key, $label, $tone]): ?>
+    <?php foreach ([
+        ['queued', 'Queued', 'slate'],
+        ['sent', 'Sent', 'emerald'],
+        ['logged', 'Recorded only', 'amber'],
+        ['failed', 'Failed', 'rose'],
+    ] as [$key, $label, $tone]): ?>
       <div class="card card-pad">
         <p class="text-2xl font-bold text-<?= $tone ?>-700"><?= (int) ($stats[$key] ?? 0) ?></p>
         <p class="text-[11px] font-medium uppercase tracking-wide text-slate-500"><?= e($label) ?></p>
@@ -96,9 +101,10 @@
                 <td>
                   <span class="<?= match ((string) $n['status']) {
                       'sent' => 'badge-emerald',
+                      'logged' => 'badge-amber',
                       'queued' => 'badge-slate',
                       default => 'badge-rose',
-                  } ?>"><?= e($n['status']) ?></span>
+                  } ?>"><?= e($n['status'] === 'logged' ? 'recorded, not sent' : $n['status']) ?></span>
                   <?php if ((int) $n['attempts'] > 0): ?>
                     <span class="ml-1 text-[10px] text-slate-400">×<?= (int) $n['attempts'] ?></span>
                   <?php endif; ?>
