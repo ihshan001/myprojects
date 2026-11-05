@@ -5,7 +5,7 @@ codebase actually does. It is deliberately blunt: a feature is **Built** only
 if I ran it against the live server, **Partial** if something exists but does
 not meet the scenario as written, and **Not built** otherwise.
 
-Verified on 2026-11-05 against commit `30d4915` (176 automated checks, 140 files
+Verified on 2026-11-05 against commit `HEAD` (188 automated checks, 145 files
 lint-clean, healthcheck all-good, all five demo logins re-checked).
 
 > **Read this first.** The blueprint describes a mature product with billing,
@@ -72,7 +72,7 @@ lint-clean, healthcheck all-good, all five demo logins re-checked).
 
 | Scenario | State | Notes |
 |---|:--:|---|
-| Doctor is running late; the board says so | ✅ | Late-arrival delay announcement with a reason; propagates to ETAs |
+| Doctor is running late; the board says so | ✅ | Late-arrival delay announcement with a reason; propagates to ETAs. Announcing it also texts every **waiting** patient their token and the new estimate — one message per delay length, so 20 then 40 minutes both send while a repeated 20 sends nothing, and clearing the delay sends nothing |
 | Queue is paused (emergency, break) | ✅ | `paused` with a reason; the display shows it instead of a stale wait |
 | Queue is resumed | ✅ | Pause is reversible; the pause interval is excluded from the wait average |
 | **Session is closed with patients still waiting** | ✅ | **This was a real data-loss bug.** Close was reachable by a crafted POST with no UI button and silently left `waiting` rows on a closed session. Now: without `resolve=acknowledge` the close is refused with a count; with it, each unseen patient is marked `no_show` with a note, a `queue_events` row is written per entry, and an `unseen_patients_closed` audit row is recorded. Verified live: 4 waiting → 0 waiting, 4 events, 4 audit rows |

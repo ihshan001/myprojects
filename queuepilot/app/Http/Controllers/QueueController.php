@@ -318,9 +318,29 @@ final class QueueController
             'minutes' => $minutes, 'note' => $note,
         ]);
 
-        flash('success', $minutes === 0
-            ? 'Delay cleared — estimates back to normal.'
-            : sprintf('%s is now shown as %d minutes behind.', $queue['name'], $minutes));
+        // The board shows the delay, but a patient who went for a walk is not
+        // looking at the board. Message everyone still waiting. Idempotent per
+        // delay length, and nothing at all when the delay is being cleared.
+        $messaged = 0;
+        try {
+            $messaged = (new \App\Services\NotificationService())->notifyDelay($clinicId, $queueId, $minutes, $note);
+        } catch (\Throwable $e) {
+            // A messaging failure must never undo the announcement itself.
+            \App\Core\Log::warn('queue.delay_notify_failed', ['queue_id' => $queueId, 'error' => $e->getMessage()]);
+        }
+
+        if ($minutes === 0) {
+            flash('success', 'Delay cleared — estimates back to normal.');
+        } else {
+            flash('success', sprintf(
+                '%s is now shown as %d minutes behind.%s',
+                $queue['name'],
+                $minutes,
+                $messaged > 0
+                    ? sprintf(' %d waiting patient%s told by message.', $messaged, $messaged === 1 ? '' : 's')
+                    : ' No new messages: everyone waiting has already been told this length.'
+            ));
+        }
         back('/app');
     }
 

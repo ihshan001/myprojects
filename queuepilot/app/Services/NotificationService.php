@@ -31,6 +31,7 @@ final class NotificationService
         'entry_approaching' => 'Almost your turn. Token {token} is {ahead} away in the {queue} queue at {clinic}. Please stay nearby.',
         'visit_completed'=> 'Thank you for visiting {clinic}. Token {token} is complete. Get well soon.',
         'appointment_reminder' => 'Reminder: appointment at {clinic} on {when}. Reply to reschedule.',
+        'entry_delayed'    => 'Your doctor is running about {minutes} minutes late. Token {token} keeps its place at {clinic}.',
     ];
 
     public function queue(int $clinicId, int $entryId, string $template, array $vars = []): void
@@ -228,6 +229,94 @@ final class NotificationService
 
         if ($queued > 0) {
             Log::info('notification.reminders_queued', ['date' => $date, 'count' => $queued]);
+        }
+        return $queued;
+    }
+
+    /**
+     * Tell every waiting patient that their doctor is running late.
+     *
+     * The delay was already visible: the board shows it and the tracking page
+     * shows it. Neither helps a patient who has gone for a walk or is sitting
+     * in their car. A delay announcement that only reaches people already
+     * staring at the screen is not a notification.
+     *
+     * Rules that make this safe to call repeatedly:
+     *
+     *   * One message per patient per announced delay. The dedupe key includes
+     *     the queue and the delay length, so re-announcing the same 20 minutes
+     *     sends nothing, and raising it to 40 sends a second, truthful message.
+     *   * Clearing a delay (minutes = 0) sends nothing at all. "We are no
+     *     longer late" is not news worth a text.
+     *   * Only patients actually still waiting are messaged. Somebody already
+     *     seen does not care.
+     *   * A patient with no phone is skipped silently, as everywhere else.
+     *
+     * @return int how many messages were newly queued
+     */
+    public function notifyDelay(int $clinicId, int $queueId, int $minutes, string $note = ''): int
+    {
+        if ($minutes <= 0) {
+            return 0;
+        }
+
+        $queue = Db::one(
+            'SELECT q.id, q.name, c.name AS clinic_name
+               FROM queues q JOIN clinics c ON c.id = q.clinic_id
+              WHERE q.id = ? AND q.clinic_id = ?',
+            [$queueId, $clinicId]
+        );
+        if (!$queue) {
+            return 0;
+        }
+
+        $waiting = Db::all(
+            "SELECT e.id, e.token_label, p.phone
+               FROM queue_entries e JOIN patients p ON p.id = e.patient_id
+              WHERE e.clinic_id = ? AND e.queue_id = ? AND e.status = 'waiting'
+                AND p.phone IS NOT NULL AND p.phone <> ''",
+            [$clinicId, $queueId]
+        );
+
+        $queued = 0;
+        foreach ($waiting as $entry) {
+            // The delay length is part of the key: telling somebody "20 minutes
+            // late" twice is noise, telling them it is now 40 is information.
+            $dedupe = 'delay:' . $queueId . ':' . $minutes . ':' . (int) $entry['id'];
+            if (Db::scalar('SELECT id FROM notifications WHERE dedupe_key = ?', [$dedupe]) !== null) {
+                continue;
+            }
+
+            $body = sprintf(
+                'Your doctor is running about %d minutes late at %s. Token %s keeps its place — no need to ask at the desk.%s',
+                $minutes,
+                (string) $queue['clinic_name'],
+                (string) $entry['token_label'],
+                $note !== '' ? ' ' . $note : ''
+            );
+
+            try {
+                Db::insert(
+                    'INSERT INTO notifications (clinic_id, entry_id, channel, template, to_number, payload_json,
+                        dedupe_key, status, attempts, scheduled_at, created_at)
+                     VALUES (?,?,?,?,?,?,?,?,0,?,?)',
+                    [
+                        $clinicId, (int) $entry['id'], 'sms', 'entry_delayed',
+                        self::mask((string) $entry['phone']),
+                        json_encode(['body' => $body, 'to' => (string) $entry['phone'], 'minutes' => $minutes], JSON_UNESCAPED_UNICODE),
+                        $dedupe, 'queued', Db::now(), Db::now(),
+                    ]
+                );
+                $queued++;
+            } catch (\PDOException $e) {
+                if (!str_contains($e->getMessage(), 'UNIQUE') && !str_contains($e->getMessage(), 'Duplicate')) {
+                    throw $e;
+                }
+            }
+        }
+
+        if ($queued > 0) {
+            Log::info('notification.delay_queued', ['queue_id' => $queueId, 'minutes' => $minutes, 'count' => $queued]);
         }
         return $queued;
     }

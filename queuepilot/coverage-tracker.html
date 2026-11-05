@@ -866,13 +866,13 @@
         </label>
         <p class="note">Threshold-based, deduplicated per entry, opt-in per clinic.</p>
       </li>
-      <li class="item" data-status="partial">
+      <li class="item" data-status="built">
         <label class="row">
           <input type="checkbox" class="tick" data-id="Communication|Doctor delay alerts">
           <span class="name">Doctor delay alerts</span>
-          <span class="pill partial">Partial</span>
+          <span class="pill built">Built</span>
         </label>
-        <p class="note">Delay is announced on the display and tracked page, and written to staff notices. Patients are not individually SMS&#x27;d about a delay.</p>
+        <p class="note">Announcing a delay messages every <em>waiting</em> patient by SMS with their token and the new estimate, once per delay length (20 min then 40 min both send; repeating 20 min does not). Shown on the display and tracked page and written to staff notices too.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
@@ -1183,7 +1183,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (185 automated checks, 145 files lint-clean, healthcheck green).
+    application (188 automated checks, 145 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.

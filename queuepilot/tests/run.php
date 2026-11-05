@@ -2955,6 +2955,66 @@ Assert::test('a planned break is validated and is not an actual break', function
 });
 
 /* ------------------------------------------------------------------ */
+/* 47. doctor delay alerts                                             */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a delay announcement messages every waiting patient once per length', function (): void {
+    seedTenant(80, 'delay-clinic', 'Delay Clinic');
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 80');
+
+    // Three waiting patients with numbers, and one without.
+    foreach ([['+94771400001', 'One'], ['+94771400002', 'Two'], ['+94771400003', 'Three'], ['', 'No Phone']] as $i => [$phone, $name]) {
+        $pid = Db::insert(
+            'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (80,?,?,?,?)',
+            ['DL' . $i . bin2hex(random_bytes(1)), $name, $phone, Db::now()]
+        );
+        Db::insert(
+            'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status,
+                track_token, track_expires_at, sort_weight, priority, source, version, joined_at)
+             VALUES (80,?,?,?,?,?,?,?,0,0,?,0,?)',
+            [$queueId, $pid, $i + 1, 'D00' . ($i + 1), 'waiting',
+             bin2hex(random_bytes(16)), date('Y-m-d H:i:s', time() + 86400), 'walkin', Db::now()]
+        );
+    }
+
+    $service = new App\Services\NotificationService();
+
+    Assert::same(3, $service->notifyDelay(80, $queueId, 20, 'Emergency'), 'three with a phone are messaged');
+    Assert::same(0, $service->notifyDelay(80, $queueId, 20, 'Emergency'), 'the same length sends nothing more');
+    Assert::same(3, $service->notifyDelay(80, $queueId, 40, ''), 'a longer delay is new information');
+    Assert::same(0, $service->notifyDelay(80, $queueId, 0, ''), 'clearing a delay sends nothing');
+    Assert::same(0, $service->notifyDelay(80, $queueId, -5, ''), 'a negative delay sends nothing');
+
+    Assert::same(6, (int) Db::scalar("SELECT COUNT(*) FROM notifications WHERE clinic_id = 80 AND template = 'entry_delayed'"));
+});
+
+Assert::test('a delay message names the clinic, the token and the minutes', function (): void {
+    $payload = json_decode((string) Db::scalar(
+        "SELECT payload_json FROM notifications WHERE clinic_id = 80 AND dedupe_key LIKE 'delay:%:20:%' LIMIT 1"
+    ), true);
+    $body = (string) ($payload['body'] ?? '');
+
+    Assert::contains('20 minutes late', $body, 'the delay length is in the message');
+    Assert::contains('Delay Clinic', $body, 'the clinic is named');
+    Assert::contains('D00', $body, 'the token is named, so the patient knows it is about them');
+    Assert::contains('keeps its place', $body, 'and that they have not lost their position');
+});
+
+Assert::test('a patient already seen is not messaged about a delay', function (): void {
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 80');
+    // Mark one of the three as completed, then announce a fresh length.
+    $done = Db::one("SELECT id FROM queue_entries WHERE clinic_id = 80 AND status = 'waiting' LIMIT 1");
+    Db::run("UPDATE queue_entries SET status = 'completed' WHERE id = ?", [(int) $done['id']]);
+
+    $queued = (new App\Services\NotificationService())->notifyDelay(80, $queueId, 55, '');
+    Assert::same(2, $queued, 'only the two still waiting are messaged');
+    Assert::same(0, (int) Db::scalar(
+        "SELECT COUNT(*) FROM notifications WHERE entry_id = ? AND dedupe_key LIKE 'delay:%:55:%'",
+        [(int) $done['id']]
+    ), 'the completed patient got nothing');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);
