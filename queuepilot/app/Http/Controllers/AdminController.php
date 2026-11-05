@@ -124,7 +124,7 @@ final class AdminController
     {
         $id = Request::int('id');
         $data = [
-            'name' => Request::string('name'),
+            'name' => trim(Request::string('name')),
             'price_monthly' => (float) Request::string('price_monthly', '0'),
             'max_doctors' => Request::int('max_doctors', 1),
             'max_staff' => Request::int('max_staff', 1),
@@ -132,6 +132,28 @@ final class AdminController
             'features' => Request::string('features'),
             'is_active' => Request::bool('is_active') ? 1 : 0,
         ];
+
+        // A price and a limit are both things a negative number can silently
+        // corrupt: a negative price reduces reported MRR, and a negative
+        // doctor limit makes `withinLimit()` refuse every doctor for the plan.
+        // Reject rather than clamp, so the operator notices the mistake.
+        if (mb_strlen($data['name']) < 2) {
+            flash('error', 'Give the plan a name.');
+            redirect('/admin/plans');
+            return;
+        }
+        if ($data['price_monthly'] < 0) {
+            flash('error', 'A plan price cannot be negative.');
+            redirect('/admin/plans');
+            return;
+        }
+        foreach (['max_doctors', 'max_staff', 'max_queues'] as $limit) {
+            if ($data[$limit] < 1) {
+                flash('error', 'Plan limits must be at least 1. Use the "active" flag to retire a plan instead.');
+                redirect('/admin/plans');
+                return;
+            }
+        }
 
         if ($id > 0) {
             Db::run(

@@ -44,7 +44,7 @@ final class DoctorService
                 $data['name'],
                 $data['reg_no'] ?? null,
                 (float) ($data['consult_fee'] ?? 0),
-                (int) ($data['avg_consult_minutes'] ?? 10),
+                self::consultMinutes($data['avg_consult_minutes'] ?? 10),
                 Db::now(),
             ]
         );
@@ -60,13 +60,33 @@ final class DoctorService
                 $data['specialty_id'] ?: null,
                 $data['room_id'] ?: null,
                 (float) ($data['consult_fee'] ?? 0),
-                (int) ($data['avg_consult_minutes'] ?? 10),
+                self::consultMinutes($data['avg_consult_minutes'] ?? 10),
                 !empty($data['is_active']) ? 1 : 0,
                 $id, $clinicId,
             ]
         );
     }
 
+
+
+    /**
+     * Clamp an average consultation time to something a human could plausibly
+     * experience.
+     *
+     * Every wait estimate is `patients_ahead × avg_consult_minutes`, so a typo
+     * here does not corrupt one number — it makes every estimate in the clinic
+     * nonsense ("your wait is 41 days"). The lower bound is 1 because a zero
+     * average divides the range into nothing; the upper bound is 240 because a
+     * four-hour average is already beyond any clinic we would serve.
+     *
+     * This is a clamp rather than a rejection because the value is an estimate,
+     * and silently storing 99999 is far worse than storing 240.
+     */
+    public static function consultMinutes(mixed $value): int
+    {
+        $minutes = (int) $value;
+        return max(1, min(240, $minutes));
+    }
 
     /* ------------------------------------------------------------------ */
     /* Leave                                                               */

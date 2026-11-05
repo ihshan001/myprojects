@@ -53,6 +53,13 @@ final class QueueService
                 throw new \RuntimeException('This queue is closed for the day.');
             }
 
+            // The patient must belong to this clinic. The composite foreign
+            // key on (clinic_id, patient_id) already refuses the row, but a
+            // constraint violation is not a sentence a receptionist can act on.
+            if (!Db::one('SELECT id FROM patients WHERE id = ? AND clinic_id = ?', [$patientId, $clinicId])) {
+                throw new \RuntimeException('That patient does not belong to this clinic.');
+            }
+
             // A patient must not hold two live tokens in the same queue. The
             // database enforces this too (unique active-entry index), but the
             // check happens first so reception sees a sentence rather than a

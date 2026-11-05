@@ -5,7 +5,7 @@ the Phase 1 / Phase 2 / Phase 3 brief and the "difficult part" table is listed
 below with its real status: **built and tested**, **built, not exercised**, or
 **not built**.
 
-Last verified: **106 automated checks passing**, 102 files lint-clean,
+Last verified: **110 automated checks passing**, 102 files lint-clean,
 `tools/healthcheck.php` green, and `/api/health` reporting `ok` on the demo
 data.
 
@@ -278,6 +278,31 @@ tested; item 5 is the one that remains.
    this needs a *service* entity (a dental procedure is not a consultation)
    before the vocabulary can be generalised.
 
+### Bugs found by probing, not by reading
+
+Four defects were found by attacking the running system rather than reviewing
+the code. All are fixed and now covered by tests:
+
+1. **Patient registration was broken outright** after any deletion. Codes were
+   generated from `COUNT(*)+1`, so the next code collided with a surviving row
+   and every new patient hit `UNIQUE constraint failed`. Now reads the
+   high-water mark and retries on the index.
+2. **A refresh re-issued a token.** `POST /queue/new` rendered the receipt
+   directly, so reloading the page ran the insert again. Converted to
+   POST-redirect-GET with a one-time session payload.
+3. **The rate limiter did not stop the request.** `json()` writes a response
+   but does not `exit`, so the controller carried on and overwrote the `429`
+   with a `200`. The limiter counted correctly the whole time, which is what
+   made it invisible without probing.
+4. **The plan editor accepted a negative price** (silently reducing MRR) and a
+   zero doctor limit (making a plan unusable), and a **99999-minute
+   consultation time** was stored verbatim — which made every wait estimate in
+   the clinic nonsense, since they are all `patients_ahead × avg_minutes`.
+
+A fifth was a plain crash: a platform administrator opening `/app` got a 500
+because the dashboard view assumes the viewer belongs to a clinic. They are now
+redirected to the console they actually own.
+
 ### Things this audit deliberately does not claim
 
 * **No AI triage, and no priority scoring.** The system never decides who
@@ -291,5 +316,5 @@ tested; item 5 is the one that remains.
 * **No WebSocket transport.** Polling with backoff is the reliable default on
   the links this is built for. The API shape allows a socket later.
 
-The 106 tests cover the parts that are built; nothing in this document is
+The 110 tests cover the parts that are built; nothing in this document is
 claimed without a way to check it.

@@ -1487,6 +1487,53 @@ Assert::test('a platform admin is never rendered a clinic dashboard', function (
     Assert::contains("isset(\$q)", $view, 'the token link tolerates a clinic with no queue');
 });
 
+Assert::test('the plan editor refuses values that would corrupt billing', function (): void {
+    // A negative price silently reduces reported MRR; a limit below 1 makes
+    // withinLimit() refuse every doctor on the plan. Both were accepted before
+    // this check existed.
+    $controller = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/AdminController.php');
+    Assert::contains("\$data['price_monthly'] < 0", $controller, 'negative price rejected');
+    Assert::contains("foreach (['max_doctors', 'max_staff', 'max_queues'] as \$limit)", $controller);
+
+    // And the clamp-free rejection must not have altered the seeded plans.
+    $starter = Db::one("SELECT price_monthly, max_doctors FROM plans WHERE code = 'starter'");
+    Assert::true((float) $starter['price_monthly'] > 0, 'starter keeps a positive price');
+    Assert::true((int) $starter['max_doctors'] >= 1, 'starter keeps a usable doctor limit');
+});
+
+Assert::test('an absurd consultation time cannot poison every wait estimate', function (): void {
+    // Every estimate is patients_ahead x avg_consult_minutes. A typo in that
+    // field (99999) made every quoted wait nonsense; it was stored verbatim.
+    Assert::same(10, App\Services\DoctorService::consultMinutes(10));
+    Assert::same(240, App\Services\DoctorService::consultMinutes(99999), 'clamped from above');
+    Assert::same(1, App\Services\DoctorService::consultMinutes(0), 'never zero');
+    Assert::same(1, App\Services\DoctorService::consultMinutes(-30), 'never negative');
+
+    $inRange = App\Services\DoctorService::consultMinutes('17');
+    Assert::same(17, $inRange, 'a normal value passes through untouched');
+});
+
+Assert::test('a token is never issued to another clinic\'s patient', function (): void {
+    // The composite FK already refuses the row; this asserts the service says
+    // something a receptionist can act on instead of surfacing PDO text.
+    $queue = (int) Db::scalar("SELECT id FROM queues WHERE clinic_id = 1 AND status = 'open' LIMIT 1");
+    $foreignPatient = (int) Db::scalar('SELECT id FROM patients WHERE clinic_id = 2 LIMIT 1');
+    if ($queue === 0 || $foreignPatient === 0) {
+        return;
+    }
+
+    $message = null;
+    try {
+        (new App\Domain\Queue\QueueService())->issueToken(1, $queue, $foreignPatient);
+    } catch (\RuntimeException $e) {
+        $message = $e->getMessage();
+    }
+    Assert::same('That patient does not belong to this clinic.', $message);
+    Assert::same(0, (int) Db::scalar(
+        'SELECT COUNT(*) FROM queue_entries WHERE clinic_id = 1 AND patient_id = ?', [$foreignPatient]
+    ), 'nothing was written');
+});
+
 /* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
