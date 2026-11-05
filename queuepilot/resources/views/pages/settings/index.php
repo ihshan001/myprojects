@@ -256,6 +256,22 @@
       <?php endif; ?>
     </div>
 
+    <?php if ($canManage): ?>
+      <div class="card card-pad">
+        <h2 class="text-sm font-bold text-slate-900">Your data</h2>
+        <p class="mt-1 text-xs leading-relaxed text-slate-500">
+          Every patient record, token and history entry is yours. Take the whole clinic as one zip of CSV
+          files whenever you want — no support ticket, no waiting.
+        </p>
+        <ul class="mt-3 space-y-1 text-[11px] leading-relaxed text-slate-500">
+          <li>· Password hashes and two-factor secrets are never included.</li>
+          <li>· The display token only on request, because it is a live credential.</li>
+          <li>· Every export is recorded in the audit log.</li>
+        </ul>
+        <a href="/settings/export" class="btn-secondary mt-3 w-full text-xs">Export clinic data →</a>
+      </div>
+    <?php endif; ?>
+
     <div class="card card-pad">
       <h2 class="text-sm font-bold text-slate-900">Language</h2>
       <p class="mt-1 text-xs text-slate-500">Interface language for your staff. Patients always see the clinic's default.</p>

@@ -4460,6 +4460,101 @@ Assert::test('a template that would reach a patient wrong is refused on save', f
 });
 
 /* ------------------------------------------------------------------ */
+/* 64. Complete data export                                            */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a clinic can export everything it owns as one archive', function (): void {
+    $clinicId = 110;
+    seedTenant($clinicId, 'exporting', 'Exporting Clinic');
+    seedTenant(111, 'nosy', 'Nosy Clinic');
+
+    // Two patients here, one at the other clinic, and a staff account with a
+    // password — the three things the archive has to get right.
+    foreach ([['A001', 'Kamala Silva', '+94 77 111 2222'], ['A002', 'නිමල් පෙරේරා', '+94 77 333 4444']] as [$code, $name, $phone]) {
+        Db::insert(
+            'INSERT INTO patients (clinic_id, code, full_name, phone, created_at, updated_at) VALUES (?,?,?,?,?,?)',
+            [$clinicId, $code, $name, $phone, Db::now(), Db::now()]
+        );
+    }
+    Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at, updated_at) VALUES (?,?,?,?,?,?)',
+        [111, 'B001', 'Someone Else', '+94 77 999 0000', Db::now(), Db::now()]
+    );
+    Db::insert(
+        "INSERT INTO settings (scope, owner_id, key_name, value) VALUES ('clinic', ?, 'display_token', 'super-secret-display-token')",
+        [$clinicId]
+    );
+    Db::insert(
+        "INSERT INTO settings (scope, owner_id, key_name, value) VALUES ('clinic', ?, 'kiosk.token', 'super-secret-kiosk-token')",
+        [$clinicId]
+    );
+
+    $service = new App\Services\ExportService();
+    $result = $service->build($clinicId, false);
+    Assert::true($result['ok'], 'the archive was built');
+    Assert::true(is_file($result['path']), 'and written somewhere on disk');
+
+    $zip = new ZipArchive();
+    Assert::same(true, $zip->open($result['path']), 'it is a real zip, not a renamed csv');
+
+    // What must be in it.
+    $patients = $zip->getFromName('patients.csv');
+    Assert::true($patients !== false, 'the patient table is in the archive');
+    Assert::contains('Kamala Silva', $patients, 'with this clinic\'s patients');
+    Assert::contains('නිමල් පෙරේරා', $patients, 'and their names still in Sinhala');
+    Assert::same(false, str_contains($patients, 'Someone Else'),
+        'but nothing from another clinic — an export is not a data dump');
+
+    $manifest = json_decode((string) $zip->getFromName('MANIFEST.json'), true);
+    Assert::same('Exporting Clinic', $manifest['clinic'], 'the manifest names the clinic');
+    Assert::same(false, $manifest['includes_credentials'], 'and records that credentials were withheld');
+
+    // What must NOT be in it, under any option.
+    Assert::same(false, str_contains((string) $zip->getFromName('users.csv'), 'password_hash'),
+        'the password hash column is gone, not just blank');
+    Assert::same(false, str_contains((string) $zip->getFromName('users.csv'), '$2y$'),
+        'and no hash sneaks through as a value');
+
+    $settings = (string) $zip->getFromName('clinic-settings.csv');
+    Assert::contains('display_token', $settings, 'the manager can see the display token setting exists');
+    Assert::same(false, str_contains($settings, 'super-secret-display-token'), 'but not its value');
+    Assert::same(false, str_contains($settings, 'super-secret-kiosk-token'), 'nor the kiosk token');
+    Assert::contains('not included', $settings, 'and the file says so in words, not a blank cell');
+
+    $readme = (string) $zip->getFromName('README.txt');
+    Assert::contains('password', strtolower($readme), 'the README explains what was left out');
+    Assert::contains('keep this file somewhere safe', strtolower($readme), 'and tells the manager to look after it');
+
+    $zip->close();
+    @unlink($result['path']);
+
+    // The opt-in exists for hardware replacement, and only then.
+    $withCreds = $service->build($clinicId, true);
+    Assert::true($withCreds['ok'], 'the same export can include screen configuration');
+    $zip2 = new ZipArchive();
+    $zip2->open($withCreds['path']);
+    $settings2 = (string) $zip2->getFromName('clinic-settings.csv');
+    Assert::contains('super-secret-display-token', $settings2,
+        'when explicitly asked for, the display token is carried so a screen can be moved');
+    Assert::same(false, str_contains((string) $zip2->getFromName('users.csv'), 'password_hash'),
+        'but a password hash is never carried, however the export is asked for');
+    $zip2->close();
+    @unlink($withCreds['path']);
+});
+
+Assert::test('the export refuses politely rather than writing a half archive', function (): void {
+    $service = new App\Services\ExportService();
+    $missing = $service->build(999999, false);
+    Assert::same(false, $missing['ok'], 'a clinic that does not exist cannot be exported');
+    Assert::contains('no longer exists', (string) $missing['error'], 'and the error says what is wrong');
+
+    // Counts are shown before building, so they must not invent tables either.
+    $counts = $service->counts(999999);
+    $patients = array_values(array_filter($counts, static fn (array $c): bool => $c['table'] === 'patients'));
+    Assert::same(0, $patients[0]['rows'], 'a missing clinic shows zero rows, not an error page');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

@@ -654,4 +654,64 @@ final class ClinicController
         flash('success', $name . ' can now sign in as ' . str_replace('_', ' ', $role) . '.');
         redirect('/settings');
     }
+
+    /** The export page: what is in the archive, what is left out, and why. */
+    public function export(): void
+    {
+        $clinicId = $this->clinicId();
+
+        view('settings/export', [
+            'title' => 'Export clinic data',
+            'clinic' => Auth::clinic(),
+            'counts' => (new \App\Services\ExportService())->counts($clinicId),
+            'lastExport' => Db::one(
+                "SELECT created_at, ip, meta_json FROM audit_logs WHERE clinic_id = ? AND action = 'clinic.exported' ORDER BY id DESC LIMIT 1",
+                [$clinicId]
+            ),
+        ]);
+    }
+
+    /**
+     * Build and hand over the archive.
+     *
+     * A plain link would let a manager's browser download the archive days
+     * later from history, after the session was meant to have ended. A POST
+     * that streams the file keeps the download tied to a fresh, explicit
+     * act — and to the audit row that records who took a copy of every
+     * patient record in the clinic.
+     */
+    public function downloadExport(): void
+    {
+        $clinicId = $this->clinicId();
+        $includeCredentials = Request::string('screen_config') === '1';
+
+        $result = (new \App\Services\ExportService())->build($clinicId, $includeCredentials);
+
+        if (!$result['ok']) {
+            flash('error', (string) $result['error']);
+            redirect('/settings/export');
+            return;
+        }
+
+        (new AuditService())->log($clinicId, 'clinic.exported', 'clinic', $clinicId, [
+            'file' => $result['name'],
+            'bytes' => $result['bytes'],
+            'tables' => $result['tables'],
+            'rows' => $result['rows'],
+            'included_credentials' => $includeCredentials,
+            'redacted' => count($result['redacted']),
+        ]);
+
+        $path = (string) $result['path'];
+        header('Content-Type: application/zip');
+        header('Content-Disposition: attachment; filename="' . $result['name'] . '"');
+        header('Content-Length: ' . (string) @filesize($path));
+        header('Cache-Control: no-store, private');
+        // The archive is a one-shot file; it should not linger in a shared
+        // hosting account's public directory. It is written outside the docroot
+        // anyway, so this is belt and braces.
+        header('X-Content-Type-Options: nosniff');
+        readfile($path);
+        @unlink($path);
+    }
 }

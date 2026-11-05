@@ -200,7 +200,7 @@ lint-clean, healthcheck all-good, all five demo logins re-checked).
 | An incident has a written timeline | ✅ | **Built.** `/incidents` — severity, detection time, who acknowledged and when, every action, cause and decision appended in order. Time to acknowledge and to resolve are computed from timestamps (a 30-minute-old incident reports 30 minutes, not 0), a second acknowledgement cannot reset the clock, and a resolved incident takes no further steps. Found and fixed while building it: `datetime-local` posts carry a `T`, which made `strtotime` read a 25-minute response as 355. **Still no pager** — nothing here wakes anyone; that is a provider contract |
 | A paper fallback exists | ✅ | **Rehearsed.** `docs/CONTINUITY.md` plus `tools/continuity-drill.php`, which prints the board state to copy off the screen, the next paper token numbers, blank manual-log rows and the reconcile arithmetic, then passes or fails. Run 5 Nov 2026: 37 seen, 10 cancelled, 9 waiting, 0 duplicates, PASSED |
 | **Data retention and account closure** | ✅ | **Built.** A clinic requests closure by typing its exact name; staff are signed out, open sessions closed, and `purge_after` set to +90 days. `tools/purge.php` refuses before the window, then removes clinic data and users in one transaction while **keeping invoices**, and marks the clinic `[closed] <name>` so the slug is never reusable. Verified end to end on Lakeview |
-| Right to export a clinic's data | ◐ | Every report exports as CSV and the audit log is readable, but there is no single complete-archive export |
+| Right to export a clinic's data | ✅ | **Built.** `/settings/export` builds the whole clinic as one zip: a CSV per table (25 of them), the clinic profile, a `MANIFEST.json` with row counts, and a `README.txt` written for a person — what is in it, what was left out, and how to import it elsewhere. Ids are preserved so an import keeps the links between a token and its patient, and every file is UTF-8 with a BOM so Sinhala names open correctly in Excel. **Passwords, two-factor secrets and recovery codes are never exported, under any option** — a credential belongs to a person, not to the clinic's records. `display_token` and `kiosk.token` are live bearer credentials, so they are withheld by default with a visible "not included" row explaining why, and only carried when a manager ticks "screen configuration" to move hardware. Verified live end to end: a 16 KB archive, 14 patients, 69 tokens, no `password_hash` anywhere in it, built fresh on demand, streamed once, deleted from the server after the download, and recorded in the audit log. A failed download cannot leave a copy behind — anything older than an hour is swept. Building this also found and fixed a bug in the dev server: binary responses were being mangled into U+FFFD because the PHP-WASM shim carries the body as a string |
 | GDPR-style DPA paperwork | ⛔ | Legal, not code |
 
 ## 15. Money
@@ -312,11 +312,11 @@ first clinic goes live — the automated suite does not replace it.
 | 11. Multi-tenancy and organisations | 7 | 0 | 0 | 0 |
 | 12. Doctors and scheduling | 7 | 0 | 0 | 1 |
 | 13. Reporting | 9 | 1 | 0 | 0 |
-| 14. Data, privacy and operations | 7 | 1 | 0 | 1 |
+| 14. Data, privacy and operations | 8 | 0 | 0 | 1 |
 | 15. Money | 2 | 0 | 3 | 0 |
 | 16. Hardware and physical space | 4 | 1 | 0 | 0 |
 | 17. Other verticals | 5 | 0 | 3 | 0 |
-| **Total (122 scenarios)** | **110** | **3** | **7** | **2** |
+| **Total (122 scenarios)** | **111** | **2** | **7** | **2** |
 
 **What is genuinely finished.** The queue engine holds up under adversarial
 input: issuing, calling, transferring, prioritising, pausing, closing,

@@ -212,6 +212,13 @@ Router::post('/settings/invites/{id}/revoke', [ClinicController::class, 'revokeI
 Router::get('/settings/templates', [ClinicController::class, 'templates'], ['auth' => true]);
 Router::post('/settings/templates', [ClinicController::class, 'saveTemplate'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/settings/templates/reset', [ClinicController::class, 'resetTemplate'], ['auth' => true, 'ability' => 'clinic.manage']);
+
+// Data portability: the whole clinic in one archive. Both are POST-or-GET by
+// design — the page explains, the download is a deliberate act that
+// re-authorises and streams, so an archive cannot be left sitting behind a
+// bookmark after the session ends.
+Router::get('/settings/export', [ClinicController::class, 'export'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/settings/export', [ClinicController::class, 'downloadExport'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::get('/settings/branches', [ClinicController::class, 'branches'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/settings/branches', [ClinicController::class, 'grantBranch'], ['auth' => true, 'ability' => 'staff.manage']);
 Router::post('/settings/branches/revoke', [ClinicController::class, 'revokeBranch'], ['auth' => true, 'ability' => 'staff.manage']);

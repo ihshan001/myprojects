@@ -82,7 +82,7 @@
     <div class="bar-inner">
       <div class="progress">
         <div class="progress-top">
-          <span><b id="doneCount">0</b> / 125 reviewed</span>
+          <span><b id="doneCount">0</b> / 126 reviewed</span>
           <span><b id="pct">0%</b></span>
         </div>
         <div class="track"><div class="fill" id="fill"></div></div>
@@ -113,7 +113,7 @@
   </div>
 
   <div class="legend">
-    <span><i class="dot built"></i> 121 built</span>
+    <span><i class="dot built"></i> 122 built</span>
     <span><i class="dot partial"></i> 4 partial</span>
     <span><i class="dot missing"></i> 0 not built</span>
   </div>
@@ -1014,7 +1014,7 @@
           <span class="name">CSV export</span>
           <span class="pill built">Built</span>
         </label>
-        <p class="note"><code>/reports/export</code>, streamed, clinic-scoped, UTF-8 BOM for Sinhala/Tamil names.</p>
+        <p class="note"><code>/reports/export</code>, streamed, clinic-scoped, UTF-8 BOM for Sinhala/Tamil names. For a portable copy of everything, see <code>/settings/export</code> under Security and reliability.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
@@ -1136,13 +1136,21 @@
         </label>
         <p class="note">New: closure starts a retention clock; <code>tools/purge.php</code> is CLI-only, refuses early, keeps invoices, and preserves the clinic row.</p>
       </li>
+      <li class="item" data-status="built">
+        <label class="row">
+          <input type="checkbox" class="tick" data-id="Security and reliability|Complete data export">
+          <span class="name">Complete data export</span>
+          <span class="pill built">Built</span>
+        </label>
+        <p class="note"><code>/settings/export</code> builds the whole clinic as one zip — a CSV per table (25), the clinic profile, <code>MANIFEST.json</code> with row counts, and a <code>README.txt</code> written for a person. Ids are preserved so an import elsewhere keeps a token linked to its patient. <b>Password hashes, two-factor secrets and recovery codes are never exported, under any option</b>; the display token and kiosk token are live bearer credentials, withheld by default with a row that says why, and carried only when a manager ticks "screen configuration" to move hardware. Built fresh on demand, streamed once, deleted after download, swept if the request dies, and recorded in the audit log. Verified live: a 16 KB archive with 14 patients and 69 tokens and no hash in it. Building it also fixed a dev-server bug — binary responses were being mangled into U+FFFD.</p>
+      </li>
       <li class="item" data-status="partial">
         <label class="row">
           <input type="checkbox" class="tick" data-id="Security and reliability|Security testing">
           <span class="name">Security testing</span>
           <span class="pill partial">Partial</span>
         </label>
-        <p class="note">241 automated checks, adversarial curl probes each session, and <code>npm run security</code> — a standing check of dependency advisories (136 packages, 0 known), runtime settings, secrets in the tree, every unauthenticated route, and whether a finished notification still holds a patient's number. It found a real leak while being written. <strong>Still no external penetration test — that is a person's engagement, not code.</strong></p>
+        <p class="note">243 automated checks, adversarial curl probes each session, and <code>npm run security</code> — a standing check of dependency advisories (136 packages, 0 known), runtime settings, secrets in the tree, every unauthenticated route, and whether a finished notification still holds a patient's number. It found a real leak while being written. <strong>Still no external penetration test — that is a person's engagement, not code.</strong></p>
       </li>
     </ul>
   </section>
@@ -1213,7 +1221,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (241 automated checks, 175 files lint-clean, healthcheck green).
+    application (243 automated checks, 177 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.

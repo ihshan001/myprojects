@@ -181,6 +181,16 @@ register_shutdown_function(function () use (&$__metaSent) {
             $p = strpos($h, ':');
             if ($p !== false) { $meta['headers'][substr($h, 0, $p)] = trim(substr($h, $p + 1)); }
         }
+        /* Binary responses cannot travel through the JS string channel this
+           shim uses: wasm->JS conversion replaces every non-UTF-8 byte with
+           U+FFFD, which silently corrupts a zip or a photo while still
+           reporting the right Content-Length. Anything that is not text is
+           base64'd and marked, then decoded on the JS side. */
+        $binary = !mb_check_encoding($body, 'UTF-8');
+        if ($binary) {
+            $meta['encoding'] = 'base64';
+            $body = base64_encode($body);
+        }
         echo "@@QP_META@@" . json_encode($meta) . "\\n" . $body;
         $__metaSent = true;
     }
@@ -209,11 +219,15 @@ require ${JSON.stringify(ROOT + '/public/index.php')};
       body = text.slice(0, idx) + text.slice(nl + 1);
     }
 
+    // A binary body arrives base64'd so the string channel cannot mangle it.
+    let payload = body;
+    if (meta.encoding === 'base64') payload = Buffer.from(body, 'base64');
+
     const headers = { ...meta.headers };
     delete headers['Content-Length'];
-    headers['Content-Length'] = Buffer.byteLength(body);
+    headers['Content-Length'] = Buffer.byteLength(payload);
     res.writeHead(meta.status || 200, headers);
-    res.end(req.method === 'HEAD' ? undefined : body);
+    res.end(req.method === 'HEAD' ? undefined : payload);
     console.log(`${req.method} ${url.pathname}${url.search} → ${meta.status} (${Date.now() - started}ms)`);
   } catch (err) {
     console.error('[queuepilot] request failed', err);
