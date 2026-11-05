@@ -257,6 +257,14 @@ The software supports both: every live surface marks itself stale after 30
 seconds without data, `/api/*` is never cached, and the audit log reconstructs
 exactly what happened while a clinic was on paper.
 
+## Honest status
+
+`docs/SPEC-AUDIT.md` maps every requirement in the brief to its real status:
+built and tested, built but unexercised, or **not built**. It is deliberately
+unflattering in places — the largest remaining gaps are no two-factor
+authentication for platform admins and no automated backup job (the procedure is
+written, nothing runs it yet).
+
 ## Deliberate non-goals for v1
 
 No AI triage. No WebSockets yet (polling is the reliable default on weak

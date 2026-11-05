@@ -137,6 +137,7 @@ foreach ($byHour as $h) { $peak = max($peak, (int) $h['total']); }
           <th class="numeric hidden md:table-cell">Avg wait</th>
           <th class="numeric hidden md:table-cell">Avg consult</th>
           <th class="numeric hidden lg:table-cell">Priority</th>
+            <th class="numeric hidden lg:table-cell" title="Announced delays in this period">Delays</th>
         </tr>
       </thead>
       <tbody>
@@ -151,6 +152,14 @@ foreach ($byHour as $h) { $peak = max($peak, (int) $h['total']); }
             <td class="numeric hidden md:table-cell"><?= $d['avg_wait'] !== null ? round((float) $d['avg_wait']) . 'm' : '—' ?></td>
             <td class="numeric hidden md:table-cell"><?= $d['avg_consult'] !== null ? round((float) $d['avg_consult']) . 'm' : '—' ?></td>
             <td class="numeric hidden lg:table-cell"><?= (int) $d['prioritised'] ?></td>
+            <td class="numeric hidden lg:table-cell">
+              <?php $delays = (int) ($d['delays'] ?? 0); ?>
+              <?php if ($delays > 0): ?>
+                <span class="badge-amber"><?= $delays ?>×</span>
+              <?php else: ?>
+                <span class="text-slate-300">—</span>
+              <?php endif; ?>
+            </td>
           </tr>
         <?php endforeach; ?>
       </tbody>

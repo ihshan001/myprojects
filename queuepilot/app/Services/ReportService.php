@@ -55,7 +55,14 @@ final class ReportService
                     SUM(CASE WHEN e.status='completed' THEN 1 ELSE 0 END) AS completed,
                     AVG(e.wait_minutes) AS avg_wait,
                     AVG(e.consult_minutes) AS avg_consult,
-                    SUM(CASE WHEN e.priority=1 THEN 1 ELSE 0 END) AS prioritised
+                    SUM(CASE WHEN e.priority=1 THEN 1 ELSE 0 END) AS prioritised,
+                    -- how often this doctor/queue announced a delay, from the
+                    -- audit trail: a performance signal, not a patient record
+                    (SELECT COUNT(*) FROM audit_logs a
+                      WHERE a.clinic_id = d.clinic_id
+                        AND a.action = 'queue.delay_announced'
+                        AND a.entity_id = q.id
+                        AND substr(a.created_at,1,10) BETWEEN ? AND ?) AS delays
                FROM doctors d
                LEFT JOIN specialties s ON s.id = d.specialty_id
                LEFT JOIN queues q ON q.doctor_id = d.id AND q.clinic_id = d.clinic_id
@@ -64,7 +71,7 @@ final class ReportService
               WHERE d.clinic_id = ?
               GROUP BY d.id, d.name, s.name
               ORDER BY completed DESC, d.name",
-            [$from, $to, $clinicId]
+            [$from, $to, $from, $to, $clinicId]
         );
     }
 
