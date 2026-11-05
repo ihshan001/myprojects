@@ -5,7 +5,7 @@ the Phase 1 / Phase 2 / Phase 3 brief and the "difficult part" table is listed
 below with its real status: **built and tested**, **built, not exercised**, or
 **not built**.
 
-Last verified: **127 automated checks passing**, 108 files lint-clean,
+Last verified: **145 automated checks passing**, 127 files lint-clean,
 `tools/healthcheck.php` green, and `/api/health` reporting `ok` on the demo
 data.
 

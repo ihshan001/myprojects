@@ -167,6 +167,61 @@ final class QueueController
         ]);
     }
 
+    /**
+     * Thermal slip for one entry.
+     *
+     * Scoped to the clinic like every other entry point: an id from another
+     * tenant produces a 404, not somebody else's patient name.
+     */
+    public function slip(string $id): void
+    {
+        $data = $this->slipData((int) $id);
+        header('Content-Type: text/html; charset=utf-8');
+        echo \App\Support\ThermalSlip::html($data);
+        exit;
+    }
+
+    /** The same slip as an ESC/POS byte stream, for a wired printer. */
+    public function slipEscpos(string $id): void
+    {
+        $data = $this->slipData((int) $id);
+        header('Content-Type: application/octet-stream');
+        header('Content-Disposition: attachment; filename="token-' . $data['token'] . '.bin"');
+        echo \App\Support\ThermalSlip::escpos($data);
+        exit;
+    }
+
+    /** @return array<string, mixed> */
+    private function slipData(int $entryId): array
+    {
+        $clinicId = $this->guard();
+        $entry = Db::one(
+            'SELECT e.*, q.name AS queue_name,
+                    d.name AS doctor_name, r.name AS room_name, c.name AS clinic_name
+               FROM queue_entries e
+               JOIN queues q ON q.id = e.queue_id
+               JOIN clinics c ON c.id = e.clinic_id
+               LEFT JOIN doctors d ON d.id = q.doctor_id
+               LEFT JOIN rooms r ON r.id = d.room_id
+              WHERE e.id = ? AND e.clinic_id = ?',
+            [$entryId, $clinicId]
+        );
+        if (!$entry) {
+            abort(404, 'That token does not exist for this clinic.');
+            return [];
+        }
+
+        return [
+            'clinic' => (string) $entry['clinic_name'],
+            'queue' => (string) $entry['queue_name'],
+            'token' => (string) $entry['token_label'],
+            'doctor' => (string) ($entry['doctor_name'] ?? ''),
+            'room' => (string) ($entry['room_name'] ?? ''),
+            'issued_at' => date('j M Y, g:i A', strtotime((string) $entry['joined_at'])),
+            'url' => rtrim((string) \App\Core\Env::get('app.url', ''), '/') . '/t/' . (string) $entry['track_token'],
+        ];
+    }
+
     /** Single queue board. */
     public function show(): void
     {

@@ -80,6 +80,18 @@ final class SlotService
     {
         $hours = $this->hoursFor($clinicId, $date);
 
+        // A holiday outranks everything: the building is shut. Checked before
+        // hours and before the doctor's roster, so a rostered Tuesday cannot
+        // resurrect a slot on a public holiday.
+        $holiday = (new HolidayService())->reasonFor($clinicId, $date);
+        if ($holiday !== null) {
+            return [
+                'slots' => [],
+                'reason' => 'The clinic is closed on this day (' . $holiday . ').',
+                'hours' => $hours,
+            ];
+        }
+
         if ($hours['open'] === null || $hours['close'] === null) {
             return ['slots' => [], 'reason' => 'The clinic is closed on this day.', 'hours' => $hours];
         }
@@ -116,10 +128,25 @@ final class SlotService
             return ['slots' => [], 'reason' => 'The clinic hours are misconfigured for this day.', 'hours' => $hours];
         }
 
-        // How many patients can this doctor physically see in the window?
+        // The doctor's own roster, intersected with clinic hours. A doctor
+        // with no roster at all falls back to clinic hours (see
+        // ScheduleService); a doctor with a roster that does not include this
+        // weekday works nowhere that day, which is a real answer.
+        $windows = (new ScheduleService())->windowsFor($clinicId, $doctorId, $date, $hours);
+        if ($windows === []) {
+            $reason = (new ScheduleService())->hasSchedule($clinicId, $doctorId)
+                ? 'That doctor does not work on this day. Choose another date.'
+                : 'There are no times left on this day. Choose another date.';
+            return ['slots' => [], 'reason' => $reason, 'hours' => $hours];
+        }
+
+        // How many patients can this doctor physically see in their windows?
         // Honest capacity beats an infinite grid: a patient who books the
         // 41st slot of a 20-patient day is being lied to.
-        $capacity = (int) floor(($close - $open) / $step);
+        $capacity = 0;
+        foreach ($windows as $window) {
+            $capacity += (int) floor(($window['end'] - $window['start']) / $step);
+        }
 
         $taken = [];
         foreach (Db::all(
@@ -136,16 +163,21 @@ final class SlotService
         $nowMinutes = $isToday ? ((int) substr($now, 11, 2)) * 60 + (int) substr($now, 14, 2) : -1;
 
         $slots = [];
-        for ($m = $open; $m + $step <= $close && count($slots) < $capacity; $m += $step) {
-            // A time that has already passed today cannot be booked.
-            if ($isToday && $m <= $nowMinutes + 15) {
-                continue;
+        foreach ($windows as $window) {
+            for ($m = $window['start']; $m + $step <= $window['end']; $m += $step) {
+                if (count($slots) >= $capacity) {
+                    break 2;
+                }
+                // A time that has already passed today cannot be booked.
+                if ($isToday && $m <= $nowMinutes + 15) {
+                    continue;
+                }
+                $label = sprintf('%02d:%02d', intdiv($m, 60), $m % 60);
+                if (isset($taken[$label])) {
+                    continue;
+                }
+                $slots[] = $label;
             }
-            $label = sprintf('%02d:%02d', intdiv($m, 60), $m % 60);
-            if (isset($taken[$label])) {
-                continue;
-            }
-            $slots[] = $label;
         }
 
         if ($slots === []) {

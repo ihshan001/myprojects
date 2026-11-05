@@ -8,6 +8,7 @@ declare(strict_types=1);
 
 use App\Core\Router;
 use App\Http\Controllers\AdminController;
+use App\Http\Controllers\AdminBillingController;
 use App\Http\Controllers\ApiController;
 use App\Http\Controllers\AppointmentController;
 use App\Http\Controllers\AuthController;
@@ -17,6 +18,10 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DisplayController;
 use App\Http\Controllers\MonitorController;
 use App\Http\Controllers\PasswordResetController;
+use App\Http\Controllers\CalendarController;
+use App\Http\Controllers\DepartmentController;
+use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\SupportController;
 use App\Http\Controllers\PatientController;
 use App\Http\Controllers\PublicController;
 use App\Http\Controllers\QueueController;
@@ -68,6 +73,10 @@ Router::get('/queue/new', [QueueController::class, 'newPatient'], ['auth' => tru
 Router::post('/queue/new', [QueueController::class, 'createEntry'], ['auth' => true, 'ability' => 'queue.issue']);
 Router::get('/queue', [QueueController::class, 'show'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::get('/queue/token-issued', [QueueController::class, 'tokenIssued'], ['auth' => true, 'ability' => 'queue.operate']);
+// Token slip for a thermal printer. HTML for a browser print dialog, ESC/POS
+// for a wired receipt printer. Both carry only the token — no clinical data.
+Router::get('/queue/{id}/slip', [QueueController::class, 'slip'], ['auth' => true, 'ability' => 'queue.operate']);
+Router::get('/queue/{id}/slip.escpos', [QueueController::class, 'slipEscpos'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::get('/queue/entry', [QueueController::class, 'entry'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/action', [QueueController::class, 'action'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/session', [QueueController::class, 'sessionControl'], ['auth' => true, 'ability' => 'queue.operate']);
@@ -91,9 +100,40 @@ Router::post('/doctors', [ClinicController::class, 'storeDoctor'], ['auth' => tr
 Router::post('/doctors/leave', [ClinicController::class, 'addLeave'], ['auth' => true, 'ability' => 'doctor.manage']);
 Router::post('/doctors/leave/{id}/delete', [ClinicController::class, 'removeLeave'], ['auth' => true, 'ability' => 'doctor.manage']);
 Router::post('/doctors/{id}', [ClinicController::class, 'updateDoctor'], ['auth' => true, 'ability' => 'doctor.manage']);
+// Departments. `clinic.manage` gates writes; reads are open to any staff
+// member, because knowing which department you are standing in is not a
+// privilege.
+Router::get('/departments', [DepartmentController::class, 'index'], ['auth' => true]);
+Router::post('/departments', [DepartmentController::class, 'store'], ['auth' => true, 'ability' => 'department.manage']);
+Router::post('/departments/assign', [DepartmentController::class, 'assign'], ['auth' => true, 'ability' => 'department.manage']);
+Router::get('/departments/{id}', [DepartmentController::class, 'show'], ['auth' => true]);
+Router::post('/departments/{id}', [DepartmentController::class, 'update'], ['auth' => true, 'ability' => 'department.manage']);
+Router::post('/departments/{id}/deactivate', [DepartmentController::class, 'deactivate'], ['auth' => true, 'ability' => 'department.manage']);
+
+// Operating calendar: per-doctor weekly schedules and clinic closure days.
+Router::get('/calendar', [CalendarController::class, 'index'], ['auth' => true]);
+Router::post('/calendar/schedule', [CalendarController::class, 'saveSchedule'], ['auth' => true, 'ability' => 'doctor.manage']);
+Router::post('/calendar/schedule/clear', [CalendarController::class, 'clearSchedule'], ['auth' => true, 'ability' => 'doctor.manage']);
+Router::post('/calendar/holidays', [CalendarController::class, 'addHoliday'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/calendar/holidays/{id}/delete', [CalendarController::class, 'removeHoliday'], ['auth' => true, 'ability' => 'clinic.manage']);
+
+// Support tickets.
+Router::get('/support', [SupportController::class, 'index'], ['auth' => true]);
+Router::post('/support', [SupportController::class, 'store'], ['auth' => true]);
+Router::get('/support/{id}', [SupportController::class, 'show'], ['auth' => true]);
+Router::post('/support/{id}/reply', [SupportController::class, 'reply'], ['auth' => true]);
+
+// Staff notification inbox.
+Router::get('/notifications', [NotificationController::class, 'index'], ['auth' => true]);
+Router::post('/notifications/{id}/read', [NotificationController::class, 'markRead'], ['auth' => true]);
+Router::post('/notifications/read-all', [NotificationController::class, 'markAllRead'], ['auth' => true]);
+
 Router::get('/settings', [ClinicController::class, 'settings'], ['auth' => true]);
 Router::post('/settings', [ClinicController::class, 'saveSettings'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/settings/hours', [ClinicController::class, 'saveHours'], ['auth' => true, 'ability' => 'clinic.manage']);
+// A clinic closing its own account. Requires typing the clinic name; starts a
+// 90-day retention window rather than deleting anything on the spot.
+Router::post('/settings/closure', [AdminController::class, 'requestClosure'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/settings/staff', [ClinicController::class, 'storeStaff'], ['auth' => true, 'ability' => 'staff.manage']);
 Router::post('/settings/invites', [ClinicController::class, 'inviteStaff'], ['auth' => true, 'ability' => 'staff.manage']);
 Router::post('/settings/invites/{id}/revoke', [ClinicController::class, 'revokeInvite'], ['auth' => true, 'ability' => 'staff.manage']);
@@ -108,13 +148,23 @@ Router::get('/audit', [ReportController::class, 'audit'], ['auth' => true, 'abil
 Router::get('/billing', [BillingController::class, 'index'], ['auth' => true]);
 Router::post('/billing/plan', [BillingController::class, 'changePlan'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/billing/pay', [BillingController::class, 'pay'], ['auth' => true, 'ability' => 'billing.view']);
+Router::post('/billing/withdraw-claim', [BillingController::class, 'withdrawClaim'], ['auth' => true, 'ability' => 'billing.view']);
 
 /* ------------------------------------------------------ platform admin */
 Router::get('/admin', [AdminController::class, 'index'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::get('/admin/clinics', [AdminController::class, 'clinics'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/admin/clinics/{id}', [AdminController::class, 'updateClinic'], ['auth' => true, 'roles' => ['super_admin']]);
+// Suspension stops new tokens without deleting anything or signing staff out.
+Router::post('/admin/clinics/{id}/suspend', [AdminController::class, 'suspendClinic'], ['auth' => true, 'roles' => ['super_admin']]);
+Router::post('/admin/clinics/{id}/reinstate', [AdminController::class, 'reinstateClinic'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::get('/admin/plans', [AdminController::class, 'plans'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/admin/plans', [AdminController::class, 'savePlan'], ['auth' => true, 'roles' => ['super_admin']]);
+
+// Payment verification. A clinic's claim is only money-in-the-bank once a
+// platform administrator matches it; this is that screen.
+Router::get('/admin/billing', [AdminBillingController::class, 'index'], ['auth' => true, 'roles' => ['super_admin']]);
+Router::post('/admin/billing/{id}/verify', [AdminBillingController::class, 'verify'], ['auth' => true, 'roles' => ['super_admin']]);
+Router::post('/admin/billing/{id}/reject', [AdminBillingController::class, 'reject'], ['auth' => true, 'roles' => ['super_admin']]);
 
 /* ------------------------------------------------------------- JSON API */
 Router::get('/api/queue/board', [ApiController::class, 'board'], ['auth' => true, 'ability' => 'queue.operate']);

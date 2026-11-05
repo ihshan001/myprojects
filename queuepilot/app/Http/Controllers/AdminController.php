@@ -3,9 +3,11 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Core\Auth;
 use App\Core\Db;
 use App\Core\Request;
 use App\Services\AuditService;
+use App\Services\LifecycleService;
 
 /** Platform (super admin) console: tenants, plans, revenue. */
 final class AdminController
@@ -103,6 +105,66 @@ final class AdminController
             flash('success', $clinic['name'] . ' moved to ' . $plan['name'] . '.');
         }
         redirect('/admin/clinics');
+    }
+
+    /**
+     * Suspend or reinstate a clinic.
+     *
+     * Suspension stops token issuing and darkens the public surfaces; it does
+     * not delete anything and does not sign staff out, because a billing
+     * dispute should not cost a clinic its day's work.
+     */
+    public function suspendClinic(string $id): void
+    {
+        $result = (new LifecycleService())->suspend(
+            (int) $id,
+            Request::string('reason'),
+            Auth::id()
+        );
+        flash($result['ok'] ? 'success' : 'error', $result['ok']
+            ? 'Clinic suspended. New tokens are refused; nothing was deleted.'
+            : $result['error']);
+        redirect('/admin/clinics');
+    }
+
+    public function reinstateClinic(string $id): void
+    {
+        $result = (new LifecycleService())->reinstate((int) $id, Auth::id());
+        flash($result['ok'] ? 'success' : 'error', $result['ok'] ? 'Clinic reinstated.' : $result['error']);
+        redirect('/admin/clinics');
+    }
+
+    /** The clinic's own request to close. Starts the retention clock. */
+    public function requestClosure(): void
+    {
+        $clinicId = Auth::clinicId();
+        if ($clinicId === null) {
+            abort(403, 'Platform administrators do not own a clinic subscription.');
+            return;
+        }
+
+        // Typing the clinic's name is the confirmation. A checkbox is too easy
+        // to click through for an action that signs out every colleague.
+        $typed = trim(Request::string('confirm_name'));
+        $clinic = Auth::clinic();
+        if (mb_strtolower($typed) !== mb_strtolower((string) $clinic['name'])) {
+            flash('error', 'Type the clinic name exactly to confirm. Nothing has been changed.');
+            redirect('/settings#account');
+            return;
+        }
+
+        $result = (new LifecycleService())->requestClosure($clinicId);
+        if (!$result['ok']) {
+            flash('error', $result['error']);
+            redirect('/settings#account');
+            return;
+        }
+
+        \App\Core\Session::destroy();
+        flash('success', 'Closure requested. Staff have been signed out and the clinic is hidden. '
+            . 'Data is kept until ' . substr((string) $result['purge_after'], 0, 10)
+            . ' — contact support before then to change your mind.');
+        redirect('/login');
     }
 
     public function plans(): void

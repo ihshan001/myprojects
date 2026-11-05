@@ -110,18 +110,79 @@ final class BillingController
             redirect('/billing');
             return;
         }
+        if ($invoice['status'] === 'claimed') {
+            flash('warn', 'Your payment reference is already with us for checking. We will email you when it clears.');
+            redirect('/billing');
+            return;
+        }
 
+        if (mb_strlen(trim($reference)) < 4) {
+            flash('error', 'Enter the bank reference or slip number so we can match your payment.');
+            redirect('/billing');
+            return;
+        }
+
+        // The clinic claims a payment; it does not settle the invoice.
+        //
+        // Settling activates the subscription, so letting the payer do it
+        // means any clinic can reactivate itself by typing eight characters.
+        // A platform administrator matches the claim against the bank and
+        // only then does billing_status change.
         Db::run(
-            "UPDATE invoices SET status = 'paid', paid_at = ?, method = ?, reference = ? WHERE id = ? AND clinic_id = ?",
-            [Db::now(), 'bank_transfer', $reference ?: null, $invoiceId, $clinicId]
+            "UPDATE invoices SET status = 'claimed', method = ?, reference = ?, claimed_at = ?
+              WHERE id = ? AND clinic_id = ?",
+            ['bank_transfer', $reference, Db::now(), $invoiceId, $clinicId]
         );
-        Db::run("UPDATE clinics SET billing_status = 'active', renews_on = ?, updated_at = ? WHERE id = ?",
-            [date('Y-m-d', strtotime('+1 month')), Db::now(), $clinicId]);
 
-        (new AuditService())->log($clinicId, 'billing.payment_recorded', 'invoice', $invoiceId, [
+        (new AuditService())->log($clinicId, 'billing.payment_claimed', 'invoice', $invoiceId, [
             'amount' => $invoice['amount'], 'reference' => $reference,
         ]);
-        flash('success', 'Payment recorded. Thank you — your subscription is active.');
+
+        // Every platform administrator sees it, so a claim cannot sit
+        // unnoticed behind one person's login.
+        foreach (Db::all("SELECT id FROM users WHERE role = 'super_admin' AND is_active = 1") as $admin) {
+            (new \App\Services\StaffNotificationService())->notify(
+                $clinicId,
+                (int) $admin['id'],
+                'Payment claim needs checking',
+                Auth::clinic()['name'] . ' claims ' . number_format((float) $invoice['amount'], 2)
+                    . ' for invoice ' . $invoice['number'] . ' (ref ' . $reference . ').',
+                'warning',
+                '/admin/billing'
+            );
+        }
+
+        flash('success', 'Payment reference received. We will verify it against the bank and activate the subscription — usually within one working day.');
+        redirect('/billing');
+    }
+
+    /**
+     * Withdraw a claim that was entered by mistake, before it is verified.
+     * Without this, a typo would freeze the invoice until a human cleared it.
+     */
+    public function withdrawClaim(): void
+    {
+        $clinicId = Auth::clinicId();
+        if ($clinicId === null) {
+            abort(403, 'Not available.');
+            return;
+        }
+        $invoiceId = Request::int('invoice_id');
+
+        $invoice = Db::one('SELECT * FROM invoices WHERE id = ? AND clinic_id = ?', [$invoiceId, $clinicId]);
+        if (!$invoice || $invoice['status'] !== 'claimed') {
+            flash('error', 'There is no pending claim on that invoice.');
+            redirect('/billing');
+            return;
+        }
+
+        Db::run(
+            "UPDATE invoices SET status = 'unpaid', reference = NULL, claimed_at = NULL
+              WHERE id = ? AND clinic_id = ?",
+            [$invoiceId, $clinicId]
+        );
+        (new AuditService())->log($clinicId, 'billing.payment_claim_withdrawn', 'invoice', $invoiceId);
+        flash('success', 'Claim withdrawn. You can enter the correct reference.');
         redirect('/billing');
     }
 }

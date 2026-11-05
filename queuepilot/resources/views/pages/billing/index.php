@@ -85,15 +85,35 @@
                 <td class="font-mono text-[11px]"><?= e((string) $inv['number']) ?></td>
                 <td class="hidden sm:table-cell text-[11px] text-slate-500"><?= e((string) $inv['period_from']) ?> → <?= e((string) $inv['period_to']) ?></td>
                 <td class="numeric text-xs"><?= e(money((float) $inv['amount'])) ?></td>
-                <td><span class="<?= $inv['status'] === 'paid' ? 'badge-emerald' : ($inv['status'] === 'void' ? 'badge-slate' : 'badge-amber') ?>"><?= e((string) $inv['status']) ?></span></td>
+                <td>
+                  <span class="<?= match ((string) $inv['status']) {
+                      'paid' => 'badge-emerald',
+                      'claimed' => 'badge-teal',
+                      'rejected' => 'badge-rose',
+                      'void' => 'badge-slate',
+                      default => 'badge-amber',
+                  } ?>"><?= e((string) $inv['status']) ?></span>
+                  <?php if ($inv['status'] === 'rejected' && !empty($inv['rejection_reason'])): ?>
+                    <p class="mt-0.5 max-w-[16rem] text-[10px] leading-snug text-rose-600"><?= e($inv['rejection_reason']) ?></p>
+                  <?php endif; ?>
+                </td>
                 <td class="text-right">
-                  <?php if ($inv['status'] === 'unpaid'): ?>
+                  <?php if (in_array((string) $inv['status'], ['unpaid', 'rejected'], true)): ?>
                     <form method="post" action="/billing/pay" class="inline-flex gap-1">
                       <?= csrf_field() ?>
                       <input type="hidden" name="invoice_id" value="<?= (int) $inv['id'] ?>">
-                      <input class="input !w-24 !px-2 !py-1 text-[11px]" name="reference" placeholder="Ref #">
-                      <button class="act-done">Mark paid</button>
+                      <input class="input !w-24 !px-2 !py-1 text-[11px]" name="reference" placeholder="Ref #" required>
+                      <button class="act-done">I have paid</button>
                     </form>
+                  <?php elseif ($inv['status'] === 'claimed'): ?>
+                    <div class="flex flex-col items-end gap-1">
+                      <span class="text-[10px] text-slate-500">ref <?= e((string) ($inv['reference'] ?? '')) ?> · awaiting check</span>
+                      <form method="post" action="/billing/withdraw-claim">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="invoice_id" value="<?= (int) $inv['id'] ?>">
+                        <button class="text-[10px] text-slate-500 underline hover:text-slate-700">entered it wrong?</button>
+                      </form>
+                    </div>
                   <?php else: ?>
                     <span class="text-[10px] text-slate-400"><?= e((string) ($inv['reference'] ?? '')) ?></span>
                   <?php endif; ?>

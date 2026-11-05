@@ -124,9 +124,10 @@ final class Auth
         return [
             self::ROLE_SUPER => ['*'],
             self::ROLE_ADMIN => [
-                'clinic.manage', 'staff.manage', 'doctor.manage',
+                'clinic.manage', 'staff.manage', 'doctor.manage', 'department.manage',
                 'queue.operate', 'queue.call', 'queue.consult', 'queue.priority',
                 'queue.issue', 'reports.view', 'billing.view', 'patient.manage',
+                'support.manage', 'notification.manage',
             ],
             self::ROLE_RECEPTION => [
                 // Day-to-day desk work plus the operational reports they are
@@ -139,13 +140,13 @@ final class Auth
                 // needs a clinician's judgement and a recorded reason.
                 'queue.operate', 'queue.call', 'queue.consult', 'queue.issue',
                 'patient.manage', 'appointment.manage',
-                'reports.view', 'reports.view.basic',
+                'reports.view', 'reports.view.basic', 'support.create',
             ],
             self::ROLE_DOCTOR => [
                 // A doctor works the same board as reception, but the UI hides
                 // issuing tokens and other patients' queues (isDoctor branch).
                 'queue.operate', 'queue.call', 'queue.consult', 'queue.priority',
-                'reports.view.own', 'patient.view',
+                'reports.view.own', 'patient.view', 'support.create',
             ],
         ];
     }

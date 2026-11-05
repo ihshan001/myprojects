@@ -39,6 +39,21 @@ final class QueueService
     public function issueToken(int $clinicId, int $queueId, int $patientId, array $opts = []): array
     {
         return Db::transaction(function () use ($clinicId, $queueId, $patientId, $opts) {
+            // A suspended or closed clinic cannot hand out tokens. Enforced
+            // here rather than only in the controller because this is the one
+            // place every entry point funnels through — the desk, the API and
+            // the booking conversion all call it.
+            $clinicState = Db::one('SELECT is_active, suspended_at, closed_at FROM clinics WHERE id = ?', [$clinicId]);
+            if ($clinicState === null || (int) $clinicState['is_active'] !== 1) {
+                throw new \RuntimeException('This clinic account is not active. Contact the platform administrator.');
+            }
+            if ($clinicState['suspended_at'] !== null) {
+                throw new \RuntimeException('This clinic account is suspended, so new tokens cannot be issued. Existing patients are unaffected.');
+            }
+            if ($clinicState['closed_at'] !== null) {
+                throw new \RuntimeException('This clinic account is closed.');
+            }
+
             $queue = $this->repo->queue($clinicId, $queueId);
             if (!$queue) {
                 throw new \RuntimeException('Queue not found for this clinic.');

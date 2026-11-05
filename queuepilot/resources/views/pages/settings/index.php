@@ -270,4 +270,31 @@
       </form>
     </div>
   </div>
+
+  <?php if ($canManage): ?>
+    <div class="card mt-5 overflow-hidden" id="account">
+      <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+        <p class="text-xs font-semibold text-slate-600">Account closure</p>
+      </div>
+      <div class="px-4 py-4">
+        <p class="text-[11px] leading-relaxed text-slate-500">
+          Closing the clinic signs out every staff member immediately and hides the public
+          booking page and display. <b class="text-slate-700">Nothing is deleted for 90 days</b>,
+          which is the window in which support can restore access if this was a mistake. After
+          that the patient and visit records are purged; invoices are kept for accounting.
+        </p>
+        <details class="mt-3">
+          <summary class="cursor-pointer text-xs font-semibold text-rose-600 hover:underline">Close this clinic…</summary>
+          <form method="post" action="/settings/closure" class="mt-3 space-y-2"
+                onsubmit="return confirm('Sign out every staff member and close this clinic? There is a 90-day window to reverse it.')">
+            <?= csrf_field() ?>
+            <label class="label" for="confirm_name">Type <b><?= e($clinicRecord['name']) ?></b> to confirm</label>
+            <input class="input" id="confirm_name" name="confirm_name" required autocomplete="off"
+                   placeholder="<?= e($clinicRecord['name']) ?>">
+            <button class="btn-stop btn-sm">Request closure</button>
+          </form>
+        </details>
+      </div>
+    </div>
+  <?php endif; ?>
 </div>

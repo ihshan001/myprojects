@@ -64,7 +64,24 @@ function seedTenant(int $id, string $slug, string $name): void
          VALUES (?, ?, ?, ?, ?, ?, 0, ?)',
         [$id, $doctorId, 'OPD', 'A', Db::today(), 'open', Db::now()]
     );
+
+    // Every tenant has an owner. Closure tests need staff to sign out, and a
+    // clinic with no admin is not a state the product allows anyway.
+    Db::insert(
+        'INSERT INTO users (clinic_id, name, email, password_hash, role, is_active, created_at)
+         VALUES (?, ?, ?, ?, ?, 1, ?)',
+        [$id, 'Admin ' . $id, 'admin' . $id . '@alpha.example', password_hash('Admin#2026', PASSWORD_DEFAULT), 'clinic_admin', Db::now()]
+    );
 }
+
+// A platform administrator exists in every real installation because there is
+// no other way to create the first clinic. The suite needs one to verify
+// payments.
+$GLOBALS['superAdminId'] = Db::insert(
+    'INSERT INTO users (clinic_id, name, email, password_hash, role, is_active, created_at)
+     VALUES (NULL, ?, ?, ?, ?, 1, ?)',
+    ['Platform Owner', 'owner@platform.example', password_hash('Owner#2026', PASSWORD_DEFAULT), 'super_admin', Db::now()]
+);
 
 seedPlans();
 seedTenant(1, 'alpha', 'Alpha Clinic');
@@ -1810,6 +1827,310 @@ Assert::test('masking keeps the last three digits and never throws on junk', fun
     Assert::same('•••••567', $mask);
     Assert::same('••••', App\Services\NotificationService::mask('12'));
     Assert::same('•••••123', App\Services\NotificationService::mask('071-223-4123'));
+});
+
+/* ------------------------------------------------------------------ */
+/* 32. departments                                                     */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a department is created, name-checked and clinic-scoped', function (): void {
+    $service = new App\Services\DepartmentService();
+    $r = $service->create(1, ['name' => 'Outpatient']);
+    Assert::true($r['ok'], 'created');
+    Assert::true(($r['id'] ?? 0) > 0);
+
+    $dupe = $service->create(1, ['name' => 'outpatient']);
+    Assert::false($dupe['ok'], 'case-insensitive duplicate refused');
+
+    $blank = $service->create(1, ['name' => 'x']);
+    Assert::false($blank['ok'], 'too short refused');
+
+    // The id belongs to clinic 1 and must be invisible to clinic 2.
+    Assert::same(null, $service->find(2, (int) $r['id']), 'not visible to another clinic');
+    Assert::true($service->find(1, (int) $r['id']) !== null, 'visible to its own clinic');
+});
+
+Assert::test('a department lead from another clinic is refused', function (): void {
+    $foreignDoctor = Db::insert(
+        'INSERT INTO doctors (clinic_id, name, avg_consult_minutes, is_active, created_at) VALUES (2, ?, 10, 1, ?)',
+        ['Foreign Doctor', Db::now()]
+    );
+    $r = (new App\Services\DepartmentService())->create(1, ['name' => 'Cardiology', 'lead_doctor_id' => (int) $foreignDoctor]);
+    Assert::false($r['ok'], 'foreign lead refused');
+    Assert::contains('does not belong', (string) $r['error']);
+});
+
+Assert::test('deactivating a department keeps its queues attached to history', function (): void {
+    $service = new App\Services\DepartmentService();
+    $r = $service->create(1, ['name' => 'Radiology']);
+    $id = (int) $r['id'];
+
+    $queue = Db::one('SELECT id FROM queues WHERE clinic_id = 1 LIMIT 1');
+    Db::run('UPDATE queues SET department_id = ? WHERE id = ?', [$id, (int) $queue['id']]);
+
+    Assert::true($service->deactivate(1, $id)['ok']);
+    Assert::same(0, (int) Db::scalar('SELECT is_active FROM departments WHERE id = ?', [$id]), 'marked inactive');
+    Assert::same($id, (int) Db::scalar('SELECT department_id FROM queues WHERE id = ?', [(int) $queue['id']]), 'queue still points at it for reporting');
+
+    Db::run('UPDATE queues SET department_id = NULL WHERE id = ?', [(int) $queue['id']]);
+});
+
+/* ------------------------------------------------------------------ */
+/* 33. doctor schedules and holidays                                   */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a doctor roster narrows the bookable window', function (): void {
+    $clinicId = 1;
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1 LIMIT 1');
+    $date = date('Y-m-d', strtotime('next wednesday +7 days'));
+    $dow = (int) date('w', strtotime($date));
+
+    (new App\Services\SlotService())->saveHours($clinicId, [$dow => '08:00-17:00']);
+    (new App\Services\ScheduleService())->saveWeek($clinicId, $doctorId, [$dow => [['09:00', '10:00']]]);
+
+    $result = (new App\Services\SlotService())->slotsFor($clinicId, $doctorId, $date);
+    Assert::true($result['slots'] !== [], 'there are slots');
+    Assert::true($result['slots'][0] >= '09:00', 'starts at the roster, not clinic opening');
+    Assert::true(end($result['slots']) < '10:00', 'ends at the roster, not clinic closing');
+
+    (new App\Services\ScheduleService())->saveWeek($clinicId, $doctorId, []);
+});
+
+Assert::test('a doctor not rostered that weekday has no slots and says why', function (): void {
+    $clinicId = 1;
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1 LIMIT 1');
+    $date = date('Y-m-d', strtotime('next thursday +14 days'));
+    $dow = (int) date('w', strtotime($date));
+    $other = ($dow + 1) % 7;
+
+    (new App\Services\SlotService())->saveHours($clinicId, [$dow => '08:00-17:00']);
+    (new App\Services\ScheduleService())->saveWeek($clinicId, $doctorId, [$other => [['09:00', '11:00']]]);
+
+    $result = (new App\Services\SlotService())->slotsFor($clinicId, $doctorId, $date);
+    Assert::same([], $result['slots']);
+    Assert::contains('does not work', (string) $result['reason']);
+
+    (new App\Services\ScheduleService())->saveWeek($clinicId, $doctorId, []);
+});
+
+Assert::test('a holiday closes the day even when the doctor is rostered', function (): void {
+    $clinicId = 1;
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1 LIMIT 1');
+    $date = date('Y-m-d', strtotime('next friday +21 days'));
+    $dow = (int) date('w', strtotime($date));
+
+    (new App\Services\SlotService())->saveHours($clinicId, [$dow => '08:00-17:00']);
+    (new App\Services\ScheduleService())->saveWeek($clinicId, $doctorId, [$dow => [['09:00', '12:00']]]);
+    Assert::true((new App\Services\SlotService())->slotsFor($clinicId, $doctorId, $date)['slots'] !== [], 'open before the holiday');
+
+    $added = (new App\Services\HolidayService())->add($clinicId, $date, 'Poya Day', null);
+    Assert::true($added['ok']);
+
+    $result = (new App\Services\SlotService())->slotsFor($clinicId, $doctorId, $date);
+    Assert::same([], $result['slots'], 'closed for the holiday');
+    Assert::contains('Poya Day', (string) $result['reason'], 'the reason names the holiday');
+
+    (new App\Services\HolidayService())->remove($clinicId, (int) $added['id']);
+    (new App\Services\ScheduleService())->saveWeek($clinicId, $doctorId, []);
+});
+
+Assert::test('the same date cannot be closed twice', function (): void {
+    $service = new App\Services\HolidayService();
+    $date = date('Y-m-d', strtotime('+40 days'));
+    $first = $service->add(1, $date, 'Test closure', null);
+    Assert::true($first['ok']);
+    $second = $service->add(1, $date, 'Another name', null);
+    Assert::false($second['ok'], 'duplicate refused');
+    $service->remove(1, (int) $first['id']);
+});
+
+Assert::test('a schedule must have valid shifts', function (): void {
+    $service = new App\Services\ScheduleService();
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1 LIMIT 1');
+
+    $backwards = $service->saveWeek(1, $doctorId, [1 => [['17:00', '09:00']]]);
+    Assert::false($backwards['ok'], 'end before start refused');
+
+    $malformed = $service->saveWeek(1, $doctorId, [1 => [['nine', 'ten']]]);
+    Assert::false($malformed['ok'], 'non-times refused');
+
+    $foreign = $service->saveWeek(1, 99999, [1 => [['09:00', '10:00']]]);
+    Assert::false($foreign['ok'], 'unknown doctor refused');
+});
+
+/* ------------------------------------------------------------------ */
+/* 34. payment verification                                            */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a claimed invoice does not activate the subscription', function (): void {
+    // The whole point of the verification step: the payer cannot settle it.
+    $number = 'INV-UNIT-' . bin2hex(random_bytes(3));
+    $invoiceId = Db::insert(
+        'INSERT INTO invoices (clinic_id, number, period_from, period_to, amount, currency, status, created_at)
+         VALUES (1,?,?,?,?,?,?,?)',
+        [$number, Db::today(), date('Y-m-d', strtotime('+1 month')), 1000, 'LKR', 'claimed', Db::now()]
+    );
+
+    $status = Db::scalar('SELECT status FROM invoices WHERE id = ?', [$invoiceId]);
+    Assert::same('claimed', $status);
+    Assert::same(null, Db::scalar('SELECT verified_at FROM invoices WHERE id = ?', [$invoiceId]), 'nothing has verified it');
+});
+
+Assert::test('verification records who did it', function (): void {
+    $invoiceId = Db::insert(
+        'INSERT INTO invoices (clinic_id, number, period_from, period_to, amount, currency, status, created_at)
+         VALUES (1,?,?,?,?,?,?,?)',
+        ['INV-UNIT-' . bin2hex(random_bytes(3)), Db::today(), date('Y-m-d', strtotime('+1 month')), 1000, 'LKR', 'claimed', Db::now()]
+    );
+    $adminId = (int) $GLOBALS['superAdminId'];
+
+    Db::run(
+        "UPDATE invoices SET status='paid', paid_at=?, verified_at=?, verified_by=? WHERE id=?",
+        [Db::now(), Db::now(), $adminId, $invoiceId]
+    );
+
+    Assert::same('paid', Db::scalar('SELECT status FROM invoices WHERE id = ?', [$invoiceId]));
+    Assert::same($adminId, (int) Db::scalar('SELECT verified_by FROM invoices WHERE id = ?', [$invoiceId]));
+});
+
+/* ------------------------------------------------------------------ */
+/* 35. lifecycle: suspension, closure, retention                       */
+/* ------------------------------------------------------------------ */
+
+Assert::test('suspension blocks token issuing without touching data', function (): void {
+    $clinicId = 2;
+    $service = new App\Services\LifecycleService();
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 2 LIMIT 1');
+    if ($queueId === 0) {
+        return;
+    }
+    $patient = Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (2,?,?,?,?)',
+        ['SUSP' . bin2hex(random_bytes(2)), 'Suspended Probe', '0771119999', Db::now()]
+    );
+    $beforePatients = (int) Db::scalar('SELECT COUNT(*) FROM patients WHERE clinic_id = 2');
+
+    Assert::true($service->suspend($clinicId, 'Unit test suspension', null)['ok']);
+
+    $message = null;
+    try {
+        (new App\Domain\Queue\QueueService())->issueToken($clinicId, $queueId, (int) $patient);
+    } catch (\RuntimeException $e) {
+        $message = $e->getMessage();
+    }
+    Assert::contains('suspended', (string) $message);
+    Assert::same(0, (int) Db::scalar('SELECT COUNT(*) FROM queue_entries WHERE patient_id = ?', [(int) $patient]), 'no entry written');
+    Assert::same($beforePatients, (int) Db::scalar('SELECT COUNT(*) FROM patients WHERE clinic_id = 2'), 'no data deleted');
+
+    Assert::true($service->reinstate($clinicId, null)['ok']);
+    Assert::false($service->isSuspended($clinicId), 'not suspended any more');
+
+    Db::run('DELETE FROM patients WHERE id = ?', [(int) $patient]);
+});
+
+Assert::test('suspending twice is refused and a blank reason is refused', function (): void {
+    $service = new App\Services\LifecycleService();
+    Assert::false($service->suspend(2, 'ok reason', null)['ok'] === false, 'first suspension works');
+    Assert::false($service->suspend(2, 'second attempt', null)['ok'], 'second is refused');
+    $service->reinstate(2, null);
+    Assert::false($service->suspend(2, 'no', null)['ok'], 'a two-character reason is refused');
+});
+
+Assert::test('closure signs staff out and closes open queues', function (): void {
+    $clinicId = 2;
+    $service = new App\Services\LifecycleService();
+    $staffBefore = (int) Db::scalar('SELECT COUNT(*) FROM users WHERE clinic_id = 2 AND is_active = 1');
+
+    $result = $service->requestClosure($clinicId, 90);
+    Assert::true($result['ok']);
+    Assert::same(0, (int) Db::scalar('SELECT COUNT(*) FROM users WHERE clinic_id = 2 AND is_active = 1'), 'nobody can sign in');
+    Assert::same(0, (int) Db::scalar("SELECT COUNT(*) FROM queues WHERE clinic_id = 2 AND status <> 'closed'"), 'no open sessions');
+    Assert::true(strtotime((string) $result['purge_after']) > time(), 'retention window is in the future');
+    Assert::true($staffBefore > 0, 'there were staff to sign out');
+
+    Assert::true($service->cancelClosure($clinicId, null)['ok'], 'closure can be cancelled inside the window');
+    Assert::true((int) Db::scalar('SELECT COUNT(*) FROM users WHERE clinic_id = 2 AND is_active = 1') > 0, 'staff restored');
+});
+
+Assert::test('purge is refused before the retention window expires', function (): void {
+    $service = new App\Services\LifecycleService();
+    (new App\Services\LifecycleService())->requestClosure(2, 90);
+    $result = $service->purge(2);
+    Assert::false($result['ok'], 'refused early');
+    Assert::contains('retention window', (string) $result['error']);
+    $service->cancelClosure(2, null);
+});
+
+Assert::test('purge keeps invoices and never frees the slug', function (): void {
+    $service = new App\Services\LifecycleService();
+    $clinicId = 2;
+
+    $invoiceNumber = 'INV-PURGE-' . bin2hex(random_bytes(2));
+    Db::insert(
+        'INSERT INTO invoices (clinic_id, number, period_from, period_to, amount, currency, status, created_at)
+         VALUES (?,?,?,?,?,?,?,?)',
+        [$clinicId, $invoiceNumber, Db::today(), date('Y-m-d'), 500, 'LKR', 'paid', Db::now()]
+    );
+
+    $service->requestClosure($clinicId, 7);
+    Db::run('UPDATE clinics SET purge_after = ? WHERE id = ?', [date('Y-m-d H:i:s', time() - 86400), $clinicId]);
+
+    $result = $service->purge($clinicId);
+    Assert::true($result['ok'], 'purged once the window passed');
+    Assert::same(0, (int) Db::scalar('SELECT COUNT(*) FROM users WHERE clinic_id = ?', [$clinicId]), 'users gone');
+    Assert::true((int) Db::scalar('SELECT COUNT(*) FROM invoices WHERE clinic_id = ? AND number = ?', [$clinicId, $invoiceNumber]) === 1, 'invoice kept for accounting');
+
+    $clinic = Db::one('SELECT name, is_active, closed_at FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::true($clinic['closed_at'] !== null, 'marked closed, not deleted');
+    Assert::same(0, (int) $clinic['is_active']);
+    Assert::contains('[closed]', (string) $clinic['name'], 'row kept so the slug cannot be reused');
+
+    // Restore the tenant for the rest of the suite.
+    Db::run("UPDATE clinics SET name='Lakeview Medical Centre', is_active=1, closed_at=NULL, closure_requested_at=NULL, purge_after=NULL, billing_status='active' WHERE id=?", [$clinicId]);
+});
+
+/* ------------------------------------------------------------------ */
+/* 36. thermal printer                                                 */
+/* ------------------------------------------------------------------ */
+
+Assert::test('an ESC/POS slip starts with the init sequence and carries the token', function (): void {
+    $slip = App\Support\ThermalSlip::escpos([
+        'clinic' => 'Serenity Medical',
+        'queue' => 'OPD',
+        'token' => 'A014',
+        'doctor' => 'Dr Perera',
+        'room' => 'Room 3',
+        'ahead' => 4,
+        'url' => 'https://example.test/t/abc123',
+    ]);
+
+    Assert::true(str_starts_with($slip, "\x1b@"), 'begins with ESC @');
+    Assert::contains('A014', $slip);
+    Assert::contains('Dr Perera', $slip);
+    Assert::contains("\x1dV\x42\x00", $slip, 'ends with a partial cut');
+});
+
+Assert::test('a slip cannot be used to inject printer control codes', function (): void {
+    // A patient name is free text; ESC in a name must not reach the printer.
+    $slip = App\Support\ThermalSlip::escpos([
+        'clinic' => "Clinic\x1b\x40Injected",
+        'queue' => "Queue\x07Bell",
+        'token' => 'A1',
+    ]);
+    Assert::false(str_contains($slip, "Injected\x1b@"), 'control bytes stripped from the injected text');
+    Assert::contains('Injected', $slip, 'the readable text survives');
+    Assert::false(str_contains($slip, "\x07"), 'BEL stripped');
+});
+
+Assert::test('the printable slip is 80mm and escapes user text', function (): void {
+    $html = App\Support\ThermalSlip::html([
+        'clinic' => 'Serenity <script>alert(1)</script>',
+        'queue' => 'OPD',
+        'token' => 'A014',
+    ]);
+    Assert::contains('@page { size: 80mm', $html);
+    Assert::false(str_contains($html, '<script>alert(1)</script>'), 'no raw script from the clinic name');
+    Assert::contains('&lt;script&gt;', $html);
 });
 
 /* ------------------------------------------------------------------ */

@@ -49,6 +49,10 @@
   <div class="mt-5 grid gap-2 sm:grid-cols-3">
     <a href="/app" class="btn-primary">Back to the board</a>
     <a href="/queue/new" class="btn-secondary">Next patient</a>
+    <a class="btn-secondary" href="/queue/<?= (int) $result['entry_id'] ?>/slip" target="_blank">
+      <svg class="h-4 w-4"><use href="#i-printer"/></svg>
+      Thermal slip
+    </a>
     <button onclick="window.print()" class="btn-secondary">
       <svg class="h-4 w-4"><use href="#i-print"/></svg>
       Print token

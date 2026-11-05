@@ -68,6 +68,41 @@
         <p>Timezone: <b class="text-slate-700"><?= e((string) $c['timezone']) ?></b></p>
         <p>Slug: <b class="font-mono text-slate-700"><?= e((string) $c['slug']) ?></b></p>
       </div>
+
+      <?php
+      $suspended = ($c['suspended_at'] ?? null) !== null;
+      $closing = ($c['closure_requested_at'] ?? null) !== null;
+      ?>
+      <?php if ($suspended): ?>
+        <div class="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
+          <p class="text-[11px] font-semibold text-rose-800">
+            Suspended <?= e(ago($c['suspended_at'])) ?> — new tokens are refused, nothing deleted.
+          </p>
+          <p class="mt-0.5 text-[11px] text-rose-700"><?= e((string) $c['suspension_reason']) ?></p>
+          <form method="post" action="/admin/clinics/<?= (int) $c['id'] ?>/reinstate" class="mt-2">
+            <?= csrf_field() ?>
+            <button class="btn-secondary btn-sm">Reinstate clinic</button>
+          </form>
+        </div>
+      <?php elseif ($closing): ?>
+        <div class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+          <p class="text-[11px] font-semibold text-amber-900">
+            Closure requested <?= e(ago($c['closure_requested_at'])) ?>. Data purgeable after
+            <?= e(substr((string) ($c['purge_after'] ?? ''), 0, 10)) ?>.
+          </p>
+        </div>
+      <?php else: ?>
+        <details class="mt-3">
+          <summary class="cursor-pointer text-[11px] font-medium text-rose-600 hover:underline">Suspend this clinic…</summary>
+          <form method="post" action="/admin/clinics/<?= (int) $c['id'] ?>/suspend" class="mt-2 flex flex-wrap gap-2"
+                onsubmit="return confirm('Suspend <?= e(addslashes((string) $c['name'])) ?>? Patients cannot be issued tokens until reinstated.')">
+            <?= csrf_field() ?>
+            <input class="input !w-64 !py-1 text-xs" name="reason" required maxlength="255"
+                   placeholder="Unpaid invoice since 3 Nov">
+            <button class="btn-stop btn-sm">Suspend</button>
+          </form>
+        </details>
+      <?php endif; ?>
     </div>
   <?php endforeach; ?>
 </div>

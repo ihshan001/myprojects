@@ -21,6 +21,7 @@ if ($u) {
                 ['/admin', 'grid', 'Overview', $isActive('/admin')],
                 ['/admin/clinics', 'building', 'Clinics', $isActive('/admin/clinics')],
                 ['/admin/plans', 'card', 'Plans & billing', $isActive('/admin/plans')],
+                ['/admin/billing', 'check-circle', 'Payment verification', $isActive('/admin/billing')],
             ],
         ];
     } else {
@@ -37,6 +38,11 @@ if ($u) {
                 $isDoctor ? null : ['/appointments', 'calendar', t('nav.appointments', 'Appointments'), $isActive('/appointments')],
                 $isDoctor ? null : ['/patients', 'users', t('nav.patients', 'Patients'), $isActive('/patients')],
                 ['/doctors', 'stethoscope', t('nav.doctors', 'Doctors & rooms'), $isActive('/doctors')],
+                // Departments and the operating calendar are clinic structure;
+                // a doctor does not need to see them, reception does not edit
+                // them, and the page itself hides the write controls by role.
+                $isDoctor ? null : ['/departments', 'grid', 'Departments', $isActive('/departments')],
+                ['/calendar', 'calendar', 'Schedules & holidays', $isActive('/calendar')],
             ])),
             'Insight' => array_values(array_filter([
                 Auth::can('reports.view') ? ['/reports', 'chart', t('nav.reports', 'Reports'), $isActive('/reports')] : null,
@@ -47,6 +53,8 @@ if ($u) {
                 Auth::can('clinic.manage') ? ['/audit', 'shield', 'Audit log', $isActive('/audit')] : null,
                 ['/settings', 'settings', t('nav.settings', 'Settings'), $isActive('/settings')],
                 Auth::can('billing.view') ? ['/billing', 'card', 'Subscription', $isActive('/billing')] : null,
+                ['/notifications', 'bell', 'Notifications', $isActive('/notifications')],
+                ['/support', 'lifebuoy', 'Support', $isActive('/support')],
             ])),
         ];
     }
