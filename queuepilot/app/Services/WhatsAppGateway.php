@@ -38,7 +38,18 @@ final class WhatsAppGateway implements Gateway
 {
     public function send(string $to, string $body): string
     {
-        $transport = strtolower((string) (getenv('WHATSAPP_TRANSPORT') ?: 'auto'));
+        // `WHATSAPP_GATEWAY` is accepted as well as `WHATSAPP_TRANSPORT`.
+        // Both spellings exist in the wild: `.env.example` shipped
+        // TRANSPORT while `.env` shipped GATEWAY, and the mismatch meant a
+        // clinic that set GATEWAY=log was silently on `auto` — one missing
+        // credential away from trying to message real patients. Reading both
+        // is the fix that cannot go stale when a template is copied between
+        // the two files.
+        $transport = strtolower((string) (
+            getenv('WHATSAPP_TRANSPORT')
+            ?: getenv('WHATSAPP_GATEWAY')
+            ?: 'auto'
+        ));
         $token = trim((string) (getenv('WHATSAPP_TOKEN') ?: ''));
         $phoneId = trim((string) (getenv('WHATSAPP_PHONE_ID') ?: ''));
         $template = trim((string) (getenv('WHATSAPP_TEMPLATE_NAME') ?: ''));

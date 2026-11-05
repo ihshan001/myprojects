@@ -141,6 +141,29 @@ if ($envTracked) {
     pass('.env is not tracked');
 }
 
+// The running install's own key. Everything else in this file is a
+// configuration detail; this one decides whether a password hash, a session
+// cookie or a signed link can be forged by anyone who has read the source.
+//
+// The check is a FAILURE in production and a warning in development, because
+// the fallback key is committed and therefore public: an install that ships
+// it to a real clinic can be impersonated by anyone who has seen the
+// repository.
+$liveKey = (string) (getenv('APP_KEY') ?: (Env::get('app.key') ?? ''));
+$keyIsFallback = $liveKey === '' || str_starts_with($liveKey, 'dev-only-key-change-me');
+$appEnv = strtolower((string) (Env::get('app.env') ?? 'production'));
+if ($keyIsFallback) {
+    if ($appEnv === 'production') {
+        fail('APP_KEY is unset or still the committed development placeholder. Generate one: php -r "echo bin2hex(random_bytes(32));"');
+    } else {
+        warn('APP_KEY is the committed development placeholder (fine for APP_ENV=development, fatal in production).');
+    }
+} elseif (strlen($liveKey) < 32) {
+    warn('APP_KEY is shorter than 32 characters — use 32+ random bytes, hex encoded.');
+} else {
+    pass('APP_KEY is set and is not the committed placeholder');
+}
+
 // A committed example file must not carry a real key.
 $example = is_file($root . '/.env.example') ? (string) file_get_contents($root . '/.env.example') : '';
 if (preg_match('/^APP_KEY=([^\s]+)/m', $example, $m) === 1 && strlen(trim($m[1])) > 16) {
