@@ -31,6 +31,7 @@ final class QueueService
         private readonly AuditService $audit = new AuditService(),
         private readonly NotificationService $notifications = new NotificationService(),
         private readonly \App\Services\PriorityRuleService $priorityRules = new \App\Services\PriorityRuleService(),
+        private readonly \App\Services\WorkflowService $workflows = new \App\Services\WorkflowService(),
     ) {}
 
     /* ------------------------------------------------------------------ */
@@ -260,6 +261,25 @@ final class QueueService
                 [$to, $patch, $message] = $this->plan($entry, $action, $ctx);
 
                 QueueStateMachine::assert($entry['status'], $to);
+
+                // A service can declare the steps its visits must pass before
+                // they are complete. Enforced here for the same reason as the
+                // priority rule: the desk, the API and any future integration
+                // all funnel through apply(), so this is the only place the
+                // check cannot be bypassed. A clinic with no steps configured
+                // sees no change at all.
+                if ($to === QueueStateMachine::COMPLETED) {
+                    $missing = $this->workflows->missing($clinicId, $entry);
+                    if ($missing !== []) {
+                        return [
+                            'ok' => false,
+                            'status' => $entry['status'],
+                            'message' => 'This visit is not finished yet: ' . implode(', ', $missing)
+                                . '. Tick each step before completing the visit.',
+                            'steps_missing' => $missing,
+                        ];
+                    }
+                }
 
                 // A transfer must know where it is going. Resolve the target
                 // queue up front so a bad id fails before anything is written.

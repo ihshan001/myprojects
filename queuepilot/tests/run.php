@@ -3199,6 +3199,147 @@ Assert::test('a clinical priority outranks the weight, and a rule outranks a wei
 });
 
 /* ------------------------------------------------------------------ */
+/* 50. service workflows                                               */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a required step blocks completion and names itself', function (): void {
+    seedTenant(83, 'workflow-clinic', 'Workflow Clinic');
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 83');
+    $workflows = new App\Services\WorkflowService();
+    $workflows->create(83, ['name' => 'Sample taken', 'position' => 1], null);
+    $workflows->create(83, ['name' => 'Result verified', 'position' => 2], null);
+
+    $patient = Db::insert('INSERT INTO patients (clinic_id, code, full_name, created_at) VALUES (83,?,?,?)',
+        ['WF1', 'Workflow One', Db::now()]);
+    $queue = new App\Domain\Queue\QueueService();
+    $entry = $queue->issueToken(83, $queueId, $patient, []);
+    $queue->apply(83, $entry['entry_id'], 'call', []);
+    $queue->apply(83, $entry['entry_id'], 'start', []);
+
+    $blocked = $queue->apply(83, $entry['entry_id'], 'complete', []);
+    Assert::false($blocked['ok'], 'completion is refused while a required step is open');
+    Assert::same(['Sample taken', 'Result verified'], $blocked['steps_missing'], 'and both open steps are named');
+    Assert::contains('Sample taken', (string) $blocked['message'], 'the message is a sentence a receptionist can act on');
+    Assert::same('in_consultation', (string) Db::scalar('SELECT status FROM queue_entries WHERE id = ?', [$entry['entry_id']]),
+        'the visit has not moved');
+});
+
+Assert::test('ticking every required step lets the visit complete', function (): void {
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 83');
+    $entryId = (int) Db::scalar("SELECT id FROM queue_entries WHERE clinic_id = 83 AND status = 'in_consultation'");
+    $workflows = new App\Services\WorkflowService();
+
+    $steps = array_column(Db::all('SELECT id FROM workflow_steps WHERE clinic_id = 83 ORDER BY position'), 'id');
+    foreach ($steps as $stepId) {
+        Assert::true($workflows->markDone(83, $entryId, (int) $stepId, null), 'the step is recorded');
+    }
+    Assert::false($workflows->markDone(83, $entryId, (int) $steps[0], null), 'ticking the same step twice is a no-op, not a duplicate');
+
+    $queue = new App\Domain\Queue\QueueService();
+    $done = $queue->apply(83, $entryId, 'complete', []);
+    Assert::true($done['ok'], 'with every step ticked the visit completes');
+    Assert::same('completed', (string) Db::scalar('SELECT status FROM queue_entries WHERE id = ?', [$entryId]), 'and the row moved');
+    Assert::same(count($steps), (int) Db::scalar('SELECT COUNT(*) FROM entry_step_done WHERE entry_id = ?', [$entryId]),
+        'one record per step, no extras');
+});
+
+Assert::test('an optional step is recorded but never blocks', function (): void {
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 83');
+    $workflows = new App\Services\WorkflowService();
+    $optional = $workflows->create(83, ['name' => 'Leaflet given', 'position' => 3, 'is_required' => '0'], null);
+
+    $patient = Db::insert('INSERT INTO patients (clinic_id, code, full_name, created_at) VALUES (83,?,?,?)',
+        ['WF2', 'Workflow Two', Db::now()]);
+    $queue = new App\Domain\Queue\QueueService();
+    $entry = $queue->issueToken(83, $queueId, $patient, []);
+    $queue->apply(83, $entry['entry_id'], 'call', []);
+    $queue->apply(83, $entry['entry_id'], 'start', []);
+
+    // The two required steps from the previous test are still configured, so
+    // tick them; the optional one stays open.
+    foreach (Db::all('SELECT id FROM workflow_steps WHERE clinic_id = 83 AND is_required = 1') as $required) {
+        $workflows->markDone(83, $entry['entry_id'], (int) $required['id'], null);
+    }
+    $progress = $workflows->progress(83, Db::one('SELECT * FROM queue_entries WHERE id = ?', [$entry['entry_id']]));
+    $byName = array_column($progress, null, 'name');
+    Assert::same(0, (int) $byName['Leaflet given']['done'], 'the optional step is not ticked');
+    Assert::same([], $workflows->missing(83, Db::one('SELECT * FROM queue_entries WHERE id = ?', [$entry['entry_id']])),
+        'and nothing required is missing');
+
+    $result = $queue->apply(83, $entry['entry_id'], 'complete', []);
+    Assert::true($result['ok'], 'so the visit completes with the optional step open');
+});
+
+Assert::test('a clinic with no steps completes in one action, as before', function (): void {
+    seedTenant(84, 'no-workflow', 'No Workflow');
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 84');
+    $patient = Db::insert('INSERT INTO patients (clinic_id, code, full_name, created_at) VALUES (84,?,?,?)',
+        ['NW1', 'No Workflow One', Db::now()]);
+
+    $queue = new App\Domain\Queue\QueueService();
+    $entry = $queue->issueToken(84, $queueId, $patient, []);
+    $queue->apply(84, $entry['entry_id'], 'call', []);
+    $queue->apply(84, $entry['entry_id'], 'start', []);
+    $result = $queue->apply(84, $entry['entry_id'], 'complete', []);
+
+    Assert::true($result['ok'], 'no configured steps means no gate');
+    Assert::same([], (new App\Services\WorkflowService())->progress(84, ['id' => $entry['entry_id'], 'queue_id' => $queueId]),
+        'and no steps are invented for it');
+});
+
+Assert::test('steps are scoped by queue kind and one queue overrides its kind', function (): void {
+    $workflows = new App\Services\WorkflowService();
+    Db::run("UPDATE queues SET kind = 'lab' WHERE clinic_id = 83");
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 83');
+
+    // A queue-level step with the same name replaces the kind-wide one.
+    $queueSpecific = $workflows->create(83, ['name' => 'Sample taken', 'position' => 1, 'queue_id' => $queueId], null);
+    $steps = $workflows->stepsFor(83, $queueId, 'lab');
+    $named = array_values(array_filter($steps, static fn ($s) => $s['name'] === 'Sample taken'));
+
+    Assert::same(1, count($named), 'the name appears once, not twice');
+    Assert::same($queueSpecific, (int) $named[0]['id'], 'and the queue-level version wins');
+
+    // A lab-only step must not appear on a consultation queue. (The two
+    // steps created earlier carry no kind at all, so they stay clinic-wide.)
+    $workflows->create(83, ['name' => 'Result filed', 'position' => 3, 'kind' => 'lab'], null);
+    $labNames = array_column($workflows->stepsFor(83, $queueId, 'lab'), 'name');
+    $consultNames = array_column($workflows->stepsFor(83, $queueId, 'consultation'), 'name');
+
+    Assert::true(in_array('Result filed', $labNames, true), 'the lab step applies to a lab queue');
+    Assert::false(in_array('Result filed', $consultNames, true), 'and not to a consultation queue');
+    Assert::true(in_array('Result verified', $consultNames, true), 'a kind-less step still applies to every kind');
+});
+
+Assert::test('a retired or foreign step cannot be ticked', function (): void {
+    $workflows = new App\Services\WorkflowService();
+    $stepId = (int) Db::scalar("SELECT id FROM workflow_steps WHERE clinic_id = 83 AND name = 'Result verified'");
+    $entryId = (int) Db::scalar('SELECT id FROM queue_entries WHERE clinic_id = 83 ORDER BY id LIMIT 1');
+
+    $workflows->deactivate(83, $stepId);
+    $refused = false;
+    try {
+        $workflows->markDone(83, $entryId, $stepId, null);
+    } catch (\InvalidArgumentException) {
+        $refused = true;
+    }
+    Assert::true($refused, 'a retired step cannot be ticked');
+
+    $foreign = (int) Db::scalar('SELECT id FROM workflow_steps WHERE clinic_id = 1 LIMIT 1');
+    if ($foreign === 0) {
+        $refused = false;
+        try {
+            $workflows->markDone(83, $entryId, 99999, null);
+        } catch (\InvalidArgumentException) {
+            $refused = true;
+        }
+        Assert::true($refused, 'an unknown step is refused');
+    }
+
+    Assert::false($workflows->deactivate(83, 99999), 'and a step from nowhere cannot be retired');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

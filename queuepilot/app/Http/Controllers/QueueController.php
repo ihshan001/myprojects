@@ -272,7 +272,45 @@ final class QueueController
             'events' => $events,
             'position' => $service->positionFor($entry, $clinicId),
             'canOperate' => Auth::can('queue.operate'),
+            // The steps this service requires. Empty for a clinic that has
+            // configured none, which is the product's previous behaviour.
+            'steps' => (new \App\Services\WorkflowService())->progress($clinicId, $entry),
         ]);
+    }
+
+    /**
+     * Tick a workflow step on an entry. Kept separate from `apply()` because
+     * a step is not a status: it records that part of the service happened
+     * without moving the patient anywhere.
+     */
+    public function markStep(): void
+    {
+        $clinicId = $this->guard();
+        $entryId = Request::int('entry_id');
+        $stepId = Request::int('step_id');
+        $undo = Request::string('undo') === '1';
+
+        $workflows = new \App\Services\WorkflowService();
+        try {
+            if ($undo) {
+                $workflows->undoStep($clinicId, $entryId, $stepId);
+                $changed = true;
+            } else {
+                $changed = $workflows->markDone($clinicId, $entryId, $stepId, Auth::id());
+            }
+        } catch (\InvalidArgumentException $e) {
+            flash('error', $e->getMessage());
+            redirect('/queue/entry?id=' . $entryId);
+            return;
+        }
+
+        if ($changed) {
+            (new AuditService())->log($clinicId, $undo ? 'queue.step_undone' : 'queue.step_done', 'queue_entry', $entryId, [
+                'step_id' => $stepId,
+            ]);
+        }
+        flash('success', $undo ? 'Step reopened.' : 'Step recorded.');
+        redirect('/queue/entry?id=' . $entryId);
     }
 
     /** Form-posted queue action (used when JS is unavailable). */

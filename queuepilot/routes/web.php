@@ -30,6 +30,7 @@ use App\Http\Controllers\QueueController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\BreakController;
 use App\Http\Controllers\PriorityRuleController;
+use App\Http\Controllers\WorkflowController;
 use App\Http\Controllers\QueueConfigController;
 use App\Http\Controllers\RoomController;
 
@@ -89,6 +90,7 @@ Router::get('/queue/{id}/slip', [QueueController::class, 'slip'], ['auth' => tru
 Router::get('/queue/{id}/slip.escpos', [QueueController::class, 'slipEscpos'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::get('/queue/entry', [QueueController::class, 'entry'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/action', [QueueController::class, 'action'], ['auth' => true, 'ability' => 'queue.operate']);
+Router::post('/queue/step', [QueueController::class, 'markStep'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/session', [QueueController::class, 'sessionControl'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/delay', [QueueController::class, 'announceDelay'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::get('/display', [DisplayController::class, 'screen'], ['auth' => true]);
@@ -123,6 +125,11 @@ Router::get('/queues/priority-rules', [PriorityRuleController::class, 'index'], 
 Router::post('/queues/priority-rules', [PriorityRuleController::class, 'save'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/queues/priority-rules/{id}/toggle', [PriorityRuleController::class, 'toggle'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/queues/priority-rules/{id}/delete', [PriorityRuleController::class, 'delete'], ['auth' => true, 'ability' => 'clinic.manage']);
+
+// Service workflows — the steps a visit must pass before it is complete.
+Router::get('/queues/workflows', [WorkflowController::class, 'index'], ['auth' => true]);
+Router::post('/queues/workflows', [WorkflowController::class, 'save'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/queues/workflows/{id}/delete', [WorkflowController::class, 'delete'], ['auth' => true, 'ability' => 'clinic.manage']);
 
 Router::get('/rooms', [RoomController::class, 'index'], ['auth' => true]);
 Router::post('/rooms', [RoomController::class, 'store'], ['auth' => true, 'ability' => 'doctor.manage']);

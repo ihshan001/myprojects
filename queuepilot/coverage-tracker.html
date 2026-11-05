@@ -1130,13 +1130,13 @@
         </label>
         <p class="note"><code>/admin/organisations</code> creates groups, attaches and detaches branches with audit rows. Branch admins get the read-only roll-up at <code>/organisation</code> — counts only, verified that a branch admin sees zero identifiers from another group.</p>
       </li>
-      <li class="item" data-status="partial">
+      <li class="item" data-status="built">
         <label class="row">
           <input type="checkbox" class="tick" data-id="Future business expansion|Configurable service workflows">
           <span class="name">Configurable service workflows</span>
-          <span class="pill partial">Partial</span>
+          <span class="pill built">Built</span>
         </label>
-        <p class="note">Queue <code>kind</code> supports consultation/lab/pharmacy/general and priorities are configurable. There is no visual workflow builder.</p>
+        <p class="note"><code>/queues/workflows</code>: a clinic names the steps a visit must pass (&ldquo;Sample taken&rdquo;, &ldquo;Result verified&rdquo;, &ldquo;Report handed over&rdquo;) against a queue kind or one queue, in order, required or optional. Completion is refused naming the open steps — enforced in the service, so the API obeys it too — and each tick records who and when. Verified live on a lab queue: complete refused, ticked from the entry page, then completed. No visual drag-and-drop builder, and none needed for a list.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
@@ -1183,7 +1183,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (197 automated checks, 148 files lint-clean, healthcheck green).
+    application (203 automated checks, 151 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.

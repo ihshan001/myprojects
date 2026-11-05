@@ -5,7 +5,7 @@ codebase actually does. It is deliberately blunt: a feature is **Built** only
 if I ran it against the live server, **Partial** if something exists but does
 not meet the scenario as written, and **Not built** otherwise.
 
-Verified on 2026-11-05 against commit `HEAD` (197 automated checks, 148 files
+Verified on 2026-11-05 against commit `HEAD` (203 automated checks, 151 files
 lint-clean, healthcheck all-good, all five demo logins re-checked).
 
 > **Read this first.** The blueprint describes a mature product with billing,
@@ -221,7 +221,32 @@ lint-clean, healthcheck all-good, all five demo logins re-checked).
 
 ---
 
-## 17. Deliberately out of scope
+## 17. Other verticals — salon, repair bench, laboratory, pharmacy, counter
+
+These use the same engine, not a separate product. What is genuinely shared,
+and what a real deployment would still need, stated plainly.
+
+| Scenario | State | Notes |
+|---|:--:|---|
+| A salon takes walk-ins and booked clients with one queue | ✅ | Set the queue kind to `general`, name it per stylist on `/queues/config`, and the booking flow and token flow are unchanged. Nothing in `QueueDomain` assumes a patient |
+| A repair bench tracks where a job is | ✅ | <code>/queues/workflows</code> — steps such as &ldquo;Device received&rdquo;, &ldquo;Parts ordered&rdquo;, &ldquo;Ready for collection&rdquo;. Completion is refused until each is ticked, with who and when recorded |
+| A laboratory runs sample → verification → report | ✅ | Same mechanism, kind `lab`. Verified live: a lab visit refused completion until &ldquo;Sample taken&rdquo; was ticked, then completed. Sample **tracking numbers** and result values are not stored — those are record-keeping fields, not queue fields |
+| A pharmacy dispenses by ticket | ✅ | Kind `pharmacy`, its own token prefix and pattern, and a `dispensed` step if the counter wants one |
+| A government counter serves several service types from one room | ✅ | One queue per counter, each with its own prefix and pattern; a department display filters the board to that counter |
+| A salon needs service codes and durations per service | ○ | The queue holds a token and a time. Named services with per-service pricing and durations would be new tables. The workaround today is one queue per service, which is honest but coarser |
+| A pharmacy needs stock or prescription data | ○ | Deliberately absent, same reason as clinical notes |
+| A laboratory needs to store a result value | ○ | Deliberately absent: it is a medical record |
+
+**The honest summary.** The queue engine is generic — a token, a cycle, a
+transfer, a delay, a display, and a list of steps. That is why a salon can run
+on it tomorrow. What the verticals cannot do is hold the **domain data** of
+their trade: no service catalogue with prices, no sample results, no parts
+inventory. Those are separate products sitting behind the same queue, and
+pretending otherwise would be the kind of claim this document exists to avoid.
+
+---
+
+## 18. Deliberately out of scope
 
 These appear in the brief and are **not** queue-management work. Building
 them would not make the queue better and would make every other feature
@@ -286,7 +311,8 @@ first clinic goes live — the automated suite does not replace it.
 | Data & ops | 6 | 1 | 0 |
 | Money | 2 | 0 | 3 |
 | Hardware | 2 | 1 | 2 |
-| **Total** | **91** | **7** | **10** |
+| Other verticals | 5 | 0 | 3 |
+| **Total** | **96** | **7** | **13** |
 
 **What is genuinely finished.** The queue engine holds up under adversarial
 input: issuing, calling, transferring, prioritising, pausing, closing,
@@ -309,8 +335,10 @@ reporting page that answers the questions a clinic manager asks.
    penetration test and a dependency CVE scan are real activities, not code.
 3. **Genuine product gaps.** A patient cannot reschedule from the tracking link.
    A doctor cannot cancel a day's appointments in bulk. There is no single
-   complete data-export archive, no patient satisfaction survey, and no visual
-   workflow builder.
+   complete data-export archive and no patient satisfaction survey. Service
+   workflows exist as an ordered list of steps, not a drag-and-drop diagram
+   editor — the list is what decides the visit, and a diagram would draw the
+   same list.
 4. **Deliberate boundaries.** No clinical notes, no prescription, no payroll, no
    insurance. Those change what product this is.
 

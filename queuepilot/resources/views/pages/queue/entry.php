@@ -92,6 +92,60 @@
         </div>
       <?php endif; ?>
 
+      <?php if (!empty($steps)): ?>
+        <div class="card card-pad">
+          <div class="flex items-baseline justify-between">
+            <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Service steps</h2>
+            <span class="text-[10px] text-slate-400">
+              <?= count(array_filter($steps, static fn ($st) => $st['done'])) ?>/<?= count($steps) ?> done
+            </span>
+          </div>
+          <p class="mt-1 text-[11px] leading-relaxed text-slate-500">
+            This visit cannot be completed until every required step is ticked.
+          </p>
+          <ul class="mt-3 space-y-2">
+            <?php foreach ($steps as $step): ?>
+              <li class="flex items-start gap-2.5">
+                <?php if ($canOperate && $step['done']): ?>
+                  <form method="post" action="/queue/step" class="shrink-0">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="entry_id" value="<?= (int) $entry['id'] ?>">
+                    <input type="hidden" name="step_id" value="<?= (int) $step['id'] ?>">
+                    <input type="hidden" name="undo" value="1">
+                    <button class="btn-secondary btn-sm text-[10px]" type="submit" title="Reopen this step">Undo</button>
+                  </form>
+                <?php elseif ($canOperate): ?>
+                  <form method="post" action="/queue/step" class="shrink-0">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="entry_id" value="<?= (int) $entry['id'] ?>">
+                    <input type="hidden" name="step_id" value="<?= (int) $step['id'] ?>">
+                    <button class="btn-primary btn-sm text-[10px]" type="submit">Tick</button>
+                  </form>
+                <?php endif; ?>
+                <div class="min-w-0 flex-1">
+                  <p class="text-xs <?= $step['done'] ? 'font-medium text-slate-800' : 'text-slate-700' ?>">
+                    <?php if ($step['done']): ?>
+                      <span class="mr-1 text-emerald-600">✓</span>
+                    <?php else: ?>
+                      <span class="mr-1 text-slate-300">○</span>
+                    <?php endif; ?>
+                    <?= e($step['name']) ?>
+                    <?php if ($step['is_required'] !== 1): ?>
+                      <span class="text-[10px] text-slate-400">(optional)</span>
+                    <?php endif; ?>
+                  </p>
+                  <?php if ($step['done'] && $step['done_at']): ?>
+                    <p class="text-[10px] text-slate-400">
+                      <?= e(fmt_time($step['done_at'], 'j M, g:i A')) ?><?php if (!empty($step['done_by'])): ?> · <?= e($step['done_by']) ?><?php endif; ?>
+                    </p>
+                  <?php endif; ?>
+                </div>
+              </li>
+            <?php endforeach; ?>
+          </ul>
+        </div>
+      <?php endif; ?>
+
       <div class="card card-pad">
         <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">History</h2>
         <ol class="mt-3 space-y-3">
