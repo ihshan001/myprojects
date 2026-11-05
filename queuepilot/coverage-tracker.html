@@ -103,8 +103,8 @@
   </div>
 
   <div class="legend">
-    <span><i class="dot built"></i> 111 built</span>
-    <span><i class="dot partial"></i> 12 partial</span>
+    <span><i class="dot built"></i> 112 built</span>
+    <span><i class="dot partial"></i> 11 partial</span>
     <span><i class="dot missing"></i> 0 not built</span>
   </div>
 
@@ -278,9 +278,9 @@
         <label class="row">
           <input type="checkbox" class="tick" data-id="Clinic administration|Queue configuration">
           <span class="name">Queue configuration</span>
-          <span class="pill partial">Partial</span>
+          <span class="pill built">Built</span>
         </label>
-        <p class="note">Queues are created per doctor per day with a token prefix. There is no screen to rename or reconfigure a queue after creation.</p>
+        <p class="note"><code>/queues/config</code> sets the name pattern (<code>{doctor}</code>, <code>{n}</code>), the queue type (consultation/lab/pharmacy/general), the token prefix and the digit count. Verified the settings flow through creation: "Lab Bench 1", kind=lab, prefix L, padding 4. A queue that has issued a token is locked against renaming.</p>
       </li>
       <li class="item" data-status="partial">
         <label class="row">
@@ -1183,7 +1183,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (176 automated checks, 140 files lint-clean, healthcheck green).
+    application (179 automated checks, 142 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.

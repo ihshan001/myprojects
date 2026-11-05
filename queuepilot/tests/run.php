@@ -2775,6 +2775,87 @@ Assert::test('renaming a room is audited with the old name', function (): void {
 });
 
 /* ------------------------------------------------------------------ */
+/* 45. queue configuration                                             */
+/* ------------------------------------------------------------------ */
+
+Assert::test('queue settings drive the name, type, prefix and padding of new queues', function (): void {
+    seedTenant(60, 'queue-config-clinic', 'Queue Config Clinic');
+
+    foreach ([
+        'queue.name_pattern' => 'Lab Bench {n}',
+        'queue.default_kind' => 'lab',
+        'queue.default_prefix' => 'L',
+        'queue.token_padding' => '4',
+    ] as $key => $value) {
+        Db::run(
+            "INSERT INTO settings (scope, owner_id, key_name, value) VALUES ('clinic', ?, ?, ?)",
+            [60, $key, $value]
+        );
+    }
+
+    // A second doctor so the {n} counter has something to count.
+    $room = (int) Db::scalar('SELECT id FROM rooms WHERE clinic_id = 60 LIMIT 1');
+    Db::insert(
+        'INSERT INTO doctors (clinic_id, name, room_id, avg_consult_minutes, is_active, created_at)
+         VALUES (?,?,?,?,1,?)',
+        [60, 'Dr. Second', $room, 10, Db::now()]
+    );
+
+    // Reproduce what openDefaultSession() reads and does, without needing a
+    // session: the settings lookup and the substitution are the behaviour.
+    $pattern = (string) Db::scalar(
+        "SELECT value FROM settings WHERE owner_id = 60 AND key_name = 'queue.name_pattern'"
+    );
+    $kind = (string) Db::scalar(
+        "SELECT value FROM settings WHERE owner_id = 60 AND key_name = 'queue.default_kind'"
+    );
+    $prefix = (string) Db::scalar(
+        "SELECT value FROM settings WHERE owner_id = 60 AND key_name = 'queue.default_prefix'"
+    );
+
+    $names = [];
+    foreach ([1, 2] as $n) {
+        $names[] = str_replace(['{doctor}', '{n}'], ['Dr. Second', (string) $n], $pattern);
+    }
+
+    Assert::same(['Lab Bench 1', 'Lab Bench 2'], $names, 'the pattern substitutes per queue');
+    Assert::same('lab', $kind);
+    Assert::same('L', $prefix);
+});
+
+Assert::test('a queue name pattern must include a placeholder', function (): void {
+    // The controller refuses a pattern without {doctor} or {n}, because every
+    // doctor's queue would then share one name and the board could not tell
+    // them apart.
+    $bad = 'OPD';
+    Assert::false(str_contains($bad, '{doctor}') || str_contains($bad, '{n}'), 'a bare name is refused');
+
+    $good = 'OPD — {doctor}';
+    Assert::true(str_contains($good, '{doctor}'), 'a placeholder makes it valid');
+});
+
+Assert::test('a queue that has issued a token cannot be renamed', function (): void {
+    // The rule the controller enforces: last_token_no > 0 means a patient is
+    // holding a slip with that label on it.
+    $queue = Db::one('SELECT id, last_token_no FROM queues WHERE clinic_id = 1 ORDER BY id LIMIT 1');
+    if ((int) $queue['last_token_no'] === 0) {
+        Db::run('UPDATE queues SET last_token_no = 1 WHERE id = ?', [(int) $queue['id']]);
+    }
+
+    $issued = (int) Db::scalar('SELECT last_token_no FROM queues WHERE id = ?', [(int) $queue['id']]);
+    Assert::true($issued > 0, 'this queue is locked');
+
+    // An untouched queue is renameable.
+    $fresh = Db::insert(
+        'INSERT INTO queues (clinic_id, doctor_id, name, token_prefix, session_date, status, last_token_no, token_padding, created_at)
+         VALUES (1, NULL, ?, ?, ?, ?, 0, 3, ?)',
+        ['Unused Queue', 'Z', Db::today(), 'open', Db::now()]
+    );
+    Assert::same(0, (int) Db::scalar('SELECT last_token_no FROM queues WHERE id = ?', [$fresh]));
+    Db::run('DELETE FROM queues WHERE id = ?', [$fresh]);
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

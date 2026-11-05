@@ -425,6 +425,28 @@ final class QueueController
     {
         $clinic = Auth::clinic();
         $doctors = (new DoctorService())->all($clinicId);
+
+        // The pattern, type and padding come from Queue settings, so a laboratory
+        // is not forced to call its queue "OPD" and a pharmacy can issue its own
+        // token series. Defaults reproduce the previous behaviour exactly.
+        $pattern = (string) (Db::scalar(
+            "SELECT value FROM settings WHERE scope='clinic' AND owner_id=? AND key_name='queue.name_pattern'",
+            [$clinicId]
+        ) ?: 'OPD — {doctor}');
+        $kind = (string) (Db::scalar(
+            "SELECT value FROM settings WHERE scope='clinic' AND owner_id=? AND key_name='queue.default_kind'",
+            [$clinicId]
+        ) ?: 'consultation');
+        $prefixSetting = (string) (Db::scalar(
+            "SELECT value FROM settings WHERE scope='clinic' AND owner_id=? AND key_name='queue.default_prefix'",
+            [$clinicId]
+        ) ?? '');
+        $padding = (int) (Db::scalar(
+            "SELECT value FROM settings WHERE scope='clinic' AND owner_id=? AND key_name='queue.token_padding'",
+            [$clinicId]
+        ) ?: 3);
+
+        $counter = 0;
         foreach ($doctors as $doc) {
             $existing = Db::scalar(
                 'SELECT id FROM queues WHERE clinic_id = ? AND doctor_id = ? AND session_date = ?',
@@ -433,13 +455,27 @@ final class QueueController
             if ($existing) {
                 continue;
             }
+
+            $counter++;
+            $name = str_replace(
+                ['{doctor}', '{n}'],
+                [(string) $doc['name'], (string) $counter],
+                $pattern
+            );
+
+            // An explicit clinic prefix wins; otherwise the doctor's initial, as
+            // before. The prefix must be one letter group, not the whole name.
+            $prefix = $prefixSetting !== ''
+                ? $prefixSetting
+                : substr(strtoupper(preg_replace('/[^A-Za-z]/', '', (string) $doc['name']) ?: 'A'), 0, 1);
+
             Db::insert(
                 "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
-                 VALUES (?,?,?,?,'open',?,?,0,3,?)",
+                 VALUES (?,?,?,?,'open',?,?,0,?,?)",
                 [
-                    $clinicId, $doc['id'], 'OPD — ' . $doc['name'],
-                    'consultation', Db::today(),
-                    $clinic['token_prefix'] ?: substr(strtoupper($doc['name']), 0, 1),
+                    $clinicId, $doc['id'], $name,
+                    $kind, Db::today(), $prefix,
+                    max(1, min(6, $padding)),
                     Db::now(),
                 ]
             );

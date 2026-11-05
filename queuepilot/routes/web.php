@@ -28,6 +28,7 @@ use App\Http\Controllers\PatientController;
 use App\Http\Controllers\PublicController;
 use App\Http\Controllers\QueueController;
 use App\Http\Controllers\ReportController;
+use App\Http\Controllers\QueueConfigController;
 use App\Http\Controllers\RoomController;
 
 /* --------------------------------------------------------------- public */
@@ -103,6 +104,11 @@ Router::post('/appointments/{id}/checkin', [AppointmentController::class, 'check
 Router::get('/doctors', [ClinicController::class, 'doctors'], ['auth' => true]);
 Router::post('/doctors', [ClinicController::class, 'storeDoctor'], ['auth' => true, 'ability' => 'doctor.manage']);
 // Rooms. Previously created only by signup and never editable.
+// Queue settings: the pattern tomorrow's queues are created from.
+Router::get('/queues/config', [QueueConfigController::class, 'index'], ['auth' => true]);
+Router::post('/queues/config', [QueueConfigController::class, 'save'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/queues/{id}/rename', [QueueConfigController::class, 'rename'], ['auth' => true, 'ability' => 'clinic.manage']);
+
 Router::get('/rooms', [RoomController::class, 'index'], ['auth' => true]);
 Router::post('/rooms', [RoomController::class, 'store'], ['auth' => true, 'ability' => 'doctor.manage']);
 Router::post('/rooms/{id}', [RoomController::class, 'update'], ['auth' => true, 'ability' => 'doctor.manage']);
