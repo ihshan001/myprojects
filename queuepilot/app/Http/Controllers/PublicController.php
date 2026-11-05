@@ -85,8 +85,13 @@ final class PublicController
             );
         }
 
+        // The satisfaction question, asked here because this is the one place
+        // the patient is already looking after the visit ends.
+        $feedback = (new \App\Services\FeedbackService())->statusFor($entry);
+
         view('track/show', [
             'title' => 'Token ' . $snapshot['token'],
+            'feedback' => $feedback,
             'appointment' => $appointment,
             'rescheduleDate' => \App\Core\Request::string('date', substr((string) ($appointment['scheduled_for'] ?? Db::today()), 0, 10)),
             'rescheduleSlots' => $appointment !== null
@@ -274,6 +279,76 @@ final class PublicController
         );
 
         Session::flash('reschedule_ok', $date . ' ' . $time);
+        redirect('/t/' . $token);
+    }
+
+    /**
+     * A patient rates the visit they just had, from their own link.
+     *
+     * Authorisation is the same 128-bit token that has been showing them the
+     * wait — no new credential, and nothing that identifies them beyond the
+     * visit. Three refusals are deliberate:
+     *
+     *   * Only a **completed** visit can be rated. A cancelled or no-show visit
+     *     has no consultation to judge.
+     *   * **One answer per visit**, enforced by a unique index rather than a
+     *     check, so a double-tap cannot produce two ratings.
+     *   * Anything **older than a fortnight** is declined: by then the answer
+     *     is about the memory of the survey, not the visit, and mixing the two
+     *     makes every average meaningless.
+     *
+     * The comment is optional. Requiring prose loses exactly the people with
+     * the least time — usually the ones who waited longest.
+     */
+    public function rateVisit(string $token): void
+    {
+        if (!preg_match('/^[A-Za-z0-9_-]{16,64}$/', $token)) {
+            http_response_code(404);
+            view('track/invalid', ['title' => 'Link not valid'], false);
+            return;
+        }
+
+        $entry = (new QueueRepository())->entryByToken($token);
+        $expired = $entry && $entry['track_expires_at'] !== null
+            && strtotime((string) $entry['track_expires_at']) < time();
+        if (!$entry || $expired) {
+            http_response_code($entry ? 410 : 404);
+            view('track/invalid', [
+                'title' => $entry ? 'Link expired' : 'Link not valid',
+                'expired' => (bool) $entry,
+                'clinicPhone' => $entry['clinic_phone'] ?? null,
+            ], false);
+            return;
+        }
+
+        // A rating is cheap to submit and valuable to a clinic, which makes it
+        // worth grinding. Ten an hour per link is more than any patient needs.
+        $limit = \App\Core\RateLimiter::hit('track-rate:' . $token, 10, 3600);
+        if (!$limit['allowed']) {
+            flash('error', 'Too many tries from this link. Thank you anyway.');
+            redirect('/t/' . $token);
+            return;
+        }
+
+        $rating = Request::int('rating');
+        $waitRating = Request::int('wait_rating');
+        $comment = Request::string('comment');
+
+        try {
+            (new \App\Services\FeedbackService())->record(
+                (int) $entry['clinic_id'],
+                (int) $entry['id'],
+                $rating,
+                $waitRating > 0 ? $waitRating : null,
+                $comment === '' ? null : $comment
+            );
+        } catch (\Throwable $e) {
+            flash('error', $e->getMessage());
+            redirect('/t/' . $token);
+            return;
+        }
+
+        Session::flash('rated_ok', $rating);
         redirect('/t/' . $token);
     }
 

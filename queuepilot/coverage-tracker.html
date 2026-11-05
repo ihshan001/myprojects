@@ -82,7 +82,7 @@
     <div class="bar-inner">
       <div class="progress">
         <div class="progress-top">
-          <span><b id="doneCount">0</b> / 123 reviewed</span>
+          <span><b id="doneCount">0</b> / 124 reviewed</span>
           <span><b id="pct">0%</b></span>
         </div>
         <div class="track"><div class="fill" id="fill"></div></div>
@@ -113,7 +113,7 @@
   </div>
 
   <div class="legend">
-    <span><i class="dot built"></i> 119 built</span>
+    <span><i class="dot built"></i> 120 built</span>
     <span><i class="dot partial"></i> 4 partial</span>
     <span><i class="dot missing"></i> 0 not built</span>
   </div>
@@ -1004,6 +1004,14 @@
           <span class="pill built">Built</span>
         </label>
         <p class="note"><code>/reports/export</code>, streamed, clinic-scoped, UTF-8 BOM for Sinhala/Tamil names.</p>
+      </li>
+      <li class="item" data-status="built">
+        <label class="row">
+          <input type="checkbox" class="tick" data-id="Reports and analytics|Patient satisfaction">
+          <span class="name">Patient satisfaction</span>
+          <span class="pill built">Built</span>
+        </label>
+        <p class="note">Asked on the tracking link the patient is already watching, the moment the visit is marked complete. Five-point scale, an optional separate <b>wait</b> rating, an optional note. A waiting visit cannot be rated (refused at the service boundary, not merely hidden), one answer per visit via a unique index on <code>entry_id</code>, and anything older than a fortnight is declined. The report leads with <b>response rate</b> rather than the average, and says so under 10% — verified live: "1 answer from 16 completed visits · 6.3% replied" with the warning rendered beside it.</p>
       </li>
     </ul>
   </section>

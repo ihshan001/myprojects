@@ -214,6 +214,95 @@ foreach ($byHour as $h) { $peak = max($peak, (int) $h['total']); }
   </div>
 </div>
 
+<!-- ==================== satisfaction ==================== -->
+<div class="card mt-5 overflow-hidden">
+  <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+    <p class="text-xs font-semibold text-slate-600">Patient satisfaction</p>
+    <p class="text-[11px] text-slate-400">
+      <?= (int) $feedback['responses'] ?> answer(s) from <?= (int) $feedback['visits'] ?> completed visit(s)
+    </p>
+  </div>
+
+  <?php if ((int) $feedback['responses'] === 0): ?>
+    <div class="p-4 text-xs leading-relaxed text-slate-500">
+      No ratings in this range. The question is asked on the tracking link once a visit is
+      marked complete, so a clinic that never completes visits will never see one.
+    </div>
+  <?php else: ?>
+    <div class="grid gap-4 p-4 sm:grid-cols-[auto_1fr]">
+      <div class="text-center sm:border-r sm:border-slate-100 sm:pr-5">
+        <p class="text-4xl font-black text-slate-900"><?= e((string) $feedback['mean']) ?></p>
+        <p class="text-[10px] uppercase tracking-wide text-slate-500">out of 5</p>
+        <p class="mt-2 text-[11px] font-semibold <?= (float) $feedback['response_rate'] < 10 ? 'text-amber-700' : 'text-emerald-700' ?>">
+          <?= e((string) $feedback['response_rate']) ?>% replied
+        </p>
+        <?php if ((float) $feedback['response_rate'] < 10): ?>
+          <p class="mt-1 max-w-[11rem] text-[10px] leading-relaxed text-amber-700">
+            Few enough that one answer moves the average. Treat it as a hint, not a measurement.
+          </p>
+        <?php endif; ?>
+      </div>
+
+      <div>
+        <?php foreach ([5, 4, 3, 2, 1] as $stars): ?>
+          <?php
+          $count = (int) ($feedback['distribution'][$stars] ?? 0);
+          $pct = (int) $feedback['responses'] > 0 ? round($count / (int) $feedback['responses'] * 100) : 0;
+          ?>
+          <div class="flex items-center gap-2 py-0.5">
+            <span class="w-3 text-right text-[11px] font-semibold text-slate-500"><?= $stars ?></span>
+            <div class="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+              <div class="h-full rounded-full <?= $stars >= 4 ? 'bg-emerald-500' : ($stars === 3 ? 'bg-amber-400' : 'bg-rose-400') ?>"
+                   style="width: <?= $pct ?>%"></div>
+            </div>
+            <span class="w-8 text-right text-[10px] tabular text-slate-400"><?= $count ?></span>
+          </div>
+        <?php endforeach; ?>
+        <p class="mt-2 text-[10px] leading-relaxed text-slate-400">
+          <?= (int) $feedback['promoters'] ?> rated 4–5,
+          <?= (int) $feedback['detractors'] ?> rated 1–2<?php if ($feedback['wait_mean'] !== null): ?>,
+          waiting averaged <?= e((string) $feedback['wait_mean']) ?>/5<?php endif; ?>.
+        </p>
+      </div>
+    </div>
+
+    <?php if ($feedback['by_doctor'] !== []): ?>
+      <table class="table border-t border-slate-100">
+        <thead><tr><th>Doctor</th><th class="numeric">Answers</th><th class="numeric">Average</th></tr></thead>
+        <tbody>
+          <?php foreach ($feedback['by_doctor'] as $d): ?>
+            <tr>
+              <td class="font-medium"><?= e((string) $d['doctor']) ?></td>
+              <td class="numeric"><?= (int) $d['count'] ?></td>
+              <td class="numeric font-semibold"><?= e((string) $d['mean']) ?></td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    <?php endif; ?>
+
+    <?php if ($feedback['comments'] !== []): ?>
+      <details class="border-t border-slate-100">
+        <summary class="cursor-pointer px-4 py-2.5 text-xs font-semibold text-teal-700 hover:bg-slate-50">
+          What people wrote (<?= count($feedback['comments']) ?>)
+        </summary>
+        <ul class="divide-y divide-slate-100">
+          <?php foreach ($feedback['comments'] as $c): ?>
+            <li class="px-4 py-2.5">
+              <p class="text-xs leading-relaxed text-slate-700"><?= e((string) $c['comment']) ?></p>
+              <p class="mt-1 text-[10px] text-slate-400">
+                <?= (int) $c['rating'] ?>/5
+                <?php if ($c['doctor'] !== null): ?> · <?= e((string) $c['doctor']) ?><?php endif; ?>
+                · <?= e(date('j M', strtotime((string) $c['at']))) ?>
+              </p>
+            </li>
+          <?php endforeach; ?>
+        </ul>
+      </details>
+    <?php endif; ?>
+  <?php endif; ?>
+</div>
+
 <!-- ==================== departments ==================== -->
 <div class="card mt-5 overflow-hidden">
   <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">

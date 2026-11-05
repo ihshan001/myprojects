@@ -36,6 +36,10 @@ final class ReportController
             'from' => $from,
             'to' => $to,
             'summary' => $service->daySummary($clinicId, $date),
+            // Satisfaction travels with the other reports because it is read in
+            // the same breath as throughput, and because its response rate is
+            // meaningless without the visit count beside it.
+            'feedback' => (new \App\Services\FeedbackService())->report($clinicId, $from, $to),
             'byHour' => $service->byHour($clinicId, $date),
             'byDoctor' => $service->byDoctor($clinicId, $from, $to),
             'byDepartment' => $service->byDepartment($clinicId, $from, $to),

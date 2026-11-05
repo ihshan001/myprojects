@@ -49,6 +49,7 @@ Router::get('/t/{token}', [PublicController::class, 'track'], ['csrf' => false])
 // token, so a cross-site link cannot cancel somebody's visit.
 Router::post('/t/{token}/cancel', [PublicController::class, 'cancelTracked']);
 Router::post('/t/{token}/reschedule', [PublicController::class, 'rescheduleTracked']);
+Router::post('/t/{token}/rate', [PublicController::class, 'rateVisit']);
 Router::get('/demo/board', [PublicController::class, 'demoBoard']);
 Router::get('/manifest.webmanifest', [PublicController::class, 'manifest']);
 Router::get('/sw.js', [PublicController::class, 'serviceWorker']);

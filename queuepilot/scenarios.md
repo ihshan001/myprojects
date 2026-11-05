@@ -186,7 +186,7 @@ lint-clean, healthcheck all-good, all five demo logins re-checked).
 | Doctor delay report | ✅ | Delay and pause events per doctor, with average and worst minutes |
 | CSV export for a spreadsheet | ✅ | Streamed, clinic-scoped |
 | **Staff activity report** | ✅ | **Built.** `/reports` actions-per-person from the audit log, with cancellations and no-shows surfaced in the same table. Gated to `clinic.manage` |
-| Patient satisfaction | ○ | No survey, no rating |
+| Patient satisfaction | ✅ | **Built.** Asked on the tracking link the patient is already watching, the moment the visit is marked complete — the only place this product has their attention. Five-point scale plus an optional separate **wait** rating and an optional note. Three refusals: a visit that has not finished cannot be rated (refused at the service boundary, not just hidden), one answer per visit (unique index on `entry_id`, so a double-tap cannot inflate the number), and anything older than a fortnight is declined because by then the answer is about the memory of the survey. The report leads with **response rate**, not the average — a 4.6 from four replies out of three hundred has taught nobody anything, and the screen says so under 10%. Verified live: rated a completed visit, was refused a second time, saw the section render with "1 answer from 16 completed visits · 6.3% replied" and the warning |
 | Revenue and payments | ◐ | Invoices are raised automatically on each renewal date (`tools/invoices.php`, one per clinic per period enforced by index), claimed with a reference by the clinic, and verified by a super admin. **There is no payment gateway** — money moves outside the system. That is a deliberate boundary, not an omission |
 
 ## 14. Data, privacy and operations
@@ -311,12 +311,12 @@ first clinic goes live — the automated suite does not replace it.
 | 10. Accounts, onboarding and access | 10 | 0 | 0 | 0 |
 | 11. Multi-tenancy and organisations | 7 | 0 | 0 | 0 |
 | 12. Doctors and scheduling | 7 | 0 | 0 | 1 |
-| 13. Reporting | 8 | 1 | 1 | 0 |
+| 13. Reporting | 9 | 1 | 0 | 0 |
 | 14. Data, privacy and operations | 7 | 1 | 0 | 1 |
 | 15. Money | 2 | 0 | 3 | 0 |
 | 16. Hardware and physical space | 4 | 1 | 0 | 0 |
 | 17. Other verticals | 5 | 0 | 3 | 0 |
-| **Total (122 scenarios)** | **106** | **6** | **8** | **2** |
+| **Total (122 scenarios)** | **107** | **6** | **7** | **2** |
 
 **What is genuinely finished.** The queue engine holds up under adversarial
 input: issuing, calling, transferring, prioritising, pausing, closing,
@@ -340,10 +340,10 @@ reporting page that answers the questions a clinic manager asks.
    mindset, and no amount of unit tests substitutes for it. (The dependency
    scan *is* now automated: `npm run security` runs `npm audit` over all 136
    packages and reports 0 known advisories — that part is no longer a gap.)
-3. **Genuine product gaps.** There is no single complete data-export archive and
-   no patient satisfaction survey. Service workflows exist as an ordered list of
-   steps, not a drag-and-drop diagram editor — the list is what decides the
-   visit, and a diagram would draw the same list.
+3. **Genuine product gaps.** There is no single complete data-export archive.
+   Service workflows exist as an ordered list of steps, not a drag-and-drop
+   diagram editor — the list is what decides the visit, and a diagram would
+   draw the same list.
 4. **Deliberate boundaries.** No clinical notes, no prescription, no payroll, no
    insurance. Those change what product this is.
 

@@ -233,6 +233,69 @@ $tone = match ($s['status']) {
     </p>
   <?php endif; ?>
 
+  <!-- satisfaction: asked once, at the only honest moment -->
+  <?php if (($rated = \App\Core\Session::takeFlash('rated_ok')) !== null): ?>
+    <div class="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-3 text-xs leading-relaxed text-emerald-900">
+      <b>Thank you — that helps.</b> Your answer goes to the clinic, not into a marketing list.
+    </div>
+  <?php elseif (!empty($feedback['can'])): ?>
+    <div class="mt-4 rounded-xl bg-white/80 px-3.5 py-3 ring-1 ring-slate-200">
+      <p class="text-sm font-semibold text-slate-800">How was your visit?</p>
+      <p class="mt-0.5 text-[11px] leading-relaxed text-slate-500">
+        One tap. It goes straight to the clinic and stays anonymous — this page does not say who you are.
+      </p>
+
+      <form method="post" action="/t/<?= e($token) ?>/rate" class="mt-3">
+        <?= csrf_field() ?>
+        <fieldset>
+          <legend class="sr-only">Your rating of the visit</legend>
+          <div class="grid grid-cols-5 gap-1.5">
+            <?php foreach ([5 => 'Very good', 4 => 'Good', 3 => 'Okay', 2 => 'Poor', 1 => 'Very poor'] as $value => $label): ?>
+              <label class="cursor-pointer text-center">
+                <input type="radio" name="rating" value="<?= (int) $value ?>" class="peer sr-only" required>
+                <span class="flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white
+                             text-sm font-semibold text-slate-600 peer-checked:border-teal-600
+                             peer-checked:bg-teal-50 peer-checked:text-teal-800">
+                  <?= (int) $value ?>
+                </span>
+                <span class="mt-1 block text-[9px] leading-tight text-slate-400"><?= e($label) ?></span>
+              </label>
+            <?php endforeach; ?>
+          </div>
+        </fieldset>
+
+        <details class="mt-3">
+          <summary class="cursor-pointer text-[11px] font-medium text-teal-700">Add a note (optional)</summary>
+          <div class="mt-2 space-y-2">
+            <div>
+              <label class="label text-[11px]" for="wait_rating">The wait</label>
+              <select class="select !py-1.5 text-xs" id="wait_rating" name="wait_rating">
+                <option value="">No opinion</option>
+                <?php foreach ([5 => 'Very good', 4 => 'Good', 3 => 'Okay', 2 => 'Poor', 1 => 'Very poor'] as $value => $label): ?>
+                  <option value="<?= (int) $value ?>"><?= (int) $value ?> · <?= e($label) ?></option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+            <div>
+              <label class="label text-[11px]" for="comment">Anything the clinic should know</label>
+              <textarea class="input text-xs" id="comment" name="comment" rows="2" maxlength="1000"
+                        placeholder="Please do not include medical details"></textarea>
+            </div>
+          </div>
+        </details>
+
+        <button class="btn mt-3 w-full justify-center bg-teal-700 text-xs text-white" type="submit">
+          Send my answer
+        </button>
+      </form>
+    </div>
+  <?php elseif (($feedback['reason'] ?? null) === 'already_rated'): ?>
+    <div class="mt-4 rounded-xl bg-white/70 px-3.5 py-3 text-[11px] leading-relaxed text-slate-500 ring-1 ring-slate-200">
+      You rated this visit <b class="text-slate-700"><?= (int) ($feedback['existing']['rating'] ?? 0) ?>/5</b>. Thank you —
+      one answer per visit keeps the clinic's numbers honest.
+    </div>
+  <?php endif; ?>
+
   <!-- add to home screen hint -->
   <div class="mt-4 rounded-xl bg-white/70 px-3.5 py-3 text-[11px] leading-relaxed text-slate-500 ring-1 ring-slate-200">
     <b class="text-slate-700">Tip:</b> add this page to your home screen to open it in one tap.

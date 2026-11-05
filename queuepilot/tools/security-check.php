@@ -211,6 +211,10 @@ foreach ($public as $route) {
 // shared phone cannot exhaust another patient's allowance.
 $expectedPublicPosts = [
     '/login', '/register', '/book/{slug}', '/t/{token}/cancel', '/t/{token}/reschedule',
+    // A visit rating: same 128-bit token, one answer per visit enforced by a
+    // unique index, and it can only ever write a rating for the visit that
+    // token belongs to. It cannot read anything.
+    '/t/{token}/rate',
     '/a/{token}/reschedule', '/a/{token}/cancel',
     // The lobby kiosk: a 192-bit key, CSRF enforced by the router, and it can
     // only add a walk-in at the default weight — it cannot read, call, move or

@@ -4122,6 +4122,105 @@ Assert::test('a branch that was never granted cannot be switched into, even by p
 });
 
 /* ------------------------------------------------------------------ */
+/* 60. Patient satisfaction                                            */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a visit can be rated once, and only once it has finished', function (): void {
+    seedTenant(103, 'feedback', 'Feedback Clinic');
+    $feedback = new App\Services\FeedbackService();
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 103 ORDER BY id LIMIT 1');
+    $patient = Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (103,?,?,?,?)',
+        ['F1', 'Feedback Patient', '0771237101', Db::now()]
+    );
+    $issued = (new App\Domain\Queue\QueueService())->issueToken(103, $queueId, $patient, ['source' => 'walkin']);
+    $entryId = (int) $issued['entry_id'];
+
+    // Waiting: there is no consultation to judge yet.
+    $entry = Db::one('SELECT id, status, finished_at FROM queue_entries WHERE id = ?', [$entryId]);
+    $status = $feedback->statusFor($entry);
+    Assert::false($status['can'], 'a waiting visit cannot be rated');
+    Assert::same('not_finished', (string) $status['reason'], 'and says why');
+
+    $threw = false;
+    try {
+        $feedback->record(103, $entryId, 5);
+    } catch (\RuntimeException) {
+        $threw = true;
+    }
+    Assert::true($threw, 'recording a rating for it is refused, not silently stored');
+
+    // Complete it, then rate it.
+    Db::run("UPDATE queue_entries SET status = 'completed', finished_at = ? WHERE id = ?", [Db::now(), $entryId]);
+    $entry = Db::one('SELECT id, status, finished_at FROM queue_entries WHERE id = ?', [$entryId]);
+    Assert::true($feedback->statusFor($entry)['can'], 'a completed visit can be rated');
+
+    $saved = $feedback->record(103, $entryId, 4, 5, '  Polite and quick.  ');
+    Assert::same(4, (int) $saved['rating'], 'the rating is stored');
+    Assert::same(5, $saved['wait_rating'], 'with the separate wait rating');
+    $row = Db::one('SELECT comment FROM visit_feedback WHERE entry_id = ?', [$entryId]);
+    Assert::same('Polite and quick.', (string) $row['comment'], 'the comment is trimmed, not escaped at rest');
+
+    // The second answer is refused by the unique index as well as the check:
+    // a double-tap must not produce two ratings.
+    Assert::false($feedback->statusFor($entry)['can'], 'an answered visit stops offering the question');
+    $threw = false;
+    try {
+        $feedback->record(103, $entryId, 1);
+    } catch (\RuntimeException) {
+        $threw = true;
+    }
+    Assert::true($threw, 'a second rating is refused');
+    Assert::same(1, (int) Db::scalar('SELECT COUNT(*) FROM visit_feedback WHERE entry_id = ?', [$entryId]),
+        'and exactly one row exists');
+
+    // Out-of-scale values are rejected before the database sees them.
+    $threw = false;
+    try {
+        $feedback->record(103, $entryId, 9);
+    } catch (\InvalidArgumentException) {
+        $threw = true;
+    }
+    Assert::true($threw, 'a rating of 9 is not a rating');
+});
+
+Assert::test('the satisfaction report leads with the response rate, not just the mean', function (): void {
+    seedTenant(104, 'feedback-report', 'Feedback Report Clinic');
+    $feedback = new App\Services\FeedbackService();
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 104 ORDER BY id LIMIT 1');
+    $doctorId = (int) Db::scalar('SELECT doctor_id FROM queues WHERE id = ?', [$queueId]);
+    $service = new App\Domain\Queue\QueueService();
+
+    // Five completed visits, two answers: 4 and 2. A screen showing "3.0"
+    // without "2 of 5 replied" would be actively misleading.
+    $ratings = [4, 2];
+    for ($i = 0; $i < 5; $i++) {
+        $patient = Db::insert(
+            'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (104,?,?,?,?)',
+            ['FR' . $i, 'Report Patient ' . $i, '07712372' . $i . '0', Db::now()]
+        );
+        $issued = $service->issueToken(104, $queueId, $patient, ['source' => 'walkin']);
+        $entryId = (int) $issued['entry_id'];
+        Db::run("UPDATE queue_entries SET status = 'completed', finished_at = ? WHERE id = ?", [Db::now(), $entryId]);
+        if (isset($ratings[$i])) {
+            $feedback->record(104, $entryId, $ratings[$i], null, $i === 0 ? 'Kind staff.' : null);
+        }
+    }
+
+    $report = $feedback->report(104, Db::today(), Db::today());
+    Assert::same(5, (int) $report['visits'], 'five visits in the range');
+    Assert::same(2, (int) $report['responses'], 'two of them answered');
+    Assert::same(40.0, (float) $report['response_rate'], 'so the response rate is 40%, and it is reported');
+    Assert::same(3.0, (float) $report['mean'], 'the mean is 3.0');
+    Assert::same(1, (int) ($report['distribution'][4] ?? 0), 'the distribution keeps the shape a mean hides');
+    Assert::same(1, (int) ($report['distribution'][2] ?? 0), 'including the unhappy answer');
+    Assert::same(1, count($report['comments']), 'and only the answer with words appears as a comment');
+    Assert::true($report['by_doctor'] !== [], 'with a per-doctor breakdown');
+    Assert::same($doctorId, (int) Db::scalar('SELECT doctor_id FROM visit_feedback WHERE clinic_id = 104 LIMIT 1'),
+        'each rating is tied to the doctor who saw the patient');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);
