@@ -77,8 +77,8 @@ final class NotificationService
                     dedupe_key, status, attempts, scheduled_at, created_at)
                  VALUES (?,?,?,?,?,?,?,?,0,?,?)',
                 [
-                    $clinicId, $entryId, 'sms', $template, $entry['phone'],
-                    json_encode(['body' => $body, 'vars' => $vars], JSON_UNESCAPED_UNICODE),
+                    $clinicId, $entryId, 'sms', $template, self::mask((string) $entry['phone']),
+                    json_encode(['body' => $body, 'vars' => $vars, 'to' => (string) $entry['phone']], JSON_UNESCAPED_UNICODE),
                     $dedupe, 'queued', Db::now(), Db::now(),
                 ]
             );
@@ -169,7 +169,15 @@ final class NotificationService
             $body = $payload['body'] ?? '';
 
             try {
-                $result = $this->gateway($job['channel'])->send((string) $job['to_number'], $body);
+                // The stored `to_number` is masked. The deliverable number
+                // lives in the payload, which is the only copy that needs it.
+                $to = (string) ($payload['to'] ?? '');
+                if ($to === '') {
+                    // A row written before masking existed still has a real
+                    // number in the column; use it rather than drop the send.
+                    $to = (string) $job['to_number'];
+                }
+                $result = $this->gateway($job['channel'])->send($to, $body);
                 if ($result === 'sent') {
                     Db::run(
                         "UPDATE notifications SET status='sent', attempts=?, sent_at=? WHERE id=?",
@@ -210,6 +218,24 @@ final class NotificationService
             'whatsapp' => new WhatsAppGateway(),
             default    => new SmsGateway(),
         };
+    }
+
+    /**
+     * Mask a phone number for storage and display.
+     *
+     * The queue needs the number only at the moment of sending. Keeping the
+     * full number on every row means a database dump — or a screenshot of the
+     * notification list — exposes every patient the clinic has ever messaged.
+     * Enough digits remain to let staff confirm they are looking at the right
+     * patient (last three), which is the only operational need.
+     */
+    public static function mask(string $phone): string
+    {
+        $digits = preg_replace('/\D+/', '', $phone) ?? '';
+        if (strlen($digits) < 5) {
+            return '••••';
+        }
+        return '•••••' . substr($digits, -3);
     }
 
     public function stats(int $clinicId): array

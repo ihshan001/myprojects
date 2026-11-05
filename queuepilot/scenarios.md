@@ -5,8 +5,8 @@ codebase actually does. It is deliberately blunt: a feature is **Built** only
 if I ran it against the live server, **Partial** if something exists but does
 not meet the scenario as written, and **Not built** otherwise.
 
-Verified on 2026-11-05 against commit `fafe770` (125 automated checks, 108
-files lint-clean, healthcheck all-good).
+Verified on 2026-11-05 against commit `fafe770` plus the notification-masking
+change (127 automated checks, 108 files lint-clean, healthcheck all-good).
 
 > **Read this first.** The blueprint describes a mature product with billing,
 > payroll, EMR integration and hardware. QueuePilot is a queue-management
@@ -125,7 +125,7 @@ files lint-clean, healthcheck all-good).
 | The patient is told when they are close to being called | ✅ | Threshold-based notification, deduplicated per entry |
 | The patient is told when it is their turn | ✅ | On `call` |
 | Delivery failure is visible to staff | ◐ | Failures are logged and retried, but **there is no notification-history screen** — staff must read logs |
-| Credentials are never logged | ✅ | Numbers are redacted before they reach a log line |
+| Credentials are never logged | ✅ | Numbers are redacted before they reach a log line, and stored notification rows now hold only the last three digits — found during this audit, when a queue dump showed every patient's full number |
 | Templates are per clinic | ✅ | Stored per clinic, editable |
 | Appointment reminders go out on a schedule | ○ | Template only; no scheduler is attached to it |
 

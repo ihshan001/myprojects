@@ -1771,6 +1771,48 @@ Assert::test('a slot clash never names the patient who holds it', function (): v
 });
 
 /* ------------------------------------------------------------------ */
+/* 31. patient phone numbers are not stored in the clear               */
+/* ------------------------------------------------------------------ */
+
+Assert::test('notification rows mask the phone number but keep it deliverable', function (): void {
+    // Its own entry: the dedupe key is template + entry, so reusing a live
+    // entry would be suppressed and the test would inspect somebody else's row.
+    $queue = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 1');
+    $patient = Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (1, ?, ?, ?, ?)',
+        ['MASK1', 'Mask Test', '+94771234567', Db::now()]
+    );
+    $entryId = Db::insert(
+        'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status,
+             priority, sort_weight, source, joined_at, track_token, track_expires_at)
+         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [$queue, $patient, 9003, 'M01', 'waiting', 0, 9, 'walkin', Db::now(),
+         bin2hex(random_bytes(16)), '2030-01-01']
+    );
+
+    $before = (int) Db::scalar('SELECT COUNT(*) FROM notifications');
+    (new App\Services\NotificationService())->queue(1, (int) $entryId, 'entry_called', ['room' => 'Room 1']);
+    Assert::true((int) Db::scalar('SELECT COUNT(*) FROM notifications') > $before, 'a row was written');
+
+    $row = Db::one('SELECT to_number, payload_json FROM notifications ORDER BY id DESC LIMIT 1');
+    Assert::true(str_contains((string) $row['to_number'], '•'), 'the stored column is masked');
+
+    $digits = preg_replace('/\D+/', '', (string) $row['to_number']);
+    Assert::true(strlen((string) $digits) <= 3, 'no more than the last three digits remain in the column');
+
+    $payload = json_decode((string) $row['payload_json'], true) ?: [];
+    Assert::true(($payload['to'] ?? '') !== '', 'the deliverable number is kept in the payload');
+    Assert::true(preg_match('/\d{5,}/', (string) $payload['to']) === 1, 'and it is a complete number');
+});
+
+Assert::test('masking keeps the last three digits and never throws on junk', function (): void {
+    $mask = App\Services\NotificationService::mask('+94 77 123 4567');
+    Assert::same('•••••567', $mask);
+    Assert::same('••••', App\Services\NotificationService::mask('12'));
+    Assert::same('•••••123', App\Services\NotificationService::mask('071-223-4123'));
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);
