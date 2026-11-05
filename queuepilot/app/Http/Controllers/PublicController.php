@@ -85,6 +85,77 @@ final class PublicController
         ], false);
     }
 
+    /**
+     * A patient cancels their own visit from the tracking link.
+     *
+     * Authorisation is the tracking token itself: 128 bits of randomness,
+     * delivered only to that patient. There is no login because the person
+     * holding the phone is the patient.
+     *
+     * Deliberate limits, because this endpoint is reachable by anyone with a
+     * link:
+     *   * Only `waiting` entries can be cancelled. Once the doctor has called
+     *     the token, walking away is a no-show and a receptionist decision —
+     *     letting a link cancel a consultation in progress would erase work.
+     *   * The clinic is derived from the entry, never from input, so the
+     *     token cannot be pointed at another clinic's queue.
+     *   * A reason of 'Cancelled by patient' is written to the audit log, so
+     *     reception can tell a self-cancel from a staff cancel.
+     */
+    public function cancelTracked(string $token): void
+    {
+        if (!preg_match('/^[A-Za-z0-9_-]{16,64}$/', $token)) {
+            http_response_code(404);
+            view('track/invalid', ['title' => 'Link not valid'], false);
+            return;
+        }
+
+        $repo = new QueueRepository();
+        $entry = $repo->entryByToken($token);
+
+        $expired = $entry && $entry['track_expires_at'] !== null
+            && strtotime((string) $entry['track_expires_at']) < time();
+
+        if (!$entry || $expired) {
+            http_response_code($entry ? 410 : 404);
+            view('track/invalid', [
+                'title' => $entry ? 'Link expired' : 'Link not valid',
+                'expired' => (bool) $entry,
+                'clinicPhone' => $entry['clinic_phone'] ?? null,
+            ], false);
+            return;
+        }
+
+        // Rate limited per token: a leaked link should not become a way to
+        // hammer the queue engine.
+        $limit = \App\Core\RateLimiter::hit('track-cancel:' . $token, 5, 3600);
+        if (!$limit['allowed']) {
+            flash('error', 'Too many attempts from this link. Please call the clinic.');
+            redirect('/t/' . $token);
+            return;
+        }
+
+        if ((string) $entry['status'] !== 'waiting') {
+            // Not an error page — the patient is told plainly why, and what to
+            // do instead. The status may have changed a second ago.
+            Session::flash('cancel_refused', (string) $entry['status']);
+            redirect('/t/' . $token);
+            return;
+        }
+
+        $result = (new QueueService())->apply((int) $entry['clinic_id'], (int) $entry['id'], 'cancel', [
+            'reason' => 'Cancelled by patient from the tracking link',
+        ]);
+
+        if ($result['ok']) {
+            Session::flash('cancel_ok', true);
+        } else {
+            flash('error', $result['message']);
+        }
+
+        redirect('/t/' . $token);
+    }
+
     public function registerForm(): void
     {
         if (Auth::check()) {

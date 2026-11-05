@@ -16,6 +16,7 @@ use App\Http\Controllers\ClinicController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DisplayController;
 use App\Http\Controllers\MonitorController;
+use App\Http\Controllers\PasswordResetController;
 use App\Http\Controllers\PatientController;
 use App\Http\Controllers\PublicController;
 use App\Http\Controllers\QueueController;
@@ -28,6 +29,9 @@ Router::get('/pricing', [PublicController::class, 'pricing']);
 Router::get('/register', [PublicController::class, 'registerForm']);
 Router::post('/register', [PublicController::class, 'register']);
 Router::get('/t/{token}', [PublicController::class, 'track'], ['csrf' => false]);
+// Patient self-service cancellation. CSRF applies: the tracking page renders a
+// token, so a cross-site link cannot cancel somebody's visit.
+Router::post('/t/{token}/cancel', [PublicController::class, 'cancelTracked']);
 Router::get('/demo/board', [PublicController::class, 'demoBoard']);
 Router::get('/manifest.webmanifest', [PublicController::class, 'manifest']);
 Router::get('/sw.js', [PublicController::class, 'serviceWorker']);
@@ -39,6 +43,13 @@ Router::post('/login', [AuthController::class, 'login']);
 // not authenticated until these succeed.
 Router::get('/login/2fa', [AuthController::class, 'showTwoFactor']);
 Router::post('/login/2fa', [AuthController::class, 'submitTwoFactor']);
+
+// Password recovery. Public by necessity; rate limited per IP inside the
+// controller and single-use per token. See PasswordResetService.
+Router::get('/forgot-password', [PasswordResetController::class, 'showRequest']);
+Router::post('/forgot-password', [PasswordResetController::class, 'send']);
+Router::get('/reset-password/{token}', [PasswordResetController::class, 'showReset']);
+Router::post('/reset-password/{token}', [PasswordResetController::class, 'reset']);
 Router::post('/login/2fa/cancel', [AuthController::class, 'cancelTwoFactor']);
 // Staff invitation acceptance
 Router::get('/invite/{token}', [AuthController::class, 'showInvite'], ['csrf' => false]);

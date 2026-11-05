@@ -287,11 +287,81 @@ final class QueueController
             return;
         }
 
-        Db::run('UPDATE queues SET status = ? WHERE id = ? AND clinic_id = ?', [$status, $queueId, $clinicId]);
+        // Closing a session is not the same as pausing it. Pausing keeps every
+        // waiting patient and stops new calls; closing ends the day. If people
+        // are still waiting when the day is closed, they must be *resolved*,
+        // not orphaned — a row left 'waiting' on a closed session is a patient
+        // the clinic has quietly forgotten, and it corrupts tomorrow's board.
+        // The operator is told how many, and must acknowledge.
+        $stillWaiting = 0;
+        if ($status === 'closed') {
+            $stillWaiting = (int) Db::scalar(
+                "SELECT COUNT(*) FROM queue_entries
+                  WHERE clinic_id = ? AND queue_id = ? AND status IN ('waiting','called','on_hold')",
+                [$clinicId, $queueId]
+            );
+            $acknowledged = Request::string('resolve') === 'acknowledge';
+            if ($stillWaiting > 0 && !$acknowledged) {
+                Session::flash('pending_close', [
+                    'queue_id' => $queueId,
+                    'queue_name' => (string) $queue['name'],
+                    'waiting' => $stillWaiting,
+                ]);
+                flash('warn', sprintf(
+                    '%d patient%s still in %s. Closing will mark them as not seen — confirm to continue, or call/cancel them first.',
+                    $stillWaiting,
+                    $stillWaiting === 1 ? '' : 's',
+                    $queue['name']
+                ));
+                back('/app');
+                return;
+            }
+        }
+
+        Db::transaction(function () use ($clinicId, $queueId, $status, $queue, $stillWaiting): void {
+            Db::run('UPDATE queues SET status = ? WHERE id = ? AND clinic_id = ?', [$status, $queueId, $clinicId]);
+
+            if ($status === 'closed' && $stillWaiting > 0) {
+                // The honest terminal state for someone who was never seen is
+                // 'no_show' at the session level: they kept their place and the
+                // clinic closed. Marking them 'cancelled' would blame them.
+                $entries = Db::all(
+                    "SELECT id, status, token_label FROM queue_entries
+                      WHERE clinic_id = ? AND queue_id = ? AND status IN ('waiting','called','on_hold')",
+                    [$clinicId, $queueId]
+                );
+                foreach ($entries as $entry) {
+                    Db::run(
+                        'UPDATE queue_entries SET status = ?, finished_at = ?, version = version + 1,
+                                note = ? WHERE id = ? AND clinic_id = ?',
+                        ['no_show', Db::now(), 'Session closed before this patient was seen', (int) $entry['id'], $clinicId]
+                    );
+                    Db::insert(
+                        'INSERT INTO queue_events (clinic_id, queue_id, entry_id, actor_id, action, from_status, to_status, meta_json, created_at)
+                         VALUES (?,?,?,?,?,?,?,?,?)',
+                        [
+                            $clinicId, $queueId, (int) $entry['id'], Auth::id(),
+                            'entry.session_closed', $entry['status'], 'no_show',
+                            json_encode(['reason' => 'session closed']), Db::now(),
+                        ]
+                    );
+                }
+            }
+        });
+
         (new AuditService())->log($clinicId, 'queue.session_' . $status, 'queue', $queueId, [
             'queue' => $queue['name'],
+            'unseen_patients_closed' => $status === 'closed' ? $stillWaiting : 0,
         ]);
-        flash('success', 'Session ' . $status . ' for ' . $queue['name'] . '.');
+
+        if ($status === 'closed' && $stillWaiting > 0) {
+            flash('warn', sprintf(
+                'Session closed. %d patient%s marked as not seen and kept in the record.',
+                $stillWaiting, $stillWaiting === 1 ? '' : 's'
+            ));
+        } else {
+            flash('success', 'Session ' . $status . ' for ' . $queue['name'] . '.');
+        }
         back('/app');
     }
 

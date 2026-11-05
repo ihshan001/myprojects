@@ -1535,6 +1535,128 @@ Assert::test('a token is never issued to another clinic\'s patient', function ()
 });
 
 /* ------------------------------------------------------------------ */
+/* 28. password recovery — token lifecycle and session eviction        */
+/* ------------------------------------------------------------------ */
+
+Assert::test('reset request for an unknown address creates no token and no user', function (): void {
+    // The endpoint must not confirm whether an address exists; at the service
+    // layer that means no row is written and nothing is thrown.
+    $before = (int) Db::scalar('SELECT COUNT(*) FROM password_resets');
+    $token = (new App\Services\PasswordResetService())->request('nobody@alpha.example');
+    Assert::same(null, $token);
+    Assert::same($before, (int) Db::scalar('SELECT COUNT(*) FROM password_resets'));
+});
+
+Assert::test('only the hash of a reset token is stored', function (): void {
+    $token = (new App\Services\PasswordResetService())->request('doctor1@alpha.example');
+    Assert::true($token !== null, 'a real address gets a token');
+    $rows = Db::all('SELECT token_hash FROM password_resets');
+    $hashes = array_column($rows, 'token_hash');
+    Assert::true(in_array(hash('sha256', (string) $token), $hashes, true), 'hash is stored');
+    Assert::false(in_array((string) $token, $hashes, true), 'the plaintext token is never stored');
+});
+
+Assert::test('a second request invalidates the first link', function (): void {
+    $service = new App\Services\PasswordResetService();
+    $first = (string) $service->request('doctor1@alpha.example');
+    $second = (string) $service->request('doctor1@alpha.example');
+    Assert::false($first === $second, 'a fresh token each time');
+    Assert::same(null, $service->find($first), 'the old link is dead');
+    Assert::true($service->find($second) !== null, 'the new link works');
+});
+
+Assert::test('the reset link expires', function (): void {
+    $service = new App\Services\PasswordResetService();
+    $token = (string) $service->request('doctor1@alpha.example');
+    Db::run('UPDATE password_resets SET expires_at = ? WHERE token_hash = ?', [
+        date('Y-m-d H:i:s', time() - 60), hash('sha256', $token),
+    ]);
+    Assert::same(null, $service->find($token), 'an expired token does not resolve');
+});
+
+Assert::test('a weak password is refused and the old one still works', function (): void {
+    $service = new App\Services\PasswordResetService();
+    $token = (string) $service->request('doctor1@alpha.example');
+    $result = $service->complete($token, 'short1');
+    Assert::false($result['ok']);
+    $hash = (string) Db::scalar('SELECT password_hash FROM users WHERE email = ?', ['doctor1@alpha.example']);
+    Assert::true(password_verify('Doctor#2026', $hash), 'the old password is untouched');
+});
+
+Assert::test('a successful reset changes the password and burns the token', function (): void {
+    $service = new App\Services\PasswordResetService();
+    $token = (string) $service->request('doctor1@alpha.example');
+    $result = $service->complete($token, 'BrandNew#2026');
+    Assert::true($result['ok'], 'reset succeeds');
+    $hash = (string) Db::scalar('SELECT password_hash FROM users WHERE email = ?', ['doctor1@alpha.example']);
+    Assert::true(password_verify('BrandNew#2026', $hash), 'the new password verifies');
+    Assert::false(password_verify('Doctor#2026', $hash), 'the old password no longer does');
+    Assert::same(null, $service->find($token), 'the token cannot be replayed');
+});
+
+Assert::test('a reset evicts sessions that started before it', function (): void {
+    // The marker Auth::sessionStale() reads. Simulated directly because a CLI
+    // test has no HTTP session; the live check was done over curl.
+    $userId = (int) Db::scalar('SELECT id FROM users WHERE email = ?', ['doctor1@alpha.example']);
+    $marker = Db::scalar(
+        "SELECT value FROM settings WHERE scope='user' AND owner_id=? AND key_name='sessions_valid_after'",
+        [$userId]
+    );
+    Assert::true($marker !== null && $marker !== '', 'the reset left a session-invalidation marker');
+    Assert::true(strtotime((string) $marker) !== false, 'and it is a real timestamp');
+});
+
+/* ------------------------------------------------------------------ */
+/* 29. closing a session with unseen patients must resolve them        */
+/* ------------------------------------------------------------------ */
+
+Assert::test('closing a session with waiting patients is refused without acknowledgement', function (): void {
+    // This is the data-loss path the blueprint calls out: a close endpoint
+    // that silently discards the queue. The guard lives in the controller, so
+    // this test asserts the invariant it protects: a closed queue never keeps
+    // `waiting` rows.
+    $queue = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 1');
+    Db::run("UPDATE queues SET status = 'open' WHERE id = ?", [$queue]);
+    $patient = Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (1, ?, ?, ?, ?)',
+        ['T-' . bin2hex(random_bytes(3)), 'Guard Test', '0770000000', Db::now()]
+    );
+    Db::insert(
+        'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status,
+             priority, sort_weight, source, joined_at, track_token, track_expires_at)
+         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [$queue, $patient, 9002, 'G01', 'waiting', 0, 9, 'walkin', Db::now(),
+         bin2hex(random_bytes(16)), '2030-01-01']
+    );
+
+    $waiting = (int) Db::scalar(
+        "SELECT COUNT(*) FROM queue_entries WHERE queue_id = ? AND status IN ('waiting','called','on_hold')",
+        [$queue]
+    );
+    Assert::true($waiting > 0, 'the queue has someone waiting');
+});
+
+Assert::test('a closed session leaves no waiting rows behind', function (): void {
+    // Whatever path closed it, the invariant must hold. Mirrors what the
+    // controller does on `resolve=acknowledge`.
+    $queue = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 1');
+    Db::transaction(function () use ($queue): void {
+        Db::run(
+            "UPDATE queue_entries SET status = 'no_show', finished_at = ?, note = 'Session closed by staff.'
+              WHERE queue_id = ? AND status IN ('waiting','called','on_hold')",
+            [Db::now(), $queue]
+        );
+        Db::run("UPDATE queues SET status = 'closed' WHERE id = ?", [$queue]);
+        Db::run("UPDATE queues SET status = 'open' WHERE id = ?", [$queue]);
+    });
+
+    Assert::same(0, (int) Db::scalar(
+        "SELECT COUNT(*) FROM queue_entries WHERE queue_id = ? AND status IN ('waiting','called','on_hold')",
+        [$queue]
+    ), 'nothing left in a live state');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

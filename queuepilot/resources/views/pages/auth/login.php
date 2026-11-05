@@ -40,6 +40,7 @@
         <div>
           <div class="flex items-center justify-between">
             <label class="label" for="password">Password</label>
+            <a class="text-xs font-medium text-teal-700 hover:underline" href="/forgot-password">Forgot password?</a>
           </div>
           <input class="input" id="password" name="password" type="password" autocomplete="current-password"
                  required placeholder="••••••••••">

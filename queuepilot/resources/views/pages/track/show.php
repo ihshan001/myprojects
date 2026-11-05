@@ -135,6 +135,37 @@ $tone = match ($s['status']) {
     </button>
   </div>
 
+  <!-- patient-initiated cancellation -->
+  <?php if (($cancelled = \App\Core\Session::takeFlash('cancel_ok')) !== null): ?>
+    <div class="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-3 text-xs leading-relaxed text-emerald-900">
+      <b>Your visit is cancelled.</b> You have given up your place in the queue. If that was a
+      mistake, call the clinic — reception can put you back in line.
+    </div>
+  <?php elseif (($refused = \App\Core\Session::takeFlash('cancel_refused')) !== null): ?>
+    <div class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-xs leading-relaxed text-amber-900">
+      <b>It is too late to cancel from here.</b>
+      <?php if ($refused === 'called'): ?>
+        Your token has been called — please go to the consultation room, or tell reception you
+        are leaving so they can mark you down correctly.
+      <?php else: ?>
+        This visit has already moved past the waiting stage. Please speak to reception.
+      <?php endif; ?>
+    </div>
+  <?php endif; ?>
+
+  <?php if ($s['status'] === 'waiting'): ?>
+    <form method="post" action="/t/<?= e($token) ?>/cancel" class="mt-4"
+          onsubmit="return confirm('Cancel your visit and give up your place in the queue?');">
+      <?= csrf_field() ?>
+      <button type="submit" class="btn w-full justify-center border border-slate-300 bg-white text-sm text-rose-700 hover:bg-rose-50">
+        I can no longer come — cancel my visit
+      </button>
+    </form>
+    <p class="mt-1.5 text-center text-[10px] leading-relaxed text-slate-400">
+      Cancelling frees your place for the next patient. You cannot undo it here.
+    </p>
+  <?php endif; ?>
+
   <!-- add to home screen hint -->
   <div class="mt-4 rounded-xl bg-white/70 px-3.5 py-3 text-[11px] leading-relaxed text-slate-500 ring-1 ring-slate-200">
     <b class="text-slate-700">Tip:</b> add this page to your home screen to open it in one tap.

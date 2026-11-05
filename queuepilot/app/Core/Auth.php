@@ -25,8 +25,40 @@ final class Auth
             return $cached;
         }
         $row = Db::one('SELECT * FROM users WHERE id = ? AND is_active = 1', [(int) $id]);
+        if ($row !== null && self::sessionStale((int) $id)) {
+            // A password reset completed after this session was established.
+            // The most common reason to reset a password is that somebody
+            // else had it, so the old session must not survive. Treated as a
+            // logout rather than an error so the user lands on the sign-in
+            // page with an explanation instead of a blank 403.
+            Session::destroy();
+            return null;
+        }
         $cached = $row ?: null;
         return $cached;
+    }
+
+    /**
+     * True when the user's password was reset after this session began.
+     * The marker lives in `settings` (scope=user) because `users` has no
+     * column for it and the baseline schema must not be hand-edited.
+     */
+    private static function sessionStale(int $userId): bool
+    {
+        $validAfter = Db::scalar(
+            "SELECT value FROM settings WHERE scope = 'user' AND owner_id = ? AND key_name = 'sessions_valid_after'",
+            [$userId]
+        );
+        if ($validAfter === null || $validAfter === '') {
+            return false;
+        }
+        $started = Session::get('started_at');
+        if ($started === null) {
+            // Sessions created before this feature shipped carry no marker;
+            // they are trusted until they expire rather than all logged out.
+            return false;
+        }
+        return (string) $started < (string) $validAfter;
     }
 
     public static function check(): bool
@@ -208,6 +240,8 @@ final class Auth
         Session::forget('2fa_pending_user_id');
         Session::forget('2fa_pending_at');
         Session::put('user_id', (int) $user['id']);
+        // Stamped so a later password reset can tell which sessions predate it.
+        Session::put('started_at', Db::now());
         Csrf::rotate();
 
         // resolve clinic association for clinic users

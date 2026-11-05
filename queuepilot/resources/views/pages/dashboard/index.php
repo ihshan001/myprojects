@@ -1,4 +1,5 @@
 <?php
+use App\Core\Session;
 use App\Domain\Queue\QueueStateMachine;
 
 $status = $summary['status'] ?? null;
@@ -95,7 +96,7 @@ $avgWait = $summary['avg_wait'] ?? null;
               <input type="hidden" name="queue_id" value="<?= $qid ?>">
               <?php if ($isOpen): ?>
                 <input type="hidden" name="status" value="paused">
-                <button class="btn-sm btn-secondary" title="Pause this queue (no new calls)">
+                <button class="btn-sm btn-secondary" title="Pause this queue (keeps every waiting patient, stops new calls)">
                   <svg class="h-3.5 w-3.5"><use href="#i-pause"/></svg>
                 </button>
               <?php else: ?>
@@ -105,6 +106,27 @@ $avgWait = $summary['avg_wait'] ?? null;
                 </button>
               <?php endif; ?>
             </form>
+            <?php $pending = Session::takeFlash('pending_close'); ?>
+            <?php if (is_array($pending) && (int) $pending['queue_id'] === $qid): ?>
+              <form method="post" action="/queue/session" class="flex items-center gap-1">
+                <?= csrf_field() ?>
+                <input type="hidden" name="queue_id" value="<?= $qid ?>">
+                <input type="hidden" name="status" value="closed">
+                <input type="hidden" name="resolve" value="acknowledge">
+                <button class="btn-sm btn-stop" title="Close the day and mark unseen patients as not seen">
+                  Close day · <?= (int) $pending['waiting'] ?> unseen
+                </button>
+              </form>
+            <?php else: ?>
+              <form method="post" action="/queue/session" class="flex items-center gap-1">
+                <?= csrf_field() ?>
+                <input type="hidden" name="queue_id" value="<?= $qid ?>">
+                <input type="hidden" name="status" value="closed">
+                <button class="btn-sm btn-secondary" title="End today's session">
+                  <svg class="h-3.5 w-3.5"><use href="#i-check"/></svg>
+                </button>
+              </form>
+            <?php endif; ?>
           </div>
         </header>
 
