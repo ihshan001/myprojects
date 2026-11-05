@@ -634,13 +634,13 @@
         </label>
         <p class="note">New: <code>queues.department_id</code>, <code>/departments/{id}</code> board, per-department report.</p>
       </li>
-      <li class="item" data-status="partial">
+      <li class="item" data-status="built">
         <label class="row">
           <input type="checkbox" class="tick" data-id="Queue engine|Appointment and walk-in coordination">
           <span class="name">Appointment and walk-in coordination</span>
-          <span class="pill partial">Partial</span>
+          <span class="pill built">Built</span>
         </label>
-        <p class="note">Both feed one sort weight (<code>appointment_weight</code> / <code>walkin_weight</code>). There is no per-service rule beyond those two numbers.</p>
+        <p class="note">Both sources feed one sort weight, and the two weights are now editable on <code>/queues/config</code> (1&ndash;9 each, equal weights give arrival order) instead of being database-only. Verified live: with 2 vs 6 the later appointment sorted ahead of the earlier walk-in. Per-service rules come from <code>/queues/priority-rules</code>, which can target one queue or one doctor.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
@@ -1183,7 +1183,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (194 automated checks, 148 files lint-clean, healthcheck green).
+    application (197 automated checks, 148 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.

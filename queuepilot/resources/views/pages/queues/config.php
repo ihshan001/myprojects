@@ -61,6 +61,37 @@
         </div>
       </div>
 
+      <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <p class="text-xs font-semibold text-slate-700">Appointment vs walk-in order</p>
+        <p class="mt-0.5 text-[11px] leading-relaxed text-slate-500">
+          A lower number sorts earlier. These decide the order between an
+          appointment and a walk-in who are otherwise equal; a clinical
+          priority still outranks both, and a priority rule can add its own.
+        </p>
+        <div class="mt-2 grid grid-cols-2 gap-3">
+          <div>
+            <label class="label" for="appointment_weight">Appointment</label>
+            <input class="input" id="appointment_weight" name="appointment_weight" type="number" min="1" max="9"
+                   value="<?= (int) $weights['appointment'] ?>">
+          </div>
+          <div>
+            <label class="label" for="walkin_weight">Walk-in</label>
+            <input class="input" id="walkin_weight" name="walkin_weight" type="number" min="1" max="9"
+                   value="<?= (int) $weights['walkin'] ?>">
+          </div>
+        </div>
+        <p class="mt-1.5 text-[11px] text-slate-500">
+          Currently <?= (int) $weights['appointment'] ?> vs <?= (int) $weights['walkin'] ?> —
+          <?php if ((int) $weights['appointment'] === (int) $weights['walkin']): ?>
+            equal, so arrival order decides.
+          <?php elseif ((int) $weights['appointment'] < (int) $weights['walkin']): ?>
+            someone who booked comes before a walk-in arriving at the same moment.
+          <?php else: ?>
+            walk-ins are seen ahead of booked patients, which suits a first-come clinic.
+          <?php endif; ?>
+        </p>
+      </div>
+
       <?php if ($canManage): ?>
         <button class="btn-primary">Save settings</button>
       <?php else: ?>

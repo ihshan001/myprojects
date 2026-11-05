@@ -76,6 +76,20 @@ final class QueueConfigController
                 ) ?? 3),
             ],
             'kinds' => self::KINDS,
+            // Ordering weights already existed on the clinic row and decided
+            // every entry's sort order — with no screen to change them, which
+            // meant the only clinics that could tune them were ones editing
+            // the database. They are on this page because they are queue
+            // policy, and the priority rules below them can only be read
+            // correctly if a manager can see this floor.
+            'weights' => [
+                'appointment' => (int) (Db::scalar(
+                    'SELECT appointment_weight FROM clinics WHERE id = ?', [$clinicId]
+                ) ?? 1),
+                'walkin'      => (int) (Db::scalar(
+                    'SELECT walkin_weight FROM clinics WHERE id = ?', [$clinicId]
+                ) ?? 3),
+            ],
             // What the next queue would be called, so the pattern is not a riddle.
             'sampleDoctor' => (string) (Db::scalar(
                 'SELECT name FROM doctors WHERE clinic_id = ? AND is_active = 1 ORDER BY id LIMIT 1',
@@ -102,6 +116,8 @@ final class QueueConfigController
         $kind = Request::string('kind', 'consultation');
         $prefix = strtoupper(trim(Request::string('prefix')));
         $padding = Request::int('padding', 3);
+        $apptWeight = Request::int('appointment_weight', 1);
+        $walkinWeight = Request::int('walkin_weight', 3);
 
         $errors = [];
 
@@ -122,6 +138,16 @@ final class QueueConfigController
         if ($padding < 1 || $padding > 6) {
             $errors[] = 'Token padding is between 1 and 6 digits.';
         }
+        // Small numbers on purpose: this is a tie-break inside a queue, not a
+        // second priority system. Anything larger than 9 would let a weight
+        // silently outrank a clinical rule, which is how a policy becomes
+        // unexplainable.
+        if ($apptWeight < 1 || $apptWeight > 9) {
+            $errors[] = 'The appointment weight is between 1 and 9.';
+        }
+        if ($walkinWeight < 1 || $walkinWeight > 9) {
+            $errors[] = 'The walk-in weight is between 1 and 9.';
+        }
 
         if ($errors !== []) {
             foreach ($errors as $message) {
@@ -136,8 +162,14 @@ final class QueueConfigController
         $this->put($clinicId, 'queue.default_prefix', $prefix);
         $this->put($clinicId, 'queue.token_padding', (string) $padding);
 
+        Db::run(
+            'UPDATE clinics SET appointment_weight = ?, walkin_weight = ?, updated_at = ? WHERE id = ?',
+            [$apptWeight, $walkinWeight, Db::now(), $clinicId]
+        );
+
         (new AuditService())->log($clinicId, 'queue.settings_updated', 'clinic', $clinicId, [
             'name_pattern' => $pattern, 'kind' => $kind, 'prefix' => $prefix, 'padding' => $padding,
+            'appointment_weight' => $apptWeight, 'walkin_weight' => $walkinWeight,
         ]);
 
         flash('success', 'Saved. Queues opened from tomorrow use these settings; queues already open today keep their labels.');

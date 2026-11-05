@@ -3143,6 +3143,62 @@ Assert::test('a patient with no birth year never matches an age rule', function 
 });
 
 /* ------------------------------------------------------------------ */
+/* 49. appointment vs walk-in weights                                  */
+/* ------------------------------------------------------------------ */
+
+Assert::test('clinic weights decide appointment vs walk-in order, not a fixed constant', function (): void {
+    seedTenant(82, 'weights-clinic', 'Weights Clinic');
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 82');
+    $queue = new App\Domain\Queue\QueueService();
+
+    // The clinic said appointments first. The service must read that, not its
+    // own 1-vs-3 default, or the settings screen would be decoration.
+    Db::run('UPDATE clinics SET appointment_weight = 2, walkin_weight = 6 WHERE id = 82');
+
+    $booked = Db::insert('INSERT INTO patients (clinic_id, code, full_name, created_at) VALUES (82,?,?,?)', ['WB1', 'Booked One', Db::now()]);
+    $walkin = Db::insert('INSERT INTO patients (clinic_id, code, full_name, created_at) VALUES (82,?,?,?)', ['WW1', 'Walkin One', Db::now()]);
+
+    $w = $queue->issueToken(82, $queueId, $walkin, ['source' => 'walkin']);
+    $a = $queue->issueToken(82, $queueId, $booked, ['source' => 'appointment']);
+
+    Assert::same(2, (int) Db::scalar('SELECT sort_weight FROM queue_entries WHERE id = ?', [$a['entry_id']]), 'the appointment carries the clinic weight');
+    Assert::same(6, (int) Db::scalar('SELECT sort_weight FROM queue_entries WHERE id = ?', [$w['entry_id']]), 'the walk-in carries the clinic weight');
+    Assert::same(1, $queue->positionFor(Db::one('SELECT * FROM queue_entries WHERE id = ?', [$a['entry_id']]), 82),
+        'the later appointment sorts ahead of the earlier walk-in');
+});
+
+Assert::test('a clinic that treats both equally gets arrival order', function (): void {
+    Db::run('UPDATE clinics SET appointment_weight = 3, walkin_weight = 3 WHERE id = 82');
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 82');
+    $queue = new App\Domain\Queue\QueueService();
+
+    $booked = Db::insert('INSERT INTO patients (clinic_id, code, full_name, created_at) VALUES (82,?,?,?)', ['WB2', 'Booked Two', Db::now()]);
+    $walkin = Db::insert('INSERT INTO patients (clinic_id, code, full_name, created_at) VALUES (82,?,?,?)', ['WW2', 'Walkin Two', Db::now()]);
+
+    $a = $queue->issueToken(82, $queueId, $booked, ['source' => 'appointment']);
+    $w = $queue->issueToken(82, $queueId, $walkin, ['source' => 'walkin']);
+
+    Assert::same((int) Db::scalar('SELECT sort_weight FROM queue_entries WHERE id = ?', [$a['entry_id']]),
+        (int) Db::scalar('SELECT sort_weight FROM queue_entries WHERE id = ?', [$w['entry_id']]),
+        'equal weights, so neither source is favoured');
+});
+
+Assert::test('a clinical priority outranks the weight, and a rule outranks a weight too', function (): void {
+    Db::run('UPDATE clinics SET appointment_weight = 1, walkin_weight = 9 WHERE id = 82');
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 82');
+    $queue = new App\Domain\Queue\QueueService();
+
+    $urgent = Db::insert('INSERT INTO patients (clinic_id, code, full_name, created_at) VALUES (82,?,?,?)', ['WU1', 'Urgent One', Db::now()]);
+    $routine = Db::insert('INSERT INTO patients (clinic_id, code, full_name, created_at) VALUES (82,?,?,?)', ['WR1', 'Routine One', Db::now()]);
+
+    $r = $queue->issueToken(82, $queueId, $routine, ['source' => 'appointment']);
+    $u = $queue->issueToken(82, $queueId, $urgent, ['source' => 'walkin', 'priority' => 4, 'priority_reason' => 'Chest pain']);
+
+    Assert::same(1, $queue->positionFor(Db::one('SELECT * FROM queue_entries WHERE id = ?', [$u['entry_id']]), 82),
+        'the urgent walk-in is first despite the worst weight');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

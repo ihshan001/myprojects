@@ -5,7 +5,7 @@ codebase actually does. It is deliberately blunt: a feature is **Built** only
 if I ran it against the live server, **Partial** if something exists but does
 not meet the scenario as written, and **Not built** otherwise.
 
-Verified on 2026-11-05 against commit `HEAD` (194 automated checks, 148 files
+Verified on 2026-11-05 against commit `HEAD` (197 automated checks, 148 files
 lint-clean, healthcheck all-good, all five demo logins re-checked).
 
 > **Read this first.** The blueprint describes a mature product with billing,
@@ -34,6 +34,7 @@ lint-clean, healthcheck all-good, all five demo logins re-checked).
 | Scenario | State | Notes |
 |---|:--:|---|
 | Walk-in patient receives a token at reception | ✅ | `POST /queue/entries` — token label, sort weight, priority all assigned server-side |
+| An appointment and a walk-in are ordered by clinic policy | ✅ | Both feed one sort weight. The two weights are editable on `/queues/config` (1–9, equal weights give arrival order) — they existed on the clinic row before but no screen read them. Verified live: with 2 vs 6 a later appointment sorted ahead of an earlier walk-in; a per-queue or per-doctor rule on `/queues/priority-rules` refines it further |
 | Token number never repeats within a session | ✅ | Issued from a per-queue sequence inside a transaction; recreation of a token from `COUNT(*)` was a bug I fixed |
 | Patient is told the estimated wait | ✅ | Snapshot computes waiting-ahead × average consult minutes, clamped |
 | Reception prints or shares a tracking link | ✅ | QR code + copyable `/t/{token}` link on the confirmation screen |
@@ -269,7 +270,7 @@ first clinic goes live — the automated suite does not replace it.
 
 | Group | ✅ Built | ◐ Partial | ○ Not built |
 |---|:--:|:--:|:--:|
-| Arrival & tokens | 7 | 0 | 0 |
+| Arrival & tokens | 8 | 0 | 0 |
 | Appointments | 8 | 0 | 1 |
 | Call & consult | 7 | 1 | 0 |
 | Disruption | 6 | 0 | 0 |
@@ -285,7 +286,7 @@ first clinic goes live — the automated suite does not replace it.
 | Data & ops | 6 | 1 | 0 |
 | Money | 2 | 0 | 3 |
 | Hardware | 2 | 1 | 2 |
-| **Total** | **90** | **7** | **10** |
+| **Total** | **91** | **7** | **10** |
 
 **What is genuinely finished.** The queue engine holds up under adversarial
 input: issuing, calling, transferring, prioritising, pausing, closing,
