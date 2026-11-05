@@ -18,7 +18,7 @@ $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
 <body class="tv min-h-full overflow-hidden" data-display-board="<?= e($key) ?>">
 <?php include QP_ROOT . '/resources/views/partials/icons.php'; ?>
 
-<div id="tv-offline" class="hidden fixed inset-x-0 top-0 z-50 bg-amber-500 px-4 py-2 text-center text-xs font-bold text-amber-950">
+<div id="tv-offline" data-tv-offline class="hidden fixed inset-x-0 top-0 z-50 bg-amber-500 px-4 py-2 text-center text-xs font-bold text-amber-950">
   Connection lost — showing the last known state. This screen is NOT live.
 </div>
 
@@ -50,7 +50,7 @@ $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
       <p class="text-xs font-bold uppercase tracking-[0.35em] text-teal-400">Now serving</p>
       <p class="tv-token mt-4 text-[7rem] leading-none text-white lg:text-[10rem]" data-tv-serving data-token="">—</p>
       <div class="mt-6 flex items-center gap-3">
-        <span class="live-pill"><span class="pulse-dot"><span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span></span>Live</span>
+        <span class="live-pill" data-tv-live><span class="pulse-dot"><span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span></span><span data-tv-live-text>Live</span></span>
         <p class="text-sm text-slate-400">Please have your token ready</p>
       </div>
     </div>

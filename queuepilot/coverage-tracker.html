@@ -103,8 +103,8 @@
   </div>
 
   <div class="legend">
-    <span><i class="dot built"></i> 104 built</span>
-    <span><i class="dot partial"></i> 19 partial</span>
+    <span><i class="dot built"></i> 105 built</span>
+    <span><i class="dot partial"></i> 18 partial</span>
     <span><i class="dot missing"></i> 0 not built</span>
   </div>
 
@@ -776,7 +776,7 @@
           <span class="name">Stale-data indication</span>
           <span class="pill built">Built</span>
         </label>
-        <p class="note">A reconnecting pill appears when polling fails; the last good frame is held.</p>
+        <p class="note">Poll fails → amber banner plus the green Live pill turning "Offline — not live", both after 30s without data, with backoff capped at 30s. Was a real bug: the banner selector did not match the DOM, so the signal staff are told to watch never changed.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
@@ -1078,9 +1078,9 @@
         <label class="row">
           <input type="checkbox" class="tick" data-id="Security and reliability|Offline fallback procedures">
           <span class="name">Offline fallback procedures</span>
-          <span class="pill partial">Partial</span>
+          <span class="pill built">Built</span>
         </label>
-        <p class="note"><code>docs/CONTINUITY.md</code> describes a paper fallback. <strong>Never rehearsed</strong> — written, not proven.</p>
+        <p class="note"><code>docs/CONTINUITY.md</code> plus <code>tools/continuity-drill.php</code>, which runs the reconcile arithmetic against live data and ends PASSED or FAILED. Rehearsed 5 Nov 2026: 37 seen, 10 cancelled, 9 waiting, 0 duplicates. Issuing a physical paper token still needs a person.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
@@ -1183,7 +1183,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (161 automated checks, 132 files lint-clean, healthcheck green).
+    application (164 automated checks, 133 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.

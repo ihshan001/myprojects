@@ -472,10 +472,32 @@
       onStale: () => {
         const el = $('[data-tv-offline]');
         if (el) el.classList.remove('hidden');
+        // The pill is the signal staff are told to watch in the continuity
+        // procedure, so it has to move. A permanently green "Live" next to an
+        // amber banner is worse than no pill at all.
+        // Inline, not utility classes: .live-pill sets its own emerald colours
+        // with @apply, and a dynamically-added utility cannot be relied on to
+        // win that specificity fight (or to exist in the built CSS at all).
+        const pill = $('[data-tv-live]');
+        const text = $('[data-tv-live-text]');
+        if (pill) {
+          pill.style.background = '#f59e0b';
+          pill.style.color = '#451a03';
+          pill.style.boxShadow = 'inset 0 0 0 1px #d97706';
+        }
+        if (text) text.textContent = 'Offline — not live';
       },
       onLive: () => {
         const el = $('[data-tv-offline]');
         if (el) el.classList.add('hidden');
+        const pill = $('[data-tv-live]');
+        const text = $('[data-tv-live-text]');
+        if (pill) {
+          pill.style.background = '';
+          pill.style.color = '';
+          pill.style.boxShadow = '';
+        }
+        if (text) text.textContent = 'Live';
       },
     }).start();
 

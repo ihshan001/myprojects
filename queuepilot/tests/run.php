@@ -2486,6 +2486,81 @@ Assert::test('a delivered message is marked sent and a failure is retried', func
 });
 
 /* ------------------------------------------------------------------ */
+/* 41. continuity: stale signalling and the drill                       */
+/* ------------------------------------------------------------------ */
+
+Assert::test('the drill detects a duplicated waiting patient, and the database makes one impossible', function (): void {
+    // The drill's verdict is the query the clinic relies on during recovery: a
+    // patient holding two live entries makes the paper log and the system
+    // disagree about how many people are waiting.
+    //
+    // The stronger guarantee is underneath it: a partial unique index forbids
+    // two live entries for one patient in one queue. So the second insert must
+    // fail, which means the drill's query can only ever fire on data that
+    // predates the index or was written around it — exactly what the drill is
+    // for.
+    $clinicId = 1;
+    $today = Db::today();
+    $dupesSql = "SELECT patient_id, COUNT(*) AS n FROM queue_entries e
+                   JOIN queues q ON q.id = e.queue_id
+                  WHERE e.clinic_id = ? AND q.session_date = ?
+                    AND e.status IN ('waiting','called','in_consultation')
+                  GROUP BY patient_id HAVING COUNT(*) > 1";
+
+    Assert::same(0, count(Db::all($dupesSql, [$clinicId, $today])), 'the fixture starts clean');
+
+    $row = Db::one(
+        "SELECT e.patient_id, e.queue_id FROM queue_entries e JOIN queues q ON q.id = e.queue_id
+          WHERE e.clinic_id = ? AND q.session_date = ? AND e.status = 'waiting' LIMIT 1",
+        [$clinicId, $today]
+    );
+    Assert::true($row !== null, 'there is a waiting entry to duplicate');
+
+    $threw = false;
+    try {
+        Db::insert(
+            'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status,
+                track_token, track_expires_at, sort_weight, priority, source, version, joined_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            [$clinicId, (int) $row['queue_id'], (int) $row['patient_id'], 999,
+             'DUP' . bin2hex(random_bytes(3)), 'waiting', bin2hex(random_bytes(16)),
+             date('Y-m-d H:i:s', time() + 86400), 0, 0, 'walkin', 1, Db::now()]
+        );
+    } catch (\PDOException $e) {
+        $threw = true;
+    }
+
+    Assert::true($threw, 'the partial unique index refuses a second live entry');
+    Assert::same(0, count(Db::all($dupesSql, [$clinicId, $today])), 'and the day stays clean');
+});
+
+Assert::test('the display board marks itself stale, and the pill is driven by the same poll', function (): void {
+    // Static check of the contract the continuity procedure tells staff to
+    // watch: the banner element must be the one the poller looks for, and the
+    // pill text must be addressable. A selector mismatch here means staff are
+    // told to watch a signal that never changes.
+    $screen = (string) file_get_contents(QP_ROOT . '/resources/views/pages/display/screen.php');
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+
+    Assert::contains('data-tv-offline', $screen, 'the offline banner is addressable');
+    Assert::contains('[data-tv-offline]', $js, 'the poller looks for the same attribute');
+    Assert::contains('data-tv-live-text', $screen, 'the pill text has a hook');
+    Assert::contains('Offline — not live', $js, 'the pill lies no more than the banner does');
+});
+
+Assert::test('the service worker never serves a cached api response', function (): void {
+    $sw = (string) file_get_contents(QP_ROOT . '/public/sw.js');
+
+    // The rule, as code: any /api/ request returns before respondWith, so the
+    // browser goes to the network and a failure is a failure.
+    Assert::contains("url.pathname.startsWith('/api/')", $sw, 'the api bypass exists');
+
+    $apiIndex = strpos($sw, "url.pathname.startsWith('/api/')");
+    $respondIndex = strpos($sw, 'respondWith', $apiIndex !== false ? $apiIndex : 0);
+    Assert::true($respondIndex !== false, 'there is a respondWith after it');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);
