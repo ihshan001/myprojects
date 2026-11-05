@@ -76,6 +76,82 @@ final class ReportService
     }
 
     /**
+     * Consultation revenue over a range — what the clinic's own fees add up to.
+     *
+     * Read the name carefully: this is **billed**, not collected. QueuePilot
+     * does not take payments and never has; money changes hands at the desk or
+     * by transfer, and the system only knows each doctor's `consult_fee`. So
+     * the honest figure is "what these completed consultations are worth at
+     * your fees", and the report says that in those words rather than
+     * presenting a number a manager would take for a bank balance.
+     *
+     * Completed visits only. A cancelled appointment or a no-show earns
+     * nothing, and counting called-but-unfinished visits would inflate the
+     * number on a busy morning. A doctor with no fee set is excluded from the
+     * money column but still counted in the visit column, and the report
+     * names those doctors — a silently missing row is how a revenue report
+     * becomes a lie.
+     *
+     * @return array{rows: array<int, array<string, mixed>>, total: float, currency: string, by_day: array<string, float>, missing_fee: array<int, string>, completed: int}
+     */
+    public function revenue(int $clinicId, string $from, string $to): array
+    {
+        $rows = Db::all(
+            "SELECT d.id, d.name, d.consult_fee,
+                    COUNT(e.id) AS completed,
+                    SUM(COALESCE(d.consult_fee, 0)) AS billed,
+                    SUM(CASE WHEN d.consult_fee IS NULL OR d.consult_fee = 0 THEN e.id END) AS no_fee_visits
+               FROM queue_entries e
+               JOIN queues q ON q.id = e.queue_id
+               JOIN doctors d ON d.id = q.doctor_id
+              WHERE e.clinic_id = ?
+                AND e.status = 'completed'
+                AND substr(COALESCE(e.finished_at, e.joined_at), 1, 10) BETWEEN ? AND ?
+              GROUP BY d.id, d.name, d.consult_fee
+              ORDER BY billed DESC, d.name",
+            [$clinicId, $from, $to]
+        );
+
+        $byDay = [];
+        foreach (Db::all(
+            "SELECT substr(COALESCE(e.finished_at, e.joined_at), 1, 10) AS day,
+                    SUM(COALESCE(d.consult_fee, 0)) AS billed,
+                    COUNT(e.id) AS completed
+               FROM queue_entries e
+               JOIN queues q ON q.id = e.queue_id
+               JOIN doctors d ON d.id = q.doctor_id
+              WHERE e.clinic_id = ?
+                AND e.status = 'completed'
+                AND substr(COALESCE(e.finished_at, e.joined_at), 1, 10) BETWEEN ? AND ?
+              GROUP BY day ORDER BY day",
+            [$clinicId, $from, $to]
+        ) as $row) {
+            $byDay[(string) $row['day']] = (float) $row['billed'];
+        }
+
+        $total = 0.0;
+        $completed = 0;
+        $missingFee = [];
+        foreach ($rows as $i => $row) {
+            $rows[$i]['billed'] = (float) $row['billed'];
+            $total += $rows[$i]['billed'];
+            $completed += (int) $row['completed'];
+            if ((float) ($row['consult_fee'] ?? 0) <= 0.0 && (int) $row['completed'] > 0) {
+                $missingFee[] = (string) $row['name'];
+            }
+        }
+
+        return [
+            'rows' => $rows,
+            'total' => $total,
+            'currency' => (string) Db::scalar('SELECT currency FROM clinics WHERE id = ?', [$clinicId]),
+            'by_day' => $byDay,
+            'missing_fee' => $missingFee,
+            'completed' => $completed,
+        ];
+    }
+
+    /**
      * Outcomes over a range: completed, no-show, cancelled, transferred.
      *
      * Reported together because the ratios are what a clinic acts on — a

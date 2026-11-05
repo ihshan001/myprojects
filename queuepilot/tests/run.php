@@ -4678,6 +4678,82 @@ Assert::test('an offline token invented by the browser is refused, not guessed a
     Assert::same(2, (int) $report['unused'], 'with both numbers still counted as usable');
 });
 /* ------------------------------------------------------------------ */
+/* 66. Consultation revenue                                            */
+/* ------------------------------------------------------------------ */
+
+Assert::test('revenue is billed at each doctor\'s fee, and says so', function (): void {
+    $clinicId = 115;
+    seedTenant($clinicId, 'revenue', 'Revenue Clinic');
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = ? ORDER BY id LIMIT 1', [$clinicId]);
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = ? ORDER BY id LIMIT 1', [$clinicId]);
+    $today = Db::today();
+
+    Db::run('UPDATE doctors SET consult_fee = ? WHERE id = ?', [1500, $doctorId]);
+
+    $mk = static function (string $status, int $minutesAgo) use ($clinicId, $queueId, $today): int {
+        $pid = (int) Db::insert(
+            'INSERT INTO patients (clinic_id, code, full_name, phone, created_at, updated_at) VALUES (?,?,?,?,?,?)',
+            [$clinicId, 'R' . random_int(10000, 99999), 'Rev Patient', '+94 77' . random_int(1000000, 9999999), Db::now(), Db::now()]
+        );
+        $finished = date('Y-m-d H:i:s', time() - $minutesAgo * 60);
+        return Db::insert(
+            'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status, priority,
+                sort_weight, source, joined_at, finished_at, track_token, version)
+             VALUES (?,?,?,?,?,?,1,0,?,?,?,?,0)',
+            [$clinicId, $queueId, $pid, random_int(1, 999), 'R' . random_int(100, 999), $status,
+             'walkin', $finished, $status === 'completed' ? $finished : null, bin2hex(random_bytes(16))]
+        );
+    };
+
+    // Three completed at 1500 = 4500, and two that must NOT count.
+    $mk('completed', 120);
+    $mk('completed', 90);
+    $mk('completed', 60);
+    $mk('called', 30);       // called but never finished — earns nothing
+    $mk('cancelled', 20);    // cancelled — earns nothing
+
+    $service = new App\Services\ReportService();
+    $rev = $service->revenue($clinicId, $today, $today);
+
+    Assert::same(4500.0, round($rev['total'], 2), 'only completed visits count, at the doctor fee');
+    Assert::same(3, $rev['completed'], 'and the visit count matches');
+    Assert::same('LKR', $rev['currency'], 'the clinic currency travels with the figure');
+    Assert::same([], $rev['missing_fee'], 'a doctor with a fee set is not flagged');
+
+    // A doctor with no fee: visits counted, money not invented, and named.
+    $freeDoctor = (int) Db::insert(
+        'INSERT INTO doctors (clinic_id, name, avg_consult_minutes, is_active, created_at) VALUES (?,?,?,1,?)',
+        [$clinicId, 'Dr. No Fee', 10, Db::now()]
+    );
+    $freeQueue = (int) Db::insert(
+        'INSERT INTO queues (clinic_id, doctor_id, name, token_prefix, session_date, status, last_token_no, created_at, started_at)
+         VALUES (?,?,?,?,?,?,0,?,?)',
+        [$clinicId, $freeDoctor, 'Free OPD', 'F', $today, 'open', Db::now(), Db::now()]
+    );
+    $pid = (int) Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at, updated_at) VALUES (?,?,?,?,?,?)',
+        [$clinicId, 'R99999', 'Free Patient', '+94 77 000 9999', Db::now(), Db::now()]
+    );
+    Db::insert(
+        'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status, priority,
+            sort_weight, source, joined_at, finished_at, track_token, version)
+         VALUES (?,?,?,?,?,?,1,0,?,?,?,?,0)',
+        [$clinicId, $freeQueue, $pid, 1, 'F001', 'completed', 'walkin', Db::now(), Db::now(), bin2hex(random_bytes(16))]
+    );
+
+    $rev2 = $service->revenue($clinicId, $today, $today);
+    Assert::same(4500.0, round($rev2['total'], 2), 'a visit with no fee adds nothing to the money');
+    Assert::same(4, $rev2['completed'], 'but is still counted as a visit');
+    Assert::same(['Dr. No Fee'], $rev2['missing_fee'], 'and the doctor is named, so the total is explainable');
+    Assert::same(1, count($rev2['by_day']), 'the daily series groups by day');
+    Assert::same(4500.0, round(array_values($rev2['by_day'])[0], 2), 'and its value matches the total');
+
+    // A range excluding the visits must report nothing, not last week's number.
+    $empty = $service->revenue($clinicId, '2020-01-01', '2020-01-02');
+    Assert::same(0.0, round($empty['total'], 2), 'an empty range reports zero');
+    Assert::same([], $empty['rows'], 'with no rows rather than a zero-filled fake');
+});
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

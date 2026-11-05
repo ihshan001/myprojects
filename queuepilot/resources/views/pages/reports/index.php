@@ -214,6 +214,80 @@ foreach ($byHour as $h) { $peak = max($peak, (int) $h['total']); }
   </div>
 </div>
 
+<!-- ==================== revenue ==================== -->
+<?php
+  $rev = $revenue ?? ['rows' => [], 'total' => 0.0, 'currency' => 'LKR', 'by_day' => [], 'missing_fee' => [], 'completed' => 0];
+  $revMax = 0.0;
+  foreach ($rev['by_day'] as $v) { $revMax = max($revMax, (float) $v); }
+?>
+<div class="card mt-5 overflow-hidden">
+  <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+    <p class="text-xs font-semibold text-slate-600">Consultation revenue</p>
+    <p class="text-[11px] text-slate-400"><?= (int) $rev['completed'] ?> completed visit(s)</p>
+  </div>
+
+  <div class="grid gap-4 p-4 sm:grid-cols-[auto_1fr]">
+    <div class="text-center sm:border-r sm:border-slate-100 sm:pr-5">
+      <p class="text-3xl font-black tracking-tight text-slate-900"><?= e(money((float) $rev['total'])) ?></p>
+      <p class="text-[10px] uppercase tracking-wide text-slate-500">billed at your fees</p>
+    </div>
+    <div>
+      <p class="text-[11px] leading-relaxed text-slate-600">
+        <b>This is what these consultations are worth at each doctor's fee — not what has been
+        collected.</b> QueuePilot does not take payments: money is handed over at the desk or by
+        transfer, and the system never sees it. Use this figure to reconcile a day's cash drawer,
+        not as a bank balance.
+      </p>
+      <?php if ((float) $rev['total'] <= 0.0): ?>
+        <p class="mt-2 text-[11px] leading-relaxed text-amber-700">
+          No fees are set, so there is nothing to add up. Set a consultation fee on each doctor
+          under Doctors, and this report starts working.
+        </p>
+      <?php endif; ?>
+      <?php if (($rev['missing_fee'] ?? []) !== []): ?>
+        <p class="mt-2 text-[11px] leading-relaxed text-amber-700">
+          <b>Excluded, because no fee is set:</b> <?= e(implode(', ', $rev['missing_fee'])) ?>.
+          Their visits are counted above but contribute nothing to the total.
+        </p>
+      <?php endif; ?>
+    </div>
+  </div>
+
+  <?php if ($revMax > 0): ?>
+    <div class="flex items-end gap-1 overflow-hidden border-t border-slate-100 px-4 pb-3 pt-4">
+      <?php foreach ($rev['by_day'] as $day => $amount): ?>
+        <div class="flex-1 min-w-0" title="<?= e((string) $day) ?>: <?= e(money((float) $amount)) ?>">
+          <div class="rounded-t bg-teal-500/80" style="height: <?= max(2, (int) round(((float) $amount / $revMax) * 48)) ?>px"></div>
+          <p class="mt-1 truncate text-center text-[9px] text-slate-400"><?= e(substr((string) $day, 8, 2)) ?>/<?= e(substr((string) $day, 5, 2)) ?></p>
+        </div>
+      <?php endforeach; ?>
+    </div>
+  <?php endif; ?>
+
+  <?php if ($rev['rows'] !== []): ?>
+    <table class="w-full border-t border-slate-100 text-left text-xs">
+      <thead class="bg-slate-50/60 text-[10px] uppercase tracking-wide text-slate-500">
+        <tr>
+          <th class="px-4 py-1.5 font-semibold">Doctor</th>
+          <th class="px-4 py-1.5 text-right font-semibold">Visits</th>
+          <th class="px-4 py-1.5 text-right font-semibold">Fee</th>
+          <th class="px-4 py-1.5 text-right font-semibold">Billed</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        <?php foreach ($rev['rows'] as $row): ?>
+          <tr>
+            <td class="px-4 py-1.5 text-slate-700"><?= e((string) $row['name']) ?></td>
+            <td class="px-4 py-1.5 text-right tabular-nums text-slate-600"><?= (int) $row['completed'] ?></td>
+            <td class="px-4 py-1.5 text-right tabular-nums text-slate-500"><?= e(money((float) ($row['consult_fee'] ?? 0))) ?></td>
+            <td class="px-4 py-1.5 text-right tabular-nums font-semibold text-slate-800"><?= e(money((float) $row['billed'])) ?></td>
+          </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  <?php endif; ?>
+</div>
+
 <!-- ==================== satisfaction ==================== -->
 <div class="card mt-5 overflow-hidden">
   <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">

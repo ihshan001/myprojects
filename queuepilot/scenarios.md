@@ -187,7 +187,7 @@ lint-clean, healthcheck all-good, all five demo logins re-checked).
 | CSV export for a spreadsheet | ✅ | Streamed, clinic-scoped |
 | **Staff activity report** | ✅ | **Built.** `/reports` actions-per-person from the audit log, with cancellations and no-shows surfaced in the same table. Gated to `clinic.manage` |
 | Patient satisfaction | ✅ | **Built.** Asked on the tracking link the patient is already watching, the moment the visit is marked complete — the only place this product has their attention. Five-point scale plus an optional separate **wait** rating and an optional note. Three refusals: a visit that has not finished cannot be rated (refused at the service boundary, not just hidden), one answer per visit (unique index on `entry_id`, so a double-tap cannot inflate the number), and anything older than a fortnight is declined because by then the answer is about the memory of the survey. The report leads with **response rate**, not the average — a 4.6 from four replies out of three hundred has taught nobody anything, and the screen says so under 10%. Verified live: rated a completed visit, was refused a second time, saw the section render with "1 answer from 16 completed visits · 6.3% replied" and the warning |
-| Revenue and payments | ◐ | Invoices are raised automatically on each renewal date (`tools/invoices.php`, one per clinic per period enforced by index), claimed with a reference by the clinic, and verified by a super admin. **There is no payment gateway** — money moves outside the system. That is a deliberate boundary, not an omission |
+| Revenue and payments | ✅ | **The subscription side.** Invoices are raised automatically on each renewal date (`tools/invoices.php`, one per clinic per period enforced by index), claimed with a reference by the clinic, and verified by a super admin. **Patient-side revenue is now reported too**: `/reports` adds up completed consultations at each doctor's own `consult_fee`, per doctor and per day, with the visit count beside it. The report is explicit that this is **billed, not collected** — the system never sees the money, so a manager uses it to reconcile a cash drawer, not as a bank balance. A doctor with no fee is named under "excluded" rather than silently contributing zero, so the total is always explainable. Only `completed` visits count; called-but-unfinished and cancelled earn nothing. Verified live: Rs 106,000 across 26 completed visits in the demo range. **There is still no payment gateway, and this does not pretend to be one** — card, wallet, refunds and tax are separate scenarios below and remain unbuilt |
 
 ## 14. Data, privacy and operations
 
@@ -311,12 +311,12 @@ first clinic goes live — the automated suite does not replace it.
 | 10. Accounts, onboarding and access | 10 | 0 | 0 | 0 |
 | 11. Multi-tenancy and organisations | 7 | 0 | 0 | 0 |
 | 12. Doctors and scheduling | 7 | 0 | 0 | 1 |
-| 13. Reporting | 9 | 1 | 0 | 0 |
+| 13. Reporting | 10 | 0 | 0 | 0 |
 | 14. Data, privacy and operations | 8 | 0 | 0 | 1 |
 | 15. Money | 2 | 0 | 3 | 0 |
 | 16. Hardware and physical space | 5 | 0 | 0 | 0 |
 | 17. Other verticals | 5 | 0 | 3 | 0 |
-| **Total (122 scenarios)** | **112** | **1** | **7** | **2** |
+| **Total (122 scenarios)** | **113** | **0** | **7** | **2** |
 
 **What is genuinely finished.** The queue engine holds up under adversarial
 input: issuing, calling, transferring, prioritising, pausing, closing,

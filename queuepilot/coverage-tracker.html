@@ -82,7 +82,7 @@
     <div class="bar-inner">
       <div class="progress">
         <div class="progress-top">
-          <span><b id="doneCount">0</b> / 127 reviewed</span>
+          <span><b id="doneCount">0</b> / 128 reviewed</span>
           <span><b id="pct">0%</b></span>
         </div>
         <div class="track"><div class="fill" id="fill"></div></div>
@@ -113,7 +113,7 @@
   </div>
 
   <div class="legend">
-    <span><i class="dot built"></i> 123 built</span>
+    <span><i class="dot built"></i> 124 built</span>
     <span><i class="dot partial"></i> 4 partial</span>
     <span><i class="dot missing"></i> 0 not built</span>
   </div>
@@ -1024,6 +1024,14 @@
         </label>
         <p class="note">Asked on the tracking link the patient is already watching, the moment the visit is marked complete. Five-point scale, an optional separate <b>wait</b> rating, an optional note. A waiting visit cannot be rated (refused at the service boundary, not merely hidden), one answer per visit via a unique index on <code>entry_id</code>, and anything older than a fortnight is declined. The report leads with <b>response rate</b> rather than the average, and says so under 10% — verified live: "1 answer from 16 completed visits · 6.3% replied" with the warning rendered beside it.</p>
       </li>
+      <li class="item" data-status="built">
+        <label class="row">
+          <input type="checkbox" class="tick" data-id="Reports and analytics|Consultation revenue">
+          <span class="name">Consultation revenue</span>
+          <span class="pill built">Built</span>
+        </label>
+        <p class="note">Completed consultations added up at each doctor's own <code>consult_fee</code>, per doctor and per day, with the visit count beside the money. The report says <b>billed, not collected</b> in those words — QueuePilot never sees the money, so this reconciles a cash drawer, it is not a bank balance. A doctor with no fee is named under "excluded" instead of silently adding zero, so the total is always explainable. Only <code>completed</code> visits count; called-but-unfinished and cancelled earn nothing. <b>Not a payment gateway</b> — card, wallet, refunds and tax remain separate unbuilt items.</p>
+      </li>
     </ul>
   </section>
   <section class="group" data-group="Security and reliability">
@@ -1158,7 +1166,7 @@
           <span class="name">Security testing</span>
           <span class="pill partial">Partial</span>
         </label>
-        <p class="note">245 automated checks, adversarial curl probes each session, and <code>npm run security</code> — a standing check of dependency advisories (136 packages, 0 known), runtime settings, secrets in the tree, every unauthenticated route, and whether a finished notification still holds a patient's number. It found a real leak while being written. <strong>Still no external penetration test — that is a person's engagement, not code.</strong></p>
+        <p class="note">246 automated checks, adversarial curl probes each session, and <code>npm run security</code> — a standing check of dependency advisories (136 packages, 0 known), runtime settings, secrets in the tree, every unauthenticated route, and whether a finished notification still holds a patient's number. It found a real leak while being written. <strong>Still no external penetration test — that is a person's engagement, not code.</strong></p>
       </li>
     </ul>
   </section>
@@ -1229,7 +1237,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (245 automated checks, 179 files lint-clean, healthcheck green).
+    application (246 automated checks, 179 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.

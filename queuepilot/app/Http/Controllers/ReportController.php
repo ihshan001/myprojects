@@ -47,6 +47,9 @@ final class ReportController
             'staffActivity' => Auth::can('clinic.manage') ? $service->staffActivity($clinicId, $from, $to) : [],
             'delays' => $service->delays($clinicId, $from, $to),
             'waits' => $service->waitPercentiles($clinicId, $from, $to),
+            // Billed, not collected: the system knows each doctor's fee and
+            // never sees the money. The view is careful with that word.
+            'revenue' => $service->revenue($clinicId, $from, $to),
         ]);
     }
 
