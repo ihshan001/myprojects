@@ -655,6 +655,23 @@ final class ClinicController
         redirect('/settings');
     }
 
+    /** The reconciliation report: blocks held, numbers used, what is outstanding. */
+    public function offline(): void
+    {
+        $clinicId = $this->clinicId();
+        $service = new \App\Services\OfflineService();
+
+        view('settings/offline', [
+            'title' => 'Offline desks',
+            'queues' => Db::all(
+                "SELECT id, name, token_prefix, token_padding, status FROM queues
+                 WHERE clinic_id = ? AND status = 'open' ORDER BY name",
+                [$clinicId]
+            ),
+            'report' => $service->outstanding($clinicId),
+        ]);
+    }
+
     /** The export page: what is in the archive, what is left out, and why. */
     public function export(): void
     {

@@ -82,7 +82,7 @@
     <div class="bar-inner">
       <div class="progress">
         <div class="progress-top">
-          <span><b id="doneCount">0</b> / 126 reviewed</span>
+          <span><b id="doneCount">0</b> / 127 reviewed</span>
           <span><b id="pct">0%</b></span>
         </div>
         <div class="track"><div class="fill" id="fill"></div></div>
@@ -113,7 +113,7 @@
   </div>
 
   <div class="legend">
-    <span><i class="dot built"></i> 122 built</span>
+    <span><i class="dot built"></i> 123 built</span>
     <span><i class="dot partial"></i> 4 partial</span>
     <span><i class="dot missing"></i> 0 not built</span>
   </div>
@@ -1114,6 +1114,14 @@
       </li>
       <li class="item" data-status="built">
         <label class="row">
+          <input type="checkbox" class="tick" data-id="Security and reliability|Offline token issuing">
+          <span class="name">Offline token issuing</span>
+          <span class="pill built">Built</span>
+        </label>
+        <p class="note">The numbering is settled <i>before</i> the connection is needed: <code>/settings/offline</code> sets aside a block of numbers out of the same counter live tokens come from, so nothing online can be issued them. With the line down the desk issues from the block and the patient gets a real number on a real slip. On reconnect the reservations replay through the ordinary issue path, so an offline token obeys every rule an online one does. <b>Reconciliation is an insert with a unique key, not a merge</b> — each reservation carries an id the database accepts once, so a retry, a second tab or a reload all produce one patient and one entry (verified by replaying an identical payload → <code>duplicate</code>, same entry id). Arrival times are backdated to the paper slip, so an offline morning does not re-queue behind everyone who arrived online. Refusals are explicit: a number nobody set aside, a missing reservation id, and another clinic's block are all rejected and nothing is written. Honest limit: no SMS tracking link until it syncs, and the desk screen says exactly that.</p>
+      </li>
+      <li class="item" data-status="built">
+        <label class="row">
           <input type="checkbox" class="tick" data-id="Security and reliability|Outage monitoring">
           <span class="name">Outage monitoring</span>
           <span class="pill built">Built</span>
@@ -1150,7 +1158,7 @@
           <span class="name">Security testing</span>
           <span class="pill partial">Partial</span>
         </label>
-        <p class="note">243 automated checks, adversarial curl probes each session, and <code>npm run security</code> — a standing check of dependency advisories (136 packages, 0 known), runtime settings, secrets in the tree, every unauthenticated route, and whether a finished notification still holds a patient's number. It found a real leak while being written. <strong>Still no external penetration test — that is a person's engagement, not code.</strong></p>
+        <p class="note">245 automated checks, adversarial curl probes each session, and <code>npm run security</code> — a standing check of dependency advisories (136 packages, 0 known), runtime settings, secrets in the tree, every unauthenticated route, and whether a finished notification still holds a patient's number. It found a real leak while being written. <strong>Still no external penetration test — that is a person's engagement, not code.</strong></p>
       </li>
     </ul>
   </section>
@@ -1221,7 +1229,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (243 automated checks, 177 files lint-clean, healthcheck green).
+    application (245 automated checks, 179 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.

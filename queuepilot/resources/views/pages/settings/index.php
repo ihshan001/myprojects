@@ -269,6 +269,7 @@
           <li>· Every export is recorded in the audit log.</li>
         </ul>
         <a href="/settings/export" class="btn-secondary mt-3 w-full text-xs">Export clinic data →</a>
+        <a href="/settings/offline" class="btn-ghost mt-2 w-full text-xs">Offline desks →</a>
       </div>
     <?php endif; ?>
 

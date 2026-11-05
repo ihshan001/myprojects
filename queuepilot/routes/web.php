@@ -269,6 +269,13 @@ Router::post('/admin/billing/{id}/reject', [AdminBillingController::class, 'reje
 /* ------------------------------------------------------------- JSON API */
 Router::get('/api/queue/board', [ApiController::class, 'board'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/api/queue/action', [ApiController::class, 'action'], ['auth' => true, 'ability' => 'queue.operate']);
+// Offline writes. A block of ticket numbers is set aside while the connection
+// is up; the desk issues from it without a connection and replays the
+// reservations on reconnect. Both need queue.issue — the same permission as
+// the desk form — because that is what they are doing.
+Router::post('/api/queue/offline/block', [ApiController::class, 'reserveOfflineBlock'], ['auth' => true]);
+Router::post('/api/queue/offline/sync', [ApiController::class, 'reconcileOffline'], ['auth' => true]);
+Router::get('/settings/offline', [ClinicController::class, 'offline'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::get('/api/track/{token}', [ApiController::class, 'track']);
 Router::get('/api/display/{key}', [ApiController::class, 'display']);
 Router::get('/board/{key}', [DisplayController::class, 'publicScreen']);

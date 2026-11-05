@@ -18,7 +18,7 @@
  * banner and the Live pill) tells the truth about it.
  */
 
-const VERSION = 'qp-v1';
+const VERSION = 'qp-v2';
 const SHELL = 'qp-shell-' + VERSION;
 const PAGES = 'qp-pages-' + VERSION;
 

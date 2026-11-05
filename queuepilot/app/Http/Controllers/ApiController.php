@@ -19,6 +19,16 @@ use App\Domain\Queue\QueueStateMachine;
  */
 final class ApiController
 {
+    /** CSRF for JSON endpoints, which carry the token in a header. */
+    private function checkApiCsrf(): void
+    {
+        $payload = Request::payload();
+        $headerToken = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? null;
+        if (!\App\Core\Csrf::check($payload['_token'] ?? $headerToken)) {
+            json(['ok' => false, 'error' => 'csrf_expired', 'message' => 'Your session expired. Reload the page.'], 419);
+        }
+    }
+
     public function board(): void
     {
         $clinicId = Auth::clinicId();
@@ -138,10 +148,8 @@ final class ApiController
         }
 
         $payload = Request::payload();
-
         // JSON requests carry the CSRF token in a header rather than a field
-        $headerToken = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? null;
-        if (!\App\Core\Csrf::check($payload['_token'] ?? $headerToken)) {
+        if (!\App\Core\Csrf::check($payload['_token'] ?? ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? null))) {
             json(['ok' => false, 'error' => 'csrf_expired', 'message' => 'Your session expired. Reload the page.'], 419);
             return;
         }
@@ -190,6 +198,76 @@ final class ApiController
             : (!empty($result['forbidden']) ? 403
                 : (!empty($result['stale']) ? 409 : 422));
         json($result, $status);
+    }
+
+    /**
+     * Set aside a block of ticket numbers for a desk that may go offline.
+     *
+     * The point of doing this on the server, while the connection is up, is
+     * that numbering stays the server's job. A browser that invents its own
+     * numbers produces two patients holding A031, and the clinic finds out at
+     * the door.
+     */
+    public function reserveOfflineBlock(): void
+    {
+        $clinicId = Auth::clinicId();
+        if ($clinicId === null) {
+            json(['ok' => false, 'error' => 'unauthenticated'], 401);
+            return;
+        }
+        $this->checkApiCsrf();
+        if (!Auth::can('queue.issue')) {
+            json(['ok' => false, 'error' => 'forbidden', 'message' => 'Your role cannot issue tokens.'], 403);
+            return;
+        }
+
+        $payload = Request::payload();
+        $queueId = (int) ($payload['queue_id'] ?? 0);
+        $size = (int) ($payload['size'] ?? 10);
+        if ($queueId <= 0) {
+            json(['ok' => false, 'error' => 'bad_request', 'message' => 'Choose a queue first.'], 422);
+            return;
+        }
+
+        $result = (new \App\Services\OfflineService())->reserveBlock($clinicId, $queueId, $size, Auth::id());
+        json($result, $result['ok'] ? 200 : 422);
+    }
+
+    /**
+     * Replay the reservations a desk made while it was offline.
+     *
+     * Idempotent: the same payload twice produces one patient and one ticket,
+     * because each reservation id is unique in the database. That is also why
+     * the browser may retry as often as it likes.
+     */
+    public function reconcileOffline(): void
+    {
+        $clinicId = Auth::clinicId();
+        if ($clinicId === null) {
+            json(['ok' => false, 'error' => 'unauthenticated'], 401);
+            return;
+        }
+        $this->checkApiCsrf();
+        if (!Auth::can('queue.issue')) {
+            json(['ok' => false, 'error' => 'forbidden', 'message' => 'Your role cannot issue tokens.'], 403);
+            return;
+        }
+
+        $payload = Request::payload();
+        $items = $payload['items'] ?? [];
+        if (!is_array($items)) {
+            json(['ok' => false, 'error' => 'bad_request', 'message' => 'Nothing to sync.'], 422);
+            return;
+        }
+        if (count($items) > 200) {
+            // A backlog larger than this is a morning of paper, not a browser
+            // queue; refusing beats a minute-long request that times out and
+            // gets retried forever.
+            json(['ok' => false, 'error' => 'too_many', 'message' => 'Sync at most 200 reservations at a time.'], 422);
+            return;
+        }
+
+        json((new \App\Services\OfflineService())->reconcile($clinicId, $items));
     }
 
     /** Public patient tracking. Rate-limited, minimal fields, no PII. */

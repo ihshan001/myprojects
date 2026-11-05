@@ -4555,6 +4555,129 @@ Assert::test('the export refuses politely rather than writing a half archive', f
 });
 
 /* ------------------------------------------------------------------ */
+/* 65. Offline writes and reconciliation                               */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a desk can issue real tokens with no connection and sync them once', function (): void {
+    $clinicId = 112;
+    seedTenant($clinicId, 'offline', 'Offline Clinic');
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = ? ORDER BY id LIMIT 1', [$clinicId]);
+    $service = new App\Services\OfflineService();
+
+    // The whole scheme rests on this: numbers are set aside BEFORE the line
+    // drops, out of the same counter live tokens come from.
+    $block = $service->reserveBlock($clinicId, $queueId, 3, null);
+    Assert::true($block['ok'], 'a block of numbers can be set aside');
+    Assert::same(3, count($block['labels']), 'three usable numbers came back');
+    Assert::same(
+        $block['to'],
+        (int) Db::scalar('SELECT last_token_no FROM queues WHERE id = ?', [$queueId]),
+        'the counter moved past the block, so nothing online can be issued those numbers'
+    );
+
+    // A live token issued now must be outside the block.
+    $patientA = (int) Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at, updated_at) VALUES (?,?,?,?,?,?)',
+        [$clinicId, 'O001', 'Online Patient', '+94 77 100 0001', Db::now(), Db::now()]
+    );
+    $online = (new App\Domain\Queue\QueueService())->issueToken($clinicId, $queueId, $patientA);
+    Assert::true(
+        (int) $online['token_no'] > $block['to'],
+        'an online token skips the block entirely — the numbers cannot collide'
+    );
+
+    // Now the desk is offline: it uses the middle number of the block.
+    $offlineNo = $block['from'] + 1;
+    $items = [[
+        'reservation' => 'offline-test-0001',
+        'queue_id'    => $queueId,
+        'token_no'    => $offlineNo,
+        'patient_name' => 'Offline Walk In',
+        'patient_phone' => '+94 77 200 0002',
+        'joined_at'   => date('Y-m-d H:i:s', time() - 3600),
+    ]];
+
+    $first = $service->reconcile($clinicId, $items)['results'][0];
+    Assert::same('applied', $first['status'], 'the offline reservation becomes a real visit on reconnect');
+    Assert::same(
+        $block['prefix'] . str_pad((string) $offlineNo, (int) Db::scalar('SELECT token_padding FROM queues WHERE id = ?', [$queueId]), '0', STR_PAD_LEFT),
+        $first['token'],
+        'the token the patient is holding is the one recorded, not the counter value'
+    );
+
+    $entry = Db::one('SELECT * FROM queue_entries WHERE id = ?', [(int) $first['entry_id']]);
+    Assert::same(App\Domain\Queue\QueueStateMachine::WAITING, (string) $entry['status'], 'the visit is waiting, like any other');
+    Assert::same((string) $entry['joined_at'], (string) $entry['joined_at'], 'sanity');
+    Assert::true(
+        strtotime((string) $entry['joined_at']) < time() - 3000,
+        'it is recorded as having arrived an hour ago, not at the moment the line came back'
+    );
+
+    // The browser retried because the connection dropped mid-response.
+    $again = $service->reconcile($clinicId, $items)['results'][0];
+    Assert::same('duplicate', $again['status'], 'a replay is recognised rather than repeated');
+    Assert::same((int) $first['entry_id'], (int) $again['entry_id'], 'and points at the same visit');
+    Assert::same(
+        1,
+        (int) Db::scalar("SELECT COUNT(*) FROM queue_entries e JOIN patients p ON p.id = e.patient_id WHERE p.full_name = 'Offline Walk In'"),
+        'the patient was not entered twice — the whole point of a reservation id'
+    );
+    Assert::same(1, (int) Db::scalar('SELECT COUNT(*) FROM patients WHERE clinic_id = ? AND full_name = ?', [$clinicId, 'Offline Walk In']),
+        'and was not registered twice either');
+});
+
+Assert::test('an offline token invented by the browser is refused, not guessed at', function (): void {
+    $clinicId = 113;
+    seedTenant($clinicId, 'offline2', 'Offline Clinic Two');
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = ? ORDER BY id LIMIT 1', [$clinicId]);
+    $service = new App\Services\OfflineService();
+    $block = $service->reserveBlock($clinicId, $queueId, 2, null);
+
+    // A number outside the block is the dangerous case: it looks valid, and it
+    // is exactly what a browser with stale storage would send.
+    $outside = $service->reconcile($clinicId, [[
+        'reservation' => 'offline-fake-001',
+        'queue_id'    => $queueId,
+        'token_no'    => $block['to'] + 500,
+        'patient_name' => 'Made Up',
+    ]])['results'][0];
+    Assert::same('refused', $outside['status'], 'a number nobody set aside is refused');
+    Assert::contains('never set aside', (string) $outside['message'], 'and the sentence says why');
+    Assert::same(0, (int) Db::scalar('SELECT COUNT(*) FROM patients WHERE clinic_id = ? AND full_name = ?', [$clinicId, 'Made Up']),
+        'no patient record was created for a token that does not exist');
+
+    // Without a reservation id there is no way to dedupe, so it must not be
+    // accepted on trust.
+    $noId = $service->reconcile($clinicId, [[
+        'reservation' => 'abc',
+        'queue_id'    => $queueId,
+        'token_no'    => $block['from'],
+        'patient_name' => 'No Id',
+    ]])['results'][0];
+    Assert::same('refused', $noId['status'], 'a too-short reservation id is refused');
+
+    // A block from another clinic must not be usable here. The number has to
+    // be outside this clinic's own block, or the test proves nothing — two
+    // fresh clinics both start counting at 1, so a naive pick lands inside
+    // both windows and is legitimately valid here.
+    seedTenant(114, 'offline3', 'Offline Clinic Three');
+    $otherQueue = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 114 LIMIT 1');
+    $crossBlock = $service->reserveBlock(114, $otherQueue, 10, null);
+    Assert::true($crossBlock['to'] > $block['to'], 'the other clinic\'s block extends past this one, so the number is unambiguous');
+    $cross = $service->reconcile($clinicId, [[
+        'reservation' => 'offline-cross-01',
+        'queue_id'    => $queueId,
+        'token_no'    => $crossBlock['to'],
+        'patient_name' => 'Cross Clinic',
+    ]])['results'][0];
+    Assert::same('refused', $cross['status'], 'another clinic\'s block is not a valid source of numbers');
+
+    // And the report a manager reads must count what was left unused.
+    $report = $service->outstanding($clinicId);
+    Assert::true(count($report['blocks']) >= 1, 'the block appears in the reconciliation report');
+    Assert::same(2, (int) $report['unused'], 'with both numbers still counted as usable');
+});
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

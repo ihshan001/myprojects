@@ -35,6 +35,11 @@
 
   /* --------------------------------------------------------- api helper */
   async function api(url, { method = 'GET', body = null, timeout = 12000 } = {}) {
+    // Failing immediately is the right answer offline: a clinic waiting on a
+    // 12-second timeout before being told to use the paper pad is twelve
+    // seconds of a queue not moving. Callers that can work offline catch this
+    // and switch; the rest get one clear sentence.
+    if (!navigator.onLine) throw new Error('No connection. This action needs the server.');
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeout);
     try {
@@ -531,4 +536,207 @@
 
   window.addEventListener('offline', () => toast('You are offline. The board will refresh when the connection returns.', 'warn', 6000));
   window.addEventListener('online', () => toast('Back online', 'success', 2000));
+})();
+
+/* ============================================================ offline desk */
+/**
+ * Issue tokens when the connection is down.
+ *
+ * This is the browser half of the scheme in `App\Services\OfflineService`:
+ * numbers are set aside on the server while the line is up, and consumed here
+ * when it is not. The localStorage key is a small ledger:
+ *
+ *     blocks:  [{ block_id, queue_id, from, to, prefix, padding, labels }]
+ *     used:    [{ reservation, queue_id, token_no, token_label, patient_name,
+ *                 patient_phone, joined_at }]
+ *
+ * A number is removed from `blocks` the instant it is used and pushed onto
+ * `used`, so the same number cannot be handed to two patients even if two tabs
+ * are open on the same machine (localStorage is shared and the write is
+ * synchronous). `reservation` is a random id made at the moment of issue —
+ * that is the value the server deduplicates on, which is why syncing twice is
+ * harmless.
+ *
+ * What this deliberately does NOT do: invent numbers. If there is no block,
+ * the desk is told to use paper. A made-up number is worse than no token,
+ * because it looks valid.
+ */
+(function offlineDesk() {
+  const root = document.querySelector('[data-offline-desk]');
+  if (!root) return;
+
+  const KEY = 'qp.offline.v1';
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+  const read = () => {
+    try {
+      return JSON.parse(localStorage.getItem(KEY) || '{"blocks":[],"used":[]}');
+    } catch {
+      return { blocks: [], used: [] };
+    }
+  };
+  const write = (state) => {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* private mode */ }
+  };
+
+  const byQueue = (state, queueId) => state.blocks.filter((b) => Number(b.queue_id) === Number(queueId));
+  const available = (state, queueId) => byQueue(state, queueId).reduce((n, b) => n + b.labels.length, 0);
+
+  function render() {
+    const state = read();
+    root.querySelectorAll('[data-offline-available]').forEach((el) => {
+      const q = el.getAttribute('data-offline-available');
+      el.textContent = String(available(state, q));
+    });
+    const pending = state.used.length;
+    const badge = root.querySelector('[data-offline-pending]');
+    if (badge) {
+      badge.textContent = pending === 0 ? 'Nothing waiting to sync' : `${pending} token${pending === 1 ? '' : 's'} waiting to sync`;
+      badge.classList.toggle('text-amber-700', pending > 0);
+    }
+    const syncBtn = root.querySelector('[data-offline-sync]');
+    if (syncBtn) syncBtn.disabled = pending === 0 || !navigator.onLine;
+  }
+
+  /* -------------------------------------------------------- take a block */
+  root.querySelectorAll('[data-offline-take]').forEach((form) => {
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const btn = form.querySelector('button');
+      const size = Number(form.querySelector('[name=size]').value || 10);
+      const queueId = Number(form.querySelector('[name=queue_id]').value);
+      btn.disabled = true;
+      try {
+        const res = await window.qpApi('/api/queue/offline/block', { method: 'POST', body: { queue_id: queueId, size } });
+        const state = read();
+        state.blocks.push({
+          block_id: res.block_id, queue_id: queueId, from: res.from, to: res.to,
+          prefix: res.prefix, padding: res.padding, labels: res.labels, expires_at: res.expires_at,
+        });
+        write(state);
+        render();
+        window.qpToast?.(`${res.labels.length} numbers set aside for this queue. You can go offline now.`, 'success', 5000);
+      } catch (err) {
+        window.qpToast?.(err.message || 'Could not set numbers aside.', 'error', 7000);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+
+  /* ------------------------------------------------------ issue offline */
+  root.querySelectorAll('[data-offline-issue]').forEach((form) => {
+    form.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const queueId = Number(form.querySelector('[name=queue_id]').value);
+      const name = form.querySelector('[name=patient_name]').value.trim();
+      const phone = form.querySelector('[name=patient_phone]').value.trim();
+      if (!name) {
+        window.qpToast?.('Type the patient\'s name — an offline token needs one.', 'error', 5000);
+        return;
+      }
+
+      const state = read();
+      const block = byQueue(state, queueId).find((b) => b.labels.length > 0);
+      if (!block) {
+        window.qpToast?.('No numbers are set aside for this queue. Use the paper pad and enter them when the line is back.', 'error', 8000);
+        return;
+      }
+
+      // `labels` are the finished slips — "A023" — exactly as the server
+      // built them. The numeric part is what gets reconciled against a block,
+      // so it is kept alongside the label rather than recomputed from it.
+      const label = String(block.labels.shift());
+      const numeric = Number(label.replace(/\D/g, ''));
+      if (!numeric) {
+        window.qpToast?.('That block is unreadable. Take a fresh one while you have a connection.', 'error', 8000);
+        return;
+      }
+
+      const reservation = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(36).slice(2)).replace(/-/g, '');
+      state.used.push({
+        reservation, queue_id: queueId, token_no: numeric,
+        token_label: label, patient_name: name, patient_phone: phone || null,
+        joined_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      });
+      if (block.labels.length === 0) {
+        state.blocks = state.blocks.filter((b) => b.block_id !== block.block_id);
+      }
+      write(state);
+      render();
+
+      form.querySelector('[name=patient_name]').value = '';
+      form.querySelector('[name=patient_phone]').value = '';
+
+      const out = root.querySelector('[data-offline-slip]');
+      if (out) {
+        out.innerHTML = '';
+        const wrap = document.createElement('div');
+        wrap.className = 'rounded-xl border-2 border-slate-900 bg-white p-4 text-center';
+        const num = document.createElement('p');
+        num.className = 'text-3xl font-black tracking-tight text-slate-900';
+        num.textContent = label;
+        const who = document.createElement('p');
+        who.className = 'mt-1 text-xs text-slate-600';
+        who.textContent = name;
+        const note = document.createElement('p');
+        note.className = 'mt-2 text-[10px] leading-relaxed text-amber-700';
+        note.textContent = 'Offline token — no SMS link until it syncs. Keep this slip.';
+        wrap.append(num, who, note);
+        out.appendChild(wrap);
+      }
+      window.qpToast?.(`${label} issued to ${name}.`, 'success', 5000);
+    });
+  });
+
+  /* ------------------------------------------------------------- sync */
+  async function sync() {
+    const state = read();
+    if (state.used.length === 0) return;
+    try {
+      const res = await window.qpApi('/api/queue/offline/sync', { method: 'POST', body: { items: state.used } });
+      // Only remove what the server accepted or already had. A refusal stays
+      // in the ledger so somebody can look at it with the patient in front of
+      // them — silently dropping a refused token loses the only record.
+      const settled = new Set();
+      (res.results || []).forEach((r) => {
+        if (r.status === 'applied' || r.status === 'duplicate') settled.add(r.reservation);
+      });
+      const latest = read();
+      latest.used = latest.used.filter((u) => !settled.has(u.reservation));
+      write(latest);
+      render();
+
+      const refused = (res.results || []).filter((r) => r.status === 'refused');
+      if (refused.length) {
+        window.qpToast?.(`${refused.length} offline token${refused.length === 1 ? '' : 's'} could not be synced. Open the reconciliation report.`, 'error', 9000);
+      } else if (settled.size) {
+        window.qpToast?.(`${settled.size} offline token${settled.size === 1 ? '' : 's'} synced.`, 'success', 5000);
+      }
+    } catch (err) {
+      window.qpToast?.(err.message || 'Sync failed — the tokens are still saved and will retry.', 'error', 7000);
+    }
+  }
+  window.qpOfflineSync = sync;
+
+  root.querySelector('[data-offline-sync]')?.addEventListener('click', sync);
+  window.addEventListener('online', () => {
+    // Auto-sync the moment the connection returns, then refresh the page so
+    // the board shows what the server now knows.
+    sync().then(() => setTimeout(() => { if (navigator.onLine) window.location.reload(); }, 600));
+  });
+
+  const netPill = root.querySelector('[data-offline-net]');
+  const paintNet = () => {
+    if (!netPill) return;
+    const on = navigator.onLine;
+    netPill.textContent = on ? 'Online' : 'Offline — issuing from the block';
+    netPill.className = on
+      ? 'rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700'
+      : 'rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800';
+  };
+  window.addEventListener('online', paintNet);
+  window.addEventListener('offline', paintNet);
+  paintNet();
+  render();
 })();
