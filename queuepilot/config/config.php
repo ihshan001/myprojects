@@ -42,6 +42,35 @@ return [
         'login_window_min'    => 10,
         'track_token_bytes'   => 24,
         'track_token_hours'   => 18,
+        // Step-up authentication and invitations
+        'totp_max_attempts'   => 5,
+        'invite_hours'        => 72,
+        // Rate limits that protect public surfaces (per minute unless stated)
+        'display_key_per_min' => 90,
+        'display_key_per_day' => 20000,
+        'track_token_per_min' => 30,
+        'booking_per_min'     => 8,
+        'api_action_per_min'  => 120,
+    ],
+    'monitor' => [
+        // Bearer token for GET /api/health. Empty => endpoint is closed to
+        // anonymous callers entirely.
+        'token' => getenv('MONITOR_TOKEN') ?: '',
+    ],
+    'backup' => [
+        // A backup older than this is treated as a failure, not a nuisance.
+        'max_age_hours' => (int) (getenv('BACKUP_MAX_AGE_HOURS') ?: 48),
+    ],
+    'mail' => [
+        // none | log | smtp — "none" means invitations are shown to the admin
+        // to pass on by hand rather than silently pretending they were sent.
+        'transport'  => getenv('MAIL_TRANSPORT') ?: 'none',
+        'host'       => getenv('MAIL_HOST') ?: '',
+        'port'       => (int) (getenv('MAIL_PORT') ?: 587),
+        'username'   => getenv('MAIL_USERNAME') ?: '',
+        'password'   => getenv('MAIL_PASSWORD') ?: '',
+        'encryption' => getenv('MAIL_ENCRYPTION') ?: 'tls',
+        'from'       => getenv('MAIL_FROM') ?: 'no-reply@queuepilot.local',
     ],
     'queue' => [
         // default policy; clinics can override per-workspace

@@ -174,21 +174,18 @@ final class PublicController
             return;
         }
 
-        $doctors = Db::all(
-            'SELECT d.id, d.name, d.avg_consult_minutes, s.name AS specialty, r.name AS room_name
-               FROM doctors d
-               LEFT JOIN specialties s ON s.id = d.specialty_id
-               LEFT JOIN rooms r ON r.id = d.room_id
-              WHERE d.clinic_id = ? AND d.is_active = 1
-              ORDER BY d.name',
-            [(int) $clinic['id']]
-        );
+        $date = Request::string('date', date('Y-m-d', strtotime('+1 day')));
+        // A doctor on leave is shown but not selectable, with the reason
+        // visible. Hiding the row entirely would make a patient think the
+        // doctor no longer works here.
+        $doctorService = new \App\Services\DoctorService();
+        $doctors = $doctorService->bookable((int) $clinic['id'], $date);
 
         view('book/form', [
             'title' => 'Book an appointment · ' . $clinic['name'],
             'clinicRecord' => $clinic,
             'doctors' => $doctors,
-            'date' => Request::string('date', date('Y-m-d', strtotime('+1 day'))),
+            'date' => $date,
             'error' => null,
         ], false);
     }
@@ -202,6 +199,16 @@ final class PublicController
         }
         $clinicId = (int) $clinic['id'];
 
+        // Booking is unauthenticated by design, so the only defence against a
+        // script filling a doctor's day is a rate limit. Per IP, generous
+        // enough for a family booking three appointments, tight enough that
+        // one host cannot create hundreds.
+        \App\Core\RateLimiter::enforce(
+            'booking:ip:' . Request::ip(),
+            (int) \App\Core\Env::get('security.booking_per_min', 8),
+            60
+        );
+
         $doctorId = Request::int('doctor_id');
         $name = trim(Request::string('full_name'));
         $phone = trim(Request::string('phone'));
@@ -209,13 +216,7 @@ final class PublicController
         $time = Request::string('time', '09:00');
 
         $fail = function (string $message) use ($clinic, $slug, $date): void {
-            $doctors = Db::all(
-                'SELECT d.id, d.name, d.avg_consult_minutes, s.name AS specialty, r.name AS room_name
-                   FROM doctors d LEFT JOIN specialties s ON s.id = d.specialty_id
-                   LEFT JOIN rooms r ON r.id = d.room_id
-                  WHERE d.clinic_id = ? AND d.is_active = 1 ORDER BY d.name',
-                [(int) $clinic['id']]
-            );
+            $doctors = (new \App\Services\DoctorService())->bookable((int) $clinic['id'], $date);
             http_response_code(422);
             view('book/form', [
                 'title' => 'Book an appointment · ' . $clinic['name'],
@@ -244,6 +245,12 @@ final class PublicController
         }
         if (preg_match('/^\d{2}:\d{2}$/', $time) !== 1) {
             $fail('Choose a time.');
+            return;
+        }
+        // Leave is checked here and not only in the form: the form is a
+        // suggestion, the POST is the request of record.
+        if ((new \App\Services\DoctorService())->isOnLeave($clinicId, $doctorId, $date)) {
+            $fail('That doctor is on leave on ' . $date . '. Choose another day or another doctor.');
             return;
         }
 

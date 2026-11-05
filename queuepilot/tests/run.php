@@ -365,6 +365,36 @@ Assert::test('a transfer must name a destination', function () use ($service): v
     Assert::contains('queue', strtolower((string) $res['message']), 'message explains it');
 });
 
+Assert::test('patient codes survive a deletion (no reuse collision)', function () use ($alphaQueue): void {
+    $ps = new App\Services\PatientService();
+
+    // create three, delete the newest, then create another: the old
+    // COUNT(*)+1 scheme would collide here and break registration entirely
+    $a = $ps->findOrCreate(1, ['full_name' => 'Code A', 'phone' => '0770000101']);
+    $b = $ps->findOrCreate(1, ['full_name' => 'Code B', 'phone' => '0770000102']);
+    $c = $ps->findOrCreate(1, ['full_name' => 'Code C', 'phone' => '0770000103']);
+    Db::run('DELETE FROM patients WHERE id = ?', [(int) $c['id']]);
+
+    $d = $ps->findOrCreate(1, ['full_name' => 'Code D', 'phone' => '0770000104']);
+    Assert::true($d['id'] > 0, 'registration still works after a delete');
+    Assert::true($d['code'] !== $b['code'], 'new code does not reuse a live one');
+    Assert::same(1, (int) Db::scalar('SELECT COUNT(*) FROM patients WHERE clinic_id = 1 AND code = ?', [$d['code']]), 'code is unique');
+});
+
+Assert::test('every patient code in a clinic is unique', function (): void {
+    $rows = Db::all('SELECT code, COUNT(*) AS n FROM patients WHERE clinic_id = 1 GROUP BY code HAVING n > 1');
+    Assert::same([], $rows, 'no duplicate codes');
+});
+
+Assert::test('the receipt for a token is a GET, so a refresh cannot reissue', function (): void {
+    // This is a routing contract: the issue endpoint must not render a receipt
+    // directly from the POST, or refreshing mints a second token.
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    Assert::contains("/queue/token-issued", $routes, 'a dedicated receipt route exists');
+    $controller = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/QueueController.php');
+    Assert::contains("Session::put('issued_token'", $controller, 'the receipt is handed over through a redirect');
+});
+
 /* ------------------------------------------------------------------ */
 /* 3. tenant isolation                                                 */
 /* ------------------------------------------------------------------ */
@@ -934,6 +964,527 @@ Assert::test('Lang returns the translated string, not the raw key', function ():
 Assert::test('an unknown key falls back instead of printing a key', function (): void {
     $value = App\Core\Lang::get('nav.does_not_exist', 'Fallback label');
     Assert::same('Fallback label', $value);
+});
+
+/* ------------------------------------------------------------------ */
+/* Operational depth: holds, leave, invites, TOTP, rate limiting        */
+/* ------------------------------------------------------------------ */
+
+Assert::test('on_hold is a live state that keeps the patient in line', function (): void {
+    // A hold must not be modelled as "skipped" (loses their place) or
+    // "no_show" (a false record). It is its own state.
+    Assert::true(QueueStateMachine::can(QueueStateMachine::WAITING, QueueStateMachine::ON_HOLD));
+    Assert::true(QueueStateMachine::can(QueueStateMachine::CALLED, QueueStateMachine::ON_HOLD));
+    Assert::true(QueueStateMachine::can(QueueStateMachine::ON_HOLD, QueueStateMachine::WAITING));
+    Assert::true(QueueStateMachine::isOpen(QueueStateMachine::ON_HOLD), 'hold occupies the board');
+});
+
+Assert::test('coming off a hold returns to the line, not to the front', function (): void {
+    // on_hold -> called would silently jump the queue.
+    Assert::false(QueueStateMachine::can(QueueStateMachine::ON_HOLD, QueueStateMachine::CALLED));
+    Assert::false(QueueStateMachine::can(QueueStateMachine::ON_HOLD, QueueStateMachine::IN_CONSULTATION));
+    Assert::false(QueueStateMachine::can(QueueStateMachine::ON_HOLD, QueueStateMachine::COMPLETED));
+    Assert::false(QueueStateMachine::can(QueueStateMachine::ON_HOLD, QueueStateMachine::TRANSFERRED));
+});
+
+Assert::test('a held patient cannot be issued a second token', function (): void {
+    // The partial unique index counts on_hold as active; the service-level
+    // pre-check must agree, or reception sees a raw SQL error instead of a
+    // sentence.
+    $sqlite = (string) file_get_contents(QP_ROOT . '/database/migrations/0003_operational_depth.sqlite.sql');
+    Assert::contains("'on_hold'", $sqlite, 'partial index covers holds');
+
+    $service = (string) file_get_contents(QP_ROOT . '/app/Domain/Queue/QueueService.php');
+    preg_match("/status IN \('waiting','called','in_consultation'[^)]*\)/", $service, $m);
+    Assert::true(isset($m[0]) && str_contains($m[0], "'on_hold'"), 'duplicate pre-check includes on_hold');
+});
+
+Assert::test('the hold action records a reason and a timestamp', function (): void {
+    $seed = Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (1, ?, ?, ?, ?)',
+        ['HLD1', 'Hold Test', '0771234501', Db::now()]
+    );
+    $entry = Db::insert(
+        'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status, joined_at, track_token)
+         VALUES (1, ?, ?, 9001, "H001", "waiting", ?, ?)',
+        [(int) $GLOBALS['alphaQueue'], $seed, Db::now(), 'holdtracktoken0001']
+    );
+
+    $result = (new App\Domain\Queue\QueueService())->apply(1, $entry, 'hold', ['reason' => 'Sent for X-ray']);
+    Assert::true($result['ok'], 'hold applied: ' . $result['message']);
+
+    $row = Db::one('SELECT status, hold_reason, hold_since FROM queue_entries WHERE id = ?', [$entry]);
+    Assert::same('on_hold', $row['status']);
+    Assert::same('Sent for X-ray', $row['hold_reason']);
+    Assert::true($row['hold_since'] !== null, 'hold_since stamped');
+
+    $audit = Db::scalar("SELECT COUNT(*) FROM audit_logs WHERE action = 'queue.hold' AND entity_id = ?", [$entry]);
+    Assert::same(1, (int) $audit, 'hold is audited');
+});
+
+Assert::test('releasing a hold clears the hold metadata', function (): void {
+    $entry = (int) Db::scalar("SELECT id FROM queue_entries WHERE token_label = 'H001'");
+    $result = (new App\Domain\Queue\QueueService())->apply(1, $entry, 'release_hold');
+    Assert::true($result['ok'], $result['message']);
+    $row = Db::one('SELECT status, hold_reason, hold_since FROM queue_entries WHERE id = ?', [$entry]);
+    Assert::same('waiting', $row['status']);
+    Assert::same(null, $row['hold_reason']);
+});
+
+Assert::test('doctor leave blocks both the form and the POST', function (): void {
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1');
+    $service = new App\Services\DoctorService();
+
+    $added = $service->addLeave(1, $doctorId, '2026-12-01', '2026-12-03', 'Conference', null);
+    Assert::true($added['ok'], $added['error'] ?? '');
+
+    Assert::true($service->isOnLeave(1, $doctorId, '2026-12-01'), 'first day covered');
+    Assert::true($service->isOnLeave(1, $doctorId, '2026-12-02'), 'middle day covered');
+    Assert::true($service->isOnLeave(1, $doctorId, '2026-12-03'), 'last day covered (inclusive)');
+    Assert::false($service->isOnLeave(1, $doctorId, '2026-12-04'), 'day after is free');
+    Assert::false($service->isOnLeave(1, $doctorId, '2026-11-30'), 'day before is free');
+
+    // Another clinic's doctor must never be affected.
+    $otherDoctor = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 2');
+    Assert::false($service->isOnLeave(2, $otherDoctor, '2026-12-02'), 'tenant isolation');
+
+    $bookable = $service->bookable(1, '2026-12-02');
+    $onLeave = array_values(array_filter($bookable, static fn (array $d): bool => (int) $d['id'] === $doctorId));
+    Assert::true($onLeave !== [] && $onLeave[0]['on_leave'] === true, 'doctor flagged in bookable list');
+});
+
+Assert::test('backwards leave dates are rejected', function (): void {
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1');
+    $result = (new App\Services\DoctorService())->addLeave(1, $doctorId, '2026-12-10', '2026-12-01', '', null);
+    Assert::false($result['ok']);
+    Assert::contains('before the start', (string) $result['error']);
+});
+
+Assert::test('leave does not silently cancel appointments', function (): void {
+    // It reports them instead. Cancelling is a human decision.
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1');
+    $patientId = Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (1, ?, ?, ?, ?)',
+        ['LVAP1', 'Leave Appt Test', '0771234502', Db::now()]
+    );
+    Db::run(
+        'INSERT INTO appointments (clinic_id, doctor_id, patient_id, scheduled_for, status, source, created_at)
+         VALUES (1, ?, ?, ?, "booked", "walkin", ?)',
+        [$doctorId, $patientId, '2027-01-15 10:00:00', Db::now()]
+    );
+
+    $result = (new App\Services\DoctorService())->addLeave(1, $doctorId, '2027-01-15', '2027-01-15', 'Sick', null);
+    Assert::true($result['ok']);
+    Assert::same(1, count($result['affected']), 'the clashing appointment is reported');
+    $status = Db::scalar('SELECT status FROM appointments WHERE scheduled_for = ?', ['2027-01-15 10:00:00']);
+    Assert::same('booked', $status, 'appointment left untouched');
+});
+
+Assert::test('TOTP matches the RFC 6238 reference vectors', function (): void {
+    // The shared secret from RFC 6238 appendix B, as ASCII.
+    $ref = new ReflectionClass(App\Services\TotpService::class);
+    $encode = $ref->getMethod('base32Encode');
+    $encode->setAccessible(true);
+    $secret = $encode->invoke(null, '12345678901234567890');
+
+    $vectors = [59 => '287082', 1111111109 => '081804', 1111111111 => '050471',
+                1234567890 => '005924', 2000000000 => '279037'];
+    foreach ($vectors as $time => $expected) {
+        Assert::same($expected, App\Services\TotpService::currentCode($secret, $time), "T={$time}");
+    }
+});
+
+Assert::test('TOTP tolerates clock drift but not a stale code', function (): void {
+    $secret = 'JBSWY3DPEHPK3PXP';
+    $now = 1800000000;
+    $current = App\Services\TotpService::currentCode($secret, $now);
+
+    Assert::true(App\Services\TotpService::verify($secret, $current, $now), 'current code accepted');
+    Assert::true(App\Services\TotpService::verify($secret, $current, $now + 29), 'one step of drift accepted');
+    Assert::false(App\Services\TotpService::verify($secret, $current, $now + 300), 'five minutes later rejected');
+    Assert::false(App\Services\TotpService::verify($secret, 'abcdef', $now), 'non-numeric rejected');
+    Assert::false(App\Services\TotpService::verify($secret, '12345', $now), 'wrong length rejected');
+});
+
+Assert::test('TOTP secrets are encrypted at rest, not stored in the clear', function (): void {
+    $userId = Db::insert(
+        'INSERT INTO users (clinic_id, name, email, password_hash, role, is_active, created_at)
+         VALUES (1, ?, ?, ?, ?, 1, ?)',
+        ['2FA Test', 'twofa@alpha.example', password_hash('TwoFactor#2026', PASSWORD_DEFAULT), 'receptionist', Db::now()]
+    );
+    $enrol = App\Services\TotpService::beginEnrolment($userId);
+    Assert::true($enrol['ok'], $enrol['error'] ?? '');
+
+    $stored = (string) Db::scalar('SELECT totp_secret FROM users WHERE id = ?', [$userId]);
+    Assert::true(str_starts_with($stored, 'v1:'), 'ciphertext envelope');
+    Assert::false(str_contains($stored, $enrol['secret']), 'plaintext secret absent from the column');
+    Assert::true(str_contains((string) $enrol['uri'], 'otpauth://totp/'), 'URI is scannable');
+});
+
+Assert::test('a 2FA account cannot log in on the password alone', function (): void {
+    $userId = (int) Db::scalar("SELECT id FROM users WHERE email = 'twofa@alpha.example'");
+    $secret = (string) Db::scalar('SELECT totp_secret FROM users WHERE id = ?', [$userId]);
+
+    $ref = new ReflectionClass(App\Services\TotpService::class);
+    $decrypt = $ref->getMethod('decrypt');
+    $decrypt->setAccessible(true);
+    $plain = $decrypt->invoke(null, $secret);
+
+    $enable = App\Services\TotpService::enable($userId, App\Services\TotpService::currentCode($plain));
+    Assert::true($enable['ok'], $enable['error'] ?? '');
+    Assert::same(8, count($enable['recovery_codes']));
+
+    // A wrong code must not pass, and must not be a usable recovery code either.
+    Assert::false(App\Services\TotpService::verifyForUser($userId, '000000'));
+});
+
+Assert::test('recovery codes are stored hashed and consumed on use', function (): void {
+    $userId = (int) Db::scalar("SELECT id FROM users WHERE email = 'twofa@alpha.example'");
+    $hashes = json_decode((string) Db::scalar('SELECT totp_recovery FROM users WHERE id = ?', [$userId]), true) ?: [];
+
+    Assert::same(8, count($hashes));
+    foreach ($hashes as $hash) {
+        Assert::same(64, strlen((string) $hash), 'sha256 hex digest');
+        Assert::true(ctype_xdigit((string) $hash), 'not plaintext');
+    }
+});
+
+Assert::test('an invitation token is stored only as a hash', function (): void {
+    $service = new App\Services\StaffInviteService();
+    $result = $service->invite(1, 'newhire@alpha.example', 'receptionist');
+    Assert::true($result['ok'], $result['error'] ?? '');
+
+    $stored = (string) Db::scalar('SELECT token_hash FROM staff_invites WHERE id = ?', [(int) $result['invite_id']]);
+    Assert::false(str_contains($stored, $result['token']), 'plaintext token is not in the database');
+    Assert::same(hash('sha256', (string) $result['token']), $stored, 'hash matches the token');
+
+    // And the token must resolve back to the invite.
+    $found = $service->find((string) $result['token']);
+    Assert::true($found !== null, 'token resolves');
+    Assert::same('newhire@alpha.example', $found['email']);
+});
+
+Assert::test('an invitation is single use', function (): void {
+    $service = new App\Services\StaffInviteService();
+    $result = $service->invite(1, 'onceonly@alpha.example', 'receptionist');
+    Assert::true($result['ok']);
+
+    $accepted = $service->accept((string) $result['token'], 'Once Only', 'OnceOnly#2026');
+    Assert::true($accepted['ok'], $accepted['error'] ?? '');
+    Assert::same(1, (int) Db::scalar('SELECT COUNT(*) FROM users WHERE email = ?', ['onceonly@alpha.example']));
+
+    $again = $service->accept((string) $result['token'], 'Someone Else', 'SomeoneElse#2026');
+    Assert::false($again['ok'], 'second use rejected');
+    Assert::same(1, (int) Db::scalar('SELECT COUNT(*) FROM users WHERE email = ?', ['onceonly@alpha.example']), 'no duplicate account');
+});
+
+Assert::test('a weak password cannot be accepted from an invitation', function (): void {
+    $service = new App\Services\StaffInviteService();
+    $result = $service->invite(1, 'weakpass@alpha.example', 'receptionist');
+    Assert::true($result['ok']);
+
+    Assert::false($service->accept((string) $result['token'], 'Weak Pass', 'short')['ok'], 'too short');
+    Assert::false($service->accept((string) $result['token'], 'Weak Pass', 'allletterslong')['ok'], 'no digit');
+    Assert::false($service->accept((string) $result['token'], 'W', 'StrongPass#2026')['ok'], 'name too short');
+    Assert::same(0, (int) Db::scalar('SELECT COUNT(*) FROM users WHERE email = ?', ['weakpass@alpha.example']));
+});
+
+Assert::test('an invitation for another clinic cannot create a user there', function (): void {
+    $service = new App\Services\StaffInviteService();
+    $result = $service->invite(1, 'crosstenant@alpha.example', 'receptionist');
+    $accepted = $service->accept((string) $result['token'], 'Cross Tenant', 'CrossTenant#2026');
+    Assert::true($accepted['ok']);
+    // The clinic comes from the invite row, never from anything the user sent.
+    Assert::same(1, (int) Db::scalar('SELECT clinic_id FROM users WHERE email = ?', ['crosstenant@alpha.example']));
+});
+
+Assert::test('an invalid or expired invitation resolves to nothing', function (): void {
+    $service = new App\Services\StaffInviteService();
+    Assert::same(null, $service->find('not-a-real-token'));
+
+    $result = $service->invite(1, 'expired@alpha.example', 'receptionist');
+    Db::run('UPDATE staff_invites SET expires_at = ? WHERE id = ?', ['2020-01-01 00:00:00', (int) $result['invite_id']]);
+    Assert::same(null, $service->find((string) $result['token']), 'expired invite is rejected');
+});
+
+Assert::test('the rate limiter counts in a durable, shared table', function (): void {
+    $bucket = 'test:' . App\Core\Str::random(4);
+    $first = App\Core\RateLimiter::hit($bucket, 3, 60);
+    Assert::true($first['allowed']);
+    Assert::same(2, $first['remaining']);
+
+    App\Core\RateLimiter::hit($bucket, 3, 60);
+    $third = App\Core\RateLimiter::hit($bucket, 3, 60);
+    Assert::true($third['allowed'], 'third hit is within the limit');
+    Assert::same(3, $third['hits']);
+
+    $fourth = App\Core\RateLimiter::hit($bucket, 3, 60);
+    Assert::false($fourth['allowed'], 'fourth hit is refused');
+    Assert::same(0, $fourth['remaining']);
+    Assert::true($fourth['retry_after'] > 0, 'caller is told when to retry');
+
+    // Durability: the counter is in the database, not in process memory.
+    Assert::same(4, (int) Db::scalar('SELECT SUM(hits) FROM rate_limits WHERE bucket = ?', [$bucket]));
+});
+
+Assert::test('rate limiter buckets never store a raw credential', function (): void {
+    $key = 'aVerySecretDisplayKey123456';
+    $redacted = App\Core\RateLimiter::redact('display:key:' . $key);
+    Assert::false(str_contains($redacted, $key), 'the key is not present in the log-safe form');
+    Assert::true(str_contains($redacted, 'sha256.'), 'replaced with a digest');
+});
+
+Assert::test('the display key is rate limited, not just validated', function (): void {
+    // A bearer token on a public URL is only as safe as the number of guesses
+    // an attacker gets; that number has to be enforced in the controller.
+    $controller = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/ApiController.php');
+    preg_match('/public function display.*?\n    }/s', $controller, $m);
+    Assert::true(isset($m[0]), 'display action found');
+    Assert::contains("RateLimiter::enforce('display:key:'", $m[0], 'per-key limit');
+    Assert::contains("RateLimiter::enforce('display:ip:'", $m[0], 'per-IP limit');
+});
+
+Assert::test('the limiter stops the request instead of returning to the caller', function (): void {
+    // json() writes a response but does not exit; without an explicit exit the
+    // controller overwrites the 429 with a 200. This was a real bug.
+    $source = (string) file_get_contents(QP_ROOT . '/app/Core/RateLimiter.php');
+    $start = strpos($source, 'public static function enforce');
+    Assert::true($start !== false, 'enforce() found');
+    $branch = substr($source, (int) $start, 1800);
+    Assert::contains('exit;', $branch, 'refusal terminates the request');
+    Assert::true(strpos($branch, 'exit;') > strpos($branch, 'rate_limited'), 'body written before exit');
+});
+
+Assert::test('staff invitations are gated by an ability, not a page', function (): void {
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    Assert::true(
+        (bool) preg_match("#Router::post\('/settings/invites'.*?'ability' => 'staff.manage'#", $routes),
+        'invite route declares staff.manage'
+    );
+    Assert::true(
+        (bool) preg_match("#Router::post\('/doctors/leave'.*?'ability' => 'doctor.manage'#", $routes),
+        'leave route declares doctor.manage'
+    );
+});
+
+Assert::test('a literal route is declared before the parameter route that would shadow it', function (): void {
+    // The router takes the first match, so `/doctors/leave` must precede
+    // `/doctors/{id}` or every leave submission becomes "update doctor 'leave'".
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    $literal = strpos($routes, "Router::post('/doctors/leave'");
+    $param = strpos($routes, "Router::post('/doctors/{id}'");
+    Assert::true($literal !== false && $param !== false);
+    Assert::true($literal < $param, 'leave routes are registered first');
+});
+
+Assert::test('migration 0003 preserves every row it rebuilds', function (): void {
+    // The SQLite variant rebuilds queue_entries to change a CHECK constraint.
+    // A rebuild that forgets a column silently drops data, so the column list
+    // in the INSERT must cover every original column.
+    $sql = (string) file_get_contents(QP_ROOT . '/database/migrations/0003_operational_depth.sqlite.sql');
+    foreach (['id', 'clinic_id', 'queue_id', 'patient_id', 'appointment_id', 'token_no', 'token_label',
+              'status', 'priority', 'priority_reason', 'sort_weight', 'source', 'joined_at', 'called_at',
+              'started_at', 'finished_at', 'wait_minutes', 'consult_minutes', 'call_count', 'note',
+              'created_by', 'track_token', 'track_expires_at', 'version'] as $column) {
+        Assert::contains($column, $sql, "column {$column} is carried across the rebuild");
+    }
+    Assert::contains('PRAGMA foreign_keys = OFF', $sql, 'FKs are suspended for the rebuild');
+    Assert::contains('PRAGMA foreign_keys = ON', $sql, 'FKs are re-enabled afterwards');
+});
+
+Assert::test('the rebuilt table keeps the duplicate-token guard', function (): void {
+    $indexes = Db::all("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'queue_entries'");
+    $names = array_column($indexes, 'name');
+    Assert::true(in_array('uq_active_entry_per_patient', $names, true), 'partial unique index survives');
+    Assert::true(in_array('idx_qe_board', $names, true), 'board index survives');
+});
+
+/* ------------------------------------------------------------------ */
+/* Monitoring, backups, approach notices, organisations                */
+/* ------------------------------------------------------------------ */
+
+Assert::test('the health endpoint fails closed without a token', function (): void {
+    // An unauthenticated health page is an inventory of the platform: tenant
+    // names, queue names, staff emails. It must be closed by default.
+    $controller = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/MonitorController.php');
+    Assert::contains('hash_equals($token, $provided)', $controller);
+    Assert::contains("'error' => 'not_found'", $controller, 'indistinguishable from a missing route');
+    Assert::contains('Auth::isSuper()', $controller, 'a signed-in super admin may look');
+});
+
+Assert::test('health checks are concrete, not a 200-from-the-web-server', function (): void {
+    $service = new App\Services\MonitorService();
+    $result = $service->run();
+    Assert::true(isset($result['status'], $result['checks']), 'report shape');
+    Assert::true(in_array($result['status'], ['ok', 'warning', 'critical'], true));
+
+    $keys = array_column($result['checks'], 'key');
+    foreach (['database', 'notification_worker', 'backups', 'schema_parity', 'stale_queues', 'long_waits', 'disk'] as $expected) {
+        Assert::true(in_array($expected, $keys, true), "{$expected} is checked");
+    }
+    foreach ($result['checks'] as $check) {
+        Assert::true(in_array($check['severity'], ['ok', 'warning', 'critical'], true), "{$check['key']} severity valid");
+        Assert::true($check['summary'] !== '', "{$check['key']} has a sentence");
+    }
+});
+
+Assert::test('a stalled notification worker is reported as critical', function (): void {
+    // The failure mode that matters: the app is up, the page renders, and
+    // nobody is being called because the worker died.
+    Db::run("DELETE FROM notifications WHERE dedupe_key LIKE 'test-stall-%'");
+    $entry = (int) Db::scalar("SELECT id FROM queue_entries WHERE clinic_id = 1 LIMIT 1");
+    Db::run(
+        'INSERT INTO notifications (clinic_id, entry_id, channel, template, to_number, payload_json,
+            dedupe_key, status, attempts, scheduled_at, created_at)
+         VALUES (1, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)',
+        [$entry, 'sms', 'entry_called', '0771234567', '{}', 'test-stall-1', 'queued',
+         date('Y-m-d H:i:s', time() - 3600), date('Y-m-d H:i:s', time() - 3600)]
+    );
+
+    $result = (new App\Services\MonitorService())->run();
+    $worker = null;
+    foreach ($result['checks'] as $check) {
+        if ($check['key'] === 'notification_worker') {
+            $worker = $check;
+        }
+    }
+    Assert::true($worker !== null);
+    Assert::same('critical', $worker['severity'], 'an hour-overdue message is critical');
+    Assert::same('critical', $result['status'], 'overall status follows the worst check');
+
+    Db::run("DELETE FROM notifications WHERE dedupe_key LIKE 'test-stall-%'");
+});
+
+Assert::test('monitoring records an alert and clears it on recovery', function (): void {
+    Db::run("DELETE FROM system_alerts WHERE code = 'long_waits'");
+    $entry = (int) Db::scalar("SELECT id FROM queue_entries WHERE clinic_id = 1 AND status = 'waiting' LIMIT 1");
+    $original = Db::scalar('SELECT joined_at FROM queue_entries WHERE id = ?', [$entry]);
+    Db::run('UPDATE queue_entries SET joined_at = ? WHERE id = ?', [date('Y-m-d H:i:s', time() - 7200), $entry]);
+
+    (new App\Services\MonitorService())->run(1);
+    Assert::true((int) Db::scalar("SELECT COUNT(*) FROM system_alerts WHERE code = 'long_waits' AND resolved_at IS NULL") >= 1, 'alert raised');
+
+    Db::run('UPDATE queue_entries SET joined_at = ? WHERE id = ?', [$original, $entry]);
+    (new App\Services\MonitorService())->run(1);
+    Assert::same(0, (int) Db::scalar("SELECT COUNT(*) FROM system_alerts WHERE code = 'long_waits' AND resolved_at IS NULL"), 'alert resolved on recovery');
+});
+
+Assert::test('the backup tool is a real restore drill, not a copy', function (): void {
+    $source = (string) file_get_contents(QP_ROOT . '/tools/backup.php');
+    // It must open the dump and check integrity rather than trust file size.
+    Assert::contains('PRAGMA integrity_check', $source);
+    Assert::contains('foreign_key_check', $source, 'referential integrity is verified');
+    Assert::contains('VACUUM INTO', $source, 'consistent snapshot, not a file copy');
+    foreach (['queue_entries', 'patients', 'audit_logs'] as $table) {
+        Assert::contains("'{$table}'", $source, "{$table} is required to exist in the dump");
+    }
+    Assert::contains('last-backup.json', $source, 'the outcome is recorded for monitoring');
+});
+
+Assert::test('an empty or tiny dump counts as a failure', function (): void {
+    // The most common silent backup failure: the file is created, the disk was
+    // full, and it is 0 bytes. "No exception thrown" is not success.
+    $source = (string) file_get_contents(QP_ROOT . '/tools/backup.php');
+    Assert::contains('$size < 1024', $source);
+    Assert::contains('dump is implausibly small', $source);
+});
+
+Assert::test('a stale backup is escalated, not ignored', function (): void {
+    $source = (string) file_get_contents(QP_ROOT . '/app/Services/MonitorService.php');
+    Assert::contains('backup.max_age_hours', $source);
+    Assert::contains("'critical'", $source);
+    // And a missing record must be a warning rather than a pass.
+    Assert::contains('No backup has ever been recorded', $source);
+});
+
+Assert::test('"your turn is approaching" is a distinct, once-only message', function (): void {
+    $source = (string) file_get_contents(QP_ROOT . '/app/Services/NotificationService.php');
+    Assert::contains("'entry_approaching'", $source);
+    Assert::contains('approach_notified_at IS NULL', $source, 'idempotency marker is in the query');
+    // It must claim the row atomically before queueing, not check-then-send.
+    Assert::contains('WHERE id = ? AND clinic_id = ? AND approach_notified_at IS NULL', $source);
+});
+
+Assert::test('approach notices are opt-in per clinic and respect the threshold', function (): void {
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 1 LIMIT 1');
+    $service = new App\Services\NotificationService();
+
+    Db::run('UPDATE clinics SET notify_approach = 0 WHERE id = 1');
+    Assert::same(0, $service->notifyApproaching(1, $queueId), 'nothing is sent when the clinic has not opted in');
+
+    Db::run('UPDATE clinics SET notify_approach = 1, approach_threshold = 1 WHERE id = 1');
+    Db::run("UPDATE queue_entries SET approach_notified_at = NULL WHERE clinic_id = 1 AND status = 'waiting'");
+    Db::run("DELETE FROM notifications WHERE template = 'entry_approaching'");
+
+    $waiting = (int) Db::scalar("SELECT COUNT(*) FROM queue_entries WHERE clinic_id = 1 AND status = 'waiting'");
+    if ($waiting === 0) {
+        return; // nothing to message in this fixture state
+    }
+    Assert::same(1, $service->notifyApproaching(1, $queueId), 'exactly one with a threshold of one');
+
+    $body = (string) Db::scalar("SELECT payload_json FROM notifications WHERE template = 'entry_approaching' LIMIT 1");
+    Assert::false(str_contains($body, '{ahead}'), 'the placeholder is substituted');
+});
+
+Assert::test('an organisation is a report, not a second tenant', function (): void {
+    $service = new App\Services\OrganisationService();
+    $created = $service->create('Test Group ' . App\Core\Str::random(3), null, 'unit test');
+    Assert::true($created['ok'], $created['error'] ?? '');
+    Assert::true($service->attachClinic((int) $created['id'], 2)['ok']);
+
+    // The clinic row remains the tenancy boundary: attaching a branch must not
+    // change who can read its queue.
+    $rows = Db::all('SELECT id FROM queue_entries WHERE clinic_id = 2');
+    foreach ($rows as $row) {
+        Assert::same(2, (int) Db::scalar('SELECT clinic_id FROM queue_entries WHERE id = ?', [(int) $row['id']]));
+    }
+
+    $branches = $service->branches((int) $created['id']);
+    Assert::same(1, count($branches), 'only the attached branch is listed');
+    Assert::same(2, (int) $branches[0]['id']);
+});
+
+Assert::test('the group roll-up carries counts, never patient identifiers', function (): void {
+    $service = (string) file_get_contents(QP_ROOT . '/app/Services/OrganisationService.php');
+    preg_match('/public function branches.*?\n    }/s', $service, $m);
+    Assert::true(isset($m[0]));
+    Assert::false(str_contains($m[0], 'full_name'), 'no patient name in the roll-up query');
+    Assert::false(str_contains($m[0], 'token_label'), 'no token in the roll-up query');
+    Assert::false(str_contains($m[0], 'phone'), 'no phone in the roll-up query');
+
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/organisation/index.php');
+    Assert::false(str_contains($view, 'full_name'), 'the view does not print a patient name');
+});
+
+Assert::test('the group view is restricted to a clinic owner', function (): void {
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    Assert::true(
+        (bool) preg_match("#Router::get\('/organisation'.*?'ability' => 'clinic.manage'#", $routes),
+        'route requires clinic.manage'
+    );
+});
+
+Assert::test('detaching a branch is audited', function (): void {
+    $service = new App\Services\OrganisationService();
+    $before = (int) Db::scalar("SELECT COUNT(*) FROM audit_logs WHERE action = 'organisation.branch_detached'");
+    $service->detachClinic(2);
+    $after = (int) Db::scalar("SELECT COUNT(*) FROM audit_logs WHERE action = 'organisation.branch_detached'");
+    Assert::same($before + 1, $after);
+    Assert::same(null, Db::scalar('SELECT organisation_id FROM clinics WHERE id = 2'));
+});
+
+Assert::test('a platform admin is never rendered a clinic dashboard', function (): void {
+    // A super admin has clinic_id NULL. The dashboard view loops over the
+    // clinic's queues and assumes at least one exists, so rendering it for a
+    // platform account was a 500 (found by probing every role against every
+    // page). They are redirected to the console they actually own.
+    $controller = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/DashboardController.php');
+    Assert::contains('Auth::isSuper() && Auth::clinicId() === null', $controller);
+    Assert::contains("redirect('/admin')", $controller);
+
+    // And the view must not hard-fail if a brand-new clinic has no queue yet.
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/dashboard/index.php');
+    Assert::contains("isset(\$q)", $view, 'the token link tolerates a clinic with no queue');
 });
 
 /* ------------------------------------------------------------------ */

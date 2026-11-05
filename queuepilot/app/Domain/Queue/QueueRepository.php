@@ -38,7 +38,11 @@ final class QueueRepository
                     (SELECT COUNT(*) FROM queue_entries e
                       WHERE e.queue_id = q.id AND e.status = 'waiting') AS waiting_count,
                     (SELECT COUNT(*) FROM queue_entries e
-                      WHERE e.queue_id = q.id AND e.status IN ('called','in_consultation')) AS active_count
+                      WHERE e.queue_id = q.id AND e.status IN ('called','in_consultation')) AS active_count,
+                    -- Holds are reported separately: they are visible work but
+                    -- they are not patients ahead of you in the line.
+                    (SELECT COUNT(*) FROM queue_entries e
+                      WHERE e.queue_id = q.id AND e.status = 'on_hold') AS hold_count
                FROM queues q
                LEFT JOIN doctors d ON d.id = q.doctor_id
                LEFT JOIN specialties s ON s.id = d.specialty_id
@@ -81,8 +85,9 @@ final class QueueRepository
                FROM queue_entries e
                JOIN patients p ON p.id = e.patient_id
               WHERE e.clinic_id = ? AND e.queue_id = ?
-                AND e.status IN ('waiting','called','in_consultation','skipped')
-              ORDER BY CASE e.status WHEN 'in_consultation' THEN 0 WHEN 'called' THEN 1 ELSE 2 END,
+                AND e.status IN ('waiting','called','in_consultation','skipped','on_hold')
+              ORDER BY CASE e.status WHEN 'in_consultation' THEN 0 WHEN 'called' THEN 1
+                                     WHEN 'waiting' THEN 2 WHEN 'on_hold' THEN 3 ELSE 4 END,
                        e.priority DESC, e.sort_weight ASC, e.id ASC",
             [$clinicId, $queueId]
         );
@@ -98,8 +103,9 @@ final class QueueRepository
                JOIN patients p ON p.id = e.patient_id
                JOIN queues q ON q.id = e.queue_id
                LEFT JOIN doctors d ON d.id = q.doctor_id
-              WHERE e.clinic_id = ? AND e.status IN ('waiting','called','in_consultation','skipped')
-              ORDER BY q.id, e.priority DESC, e.sort_weight ASC, e.id",
+              WHERE e.clinic_id = ? AND e.status IN ('waiting','called','in_consultation','skipped','on_hold')
+              ORDER BY q.id, CASE e.status WHEN 'on_hold' THEN 1 ELSE 0 END,
+                       e.priority DESC, e.sort_weight ASC, e.id",
             [$clinicId]
         );
     }

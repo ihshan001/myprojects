@@ -33,15 +33,64 @@ final class ClinicController
             $queues[(int) $q['doctor_id']] = $q;
         }
 
+        // Leave today is a first-class fact on this page: reception needs to
+        // see "away until Thursday" next to the doctor, not hunt for it.
+        $awayToday = $service->onLeaveIds($clinicId, $today, $today);
+
         view('doctors/index', [
             'title' => 'Doctors & rooms',
             'doctors' => $doctors,
             'specialties' => $service->specialties($clinicId),
             'rooms' => $service->rooms($clinicId),
             'queues' => $queues,
+            'awayToday' => $awayToday,
+            'leave' => $service->leave($clinicId, $today),
             'canManage' => Auth::can('doctor.manage'),
             'planLimit' => (new ClinicService())->withinLimit($clinicId, 'doctors'),
         ]);
+    }
+
+    public function addLeave(): void
+    {
+        $clinicId = $this->clinicId();
+        $result = (new DoctorService())->addLeave(
+            $clinicId,
+            Request::int('doctor_id'),
+            Request::string('starts_on'),
+            Request::string('ends_on', Request::string('starts_on')),
+            trim(Request::string('reason')),
+            Auth::id()
+        );
+        if (!$result['ok']) {
+            flash('error', $result['error']);
+            redirect('/doctors');
+            return;
+        }
+
+        $affected = $result['affected'] ?? [];
+        if ($affected !== []) {
+            // Nothing is cancelled automatically. Reception gets the list and
+            // decides: move them, call them, or leave them alone.
+            flash('warn', sprintf(
+                '%d appointment%s falls inside this leave. Review them and contact the patients — nothing was cancelled automatically.',
+                count($affected),
+                count($affected) === 1 ? '' : 's'
+            ));
+        } else {
+            flash('success', 'Leave recorded. The booking form will not offer this doctor on those dates.');
+        }
+        redirect('/doctors');
+    }
+
+    public function removeLeave(string $id): void
+    {
+        $clinicId = $this->clinicId();
+        if ((new DoctorService())->removeLeave($clinicId, (int) $id)) {
+            flash('success', 'Leave removed — the doctor is bookable again on those dates.');
+        } else {
+            flash('error', 'That leave record was not found.');
+        }
+        redirect('/doctors');
     }
 
     public function storeDoctor(): void
@@ -121,6 +170,11 @@ final class ClinicController
             'canManage' => Auth::can('clinic.manage'),
             'plan' => (new ClinicService())->plan($clinic['plan_id'] !== null ? (int) $clinic['plan_id'] : null),
             'notifStats' => (new \App\Services\NotificationService())->stats($clinicId),
+            'invites' => (new \App\Services\StaffInviteService())->pending($clinicId),
+            // When no mail transport is configured the invitation link is the
+            // only way the invite reaches the person, so it is shown once,
+            // here, to the administrator who created it.
+            'inviteLink' => \App\Core\Session::takeFlash('last_invite_link'),
         ]);
     }
 
@@ -150,10 +204,102 @@ final class ClinicController
             'locale' => Request::string('locale', 'en'),
             'token_prefix' => Request::string('token_prefix'),
             'late_grace_minutes' => Request::int('late_grace_minutes', 15),
+            // Opt-in, and the checkbox is the only way it becomes 1 — an
+            // unchecked box sends nothing, which is the safe default.
+            'notify_approach' => Request::input('notify_approach') ? 1 : 0,
+            'approach_threshold' => max(1, min(10, Request::int('approach_threshold', 2))),
         ]);
 
         (new AuditService())->log($clinicId, 'clinic.settings_updated', 'clinic', $clinicId, ['name' => $name]);
         flash('success', 'Clinic settings saved.');
+        redirect('/settings');
+    }
+
+    /**
+     * Group view for a clinic that belongs to an organisation.
+     *
+     * Only a clinic administrator may see it, and it is a *summary*: no
+     * patient name, no token, nothing that would let one branch's manager
+     * identify another branch's patient. That restriction is the difference
+     * between a useful roll-up and a privacy incident.
+     */
+    public function organisation(): void
+    {
+        $clinicId = $this->clinicId();
+        $service = new \App\Services\OrganisationService();
+        $org = $service->forClinic($clinicId);
+        if (!$org) {
+            view('organisation/index', [
+                'title' => 'Group',
+                'org' => null,
+                'branches' => [],
+                'rollup' => null,
+            ]);
+            return;
+        }
+
+        // A branch admin sees the group roll-up but cannot administer it.
+        if (!Auth::can('clinic.manage')) {
+            abort(403, 'Only a clinic owner can view the group. Ask your administrator.');
+            return;
+        }
+
+        view('organisation/index', [
+            'title' => $org['name'],
+            'org' => $org,
+            'branches' => $service->branches((int) $org['id']),
+            'rollup' => $service->rollup((int) $org['id']),
+            'currentClinicId' => $clinicId,
+        ]);
+    }
+
+    /**
+     * Invite a staff member.
+     *
+     * Replaces the old "admin types a temporary password" flow. The admin
+     * never learns the password, and the invitation is a single-use token
+     * stored only as a hash.
+     */
+    public function inviteStaff(): void
+    {
+        $clinicId = $this->clinicId();
+        if (!(new ClinicService())->withinLimit($clinicId, 'staff')) {
+            flash('error', 'Your plan is at its staff limit. Upgrade to add more accounts.');
+            redirect('/settings');
+            return;
+        }
+
+        $result = (new \App\Services\StaffInviteService())->invite(
+            $clinicId,
+            Request::string('email'),
+            Request::string('role', 'receptionist'),
+            trim(Request::string('name'))
+        );
+        if (!$result['ok']) {
+            flash('error', $result['error']);
+            redirect('/settings');
+            return;
+        }
+
+        if ($result['delivered']) {
+            flash('success', 'Invitation emailed to ' . $result['email'] . '. It expires ' . ago($result['expires_at']) . ' from now.');
+        } else {
+            // No transport configured: say so, and hand over the link. This is
+            // the honest version of "we sent an email".
+            \App\Core\Session::flash('last_invite_link', '/invite/' . $result['token']);
+            flash('warn', 'No mail transport is configured, so the invitation was not emailed. Copy the link shown on this page and pass it on.');
+        }
+        redirect('/settings');
+    }
+
+    public function revokeInvite(string $id): void
+    {
+        $clinicId = $this->clinicId();
+        if ((new \App\Services\StaffInviteService())->revoke($clinicId, (int) $id)) {
+            flash('success', 'Invitation revoked. The link no longer works.');
+        } else {
+            flash('error', 'That invitation was not found or has already been used.');
+        }
         redirect('/settings');
     }
 

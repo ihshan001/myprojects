@@ -7,6 +7,22 @@
   <a href="/billing" class="btn-secondary"><svg class="h-4 w-4"><use href="#i-card"/></svg><?= e($plan['name'] ?? 'No plan') ?></a>
 </div>
 
+<?php if (!empty($inviteLink)): ?>
+  <div class="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3">
+    <p class="text-xs font-bold text-amber-900">Invitation link — pass this on yourself</p>
+    <p class="mt-0.5 text-[11px] text-amber-800">
+      No mail transport is configured, so nothing was emailed. This link works once and expires in 72 hours.
+    </p>
+    <div class="mt-2 flex items-center gap-2 rounded-lg bg-white px-3 py-2">
+      <code class="flex-1 truncate text-[11px] text-slate-700"><?= e(rtrim((string) App\Core\Env::get('app.url', ''), '/') . $inviteLink) ?></code>
+      <button class="rounded p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-700"
+              data-copy="<?= e(rtrim((string) App\Core\Env::get('app.url', ''), '/') . $inviteLink) ?>">
+        <svg class="h-3.5 w-3.5"><use href="#i-copy"/></svg>
+      </button>
+    </div>
+  </div>
+<?php endif; ?>
+
 <div class="mt-5 grid gap-5 lg:grid-cols-[1.15fr_.85fr]">
   <div class="space-y-5">
     <div class="card card-pad">
@@ -53,6 +69,27 @@
                      value="<?= (int) $c['late_grace_minutes'] ?>">
               <p class="help">How long before a patient is marked absent.</p></div>
           </div>
+
+          <div class="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+            <label class="flex items-start gap-2">
+              <input type="checkbox" class="checkbox mt-0.5" name="notify_approach" value="1"
+                     <?= (int) ($c['notify_approach'] ?? 0) === 1 ? 'checked' : '' ?>>
+              <span>
+                <span class="block text-[11px] font-semibold text-slate-800">SMS "your turn is approaching"</span>
+                <span class="block text-[10px] leading-relaxed text-slate-500">
+                  One extra message per patient when they are near the front. Costs one SMS each — most
+                  clinics leave this off and rely on the tracking link.
+                </span>
+              </span>
+            </label>
+            <div class="mt-2 flex items-center gap-2 pl-6">
+              <label class="text-[10px] font-semibold text-slate-600" for="approach_threshold">Message the next</label>
+              <input class="input !w-14 !px-2 !py-1 text-center text-[11px]" id="approach_threshold"
+                     name="approach_threshold" inputmode="numeric" min="1" max="10"
+                     value="<?= (int) ($c['approach_threshold'] ?? 2) ?>">
+              <span class="text-[10px] text-slate-600">patient(s) in line</span>
+            </div>
+          </div>
         </div>
 
         <?php if ($canManage): ?>
@@ -85,25 +122,52 @@
 
       <?php if ($canManage): ?>
         <details class="border-t border-slate-200">
-          <summary class="cursor-pointer px-4 py-3 text-xs font-semibold text-teal-700 hover:bg-slate-50">Add a staff account</summary>
-          <form method="post" action="/settings/staff" class="space-y-3 px-4 pb-4">
+          <summary class="cursor-pointer px-4 py-3 text-xs font-semibold text-teal-700 hover:bg-slate-50">Invite a staff member</summary>
+          <form method="post" action="/settings/invites" class="space-y-3 px-4 pb-4">
             <?= csrf_field() ?>
             <div class="grid gap-3 sm:grid-cols-2">
-              <div><label class="label">Full name</label><input class="input" name="name" required></div>
-              <div><label class="label">Email</label><input class="input" name="email" type="email" required></div>
-              <div><label class="label">Role</label>
+              <div><label class="label">Full name</label><input class="input" name="name" required maxlength="120"></div>
+              <div><label class="label">Email</label><input class="input" name="email" type="email" required maxlength="160"></div>
+              <div class="sm:col-span-2"><label class="label">Role</label>
                 <select class="select" name="role">
                   <option value="receptionist">Receptionist</option>
                   <option value="doctor">Doctor</option>
                   <option value="clinic_admin">Clinic owner</option>
                 </select></div>
-              <div><label class="label">Temporary password</label>
-                <input class="input" name="password" type="text" minlength="10" required placeholder="min 10 characters"></div>
             </div>
-            <button class="btn-primary">Create account</button>
-            <p class="help">Share the password in person and ask them to change it after first sign-in.</p>
+            <button class="btn-primary">Send invitation</button>
+            <p class="help">
+              You never choose their password: the invitation email contains a one-time link where
+              they set their own. The link expires in 72 hours and can be revoked below.
+            </p>
           </form>
         </details>
+
+        <?php if (($invites ?? []) !== []): ?>
+          <details class="border-t border-slate-200" open>
+            <summary class="cursor-pointer px-4 py-3 text-xs font-semibold text-teal-700 hover:bg-slate-50">
+              Pending invitations (<?= count($invites) ?>)
+            </summary>
+            <table class="table">
+              <thead><tr><th>Email</th><th>Role</th><th class="hidden sm:table-cell">Expires</th><th></th></tr></thead>
+              <tbody>
+                <?php foreach ($invites as $inv): ?>
+                  <tr>
+                    <td class="text-xs"><?= e($inv['email']) ?></td>
+                    <td><span class="badge-slate"><?= e(str_replace('_', ' ', (string) $inv['role'])) ?></span></td>
+                    <td class="hidden sm:table-cell text-xs text-slate-500"><?= e(ago($inv['expires_at'])) ?> left</td>
+                    <td class="text-right">
+                      <form method="post" action="/settings/invites/<?= (int) $inv['id'] ?>/revoke" class="inline">
+                        <?= csrf_field() ?>
+                        <button class="act-mute">Revoke</button>
+                      </form>
+                    </td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </details>
+        <?php endif; ?>
       <?php endif; ?>
     </div>
   </div>

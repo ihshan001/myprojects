@@ -4,6 +4,10 @@ storage/db/*.sqlite-wal
 storage/db/*.sqlite-shm
 storage/logs/*.log
 storage/sessions/sess_*
+# Generated backups and the restore-drill record. The tool and the procedure
+# are versioned; the dumps themselves are runtime artifacts and may contain
+# patient data, so they never belong in Git.
+storage/backups/
 
 # dependencies and build tooling
 node_modules/

@@ -19,6 +19,15 @@ final class DashboardController
 {
     public function index(): void
     {
+        // A platform administrator has no clinic. Rendering the clinic
+        // dashboard for them produced a 500: the view assumes there is at
+        // least one queue. Send them to the console they actually own instead
+        // of special-casing every clinic view for a role that never uses it.
+        if (Auth::isSuper() && Auth::clinicId() === null) {
+            redirect('/admin');
+            return;
+        }
+
         $clinicId = (int) Auth::clinicId();
         $clinic = Auth::clinic();
         $repo = new QueueRepository();

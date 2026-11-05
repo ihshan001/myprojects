@@ -40,6 +40,10 @@ if ($u) {
             ])),
             'Insight' => array_values(array_filter([
                 Auth::can('reports.view') ? ['/reports', 'chart', t('nav.reports', 'Reports'), $isActive('/reports')] : null,
+                // Only shown to a clinic owner whose clinic is actually in a
+                // group — a link to an empty page trains people to ignore links.
+                (Auth::can('clinic.manage') && (Auth::clinic()['organisation_id'] ?? null) !== null)
+                    ? ['/organisation', 'building', 'Group', $isActive('/organisation')] : null,
                 Auth::can('clinic.manage') ? ['/audit', 'shield', 'Audit log', $isActive('/audit')] : null,
                 ['/settings', 'settings', t('nav.settings', 'Settings'), $isActive('/settings')],
                 Auth::can('billing.view') ? ['/billing', 'card', 'Subscription', $isActive('/billing')] : null,

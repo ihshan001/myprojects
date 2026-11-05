@@ -5,7 +5,9 @@ namespace App\Http\Controllers;
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Core\Env;
 use App\Core\Log;
+use App\Core\RateLimiter;
 use App\Core\Request;
 use App\Domain\Queue\QueueRepository;
 use App\Domain\Queue\QueueService;
@@ -198,19 +200,15 @@ final class ApiController
             return;
         }
 
-        // crude but effective per-IP throttle: 120 lookups / 5 min
-        $key = 'track_' . Request::ip();
-        $now = time();
-        $bucket = $_SESSION[$key] ?? ['start' => $now, 'n' => 0];
-        if ($now - (int) $bucket['start'] > 300) {
-            $bucket = ['start' => $now, 'n' => 0];
-        }
-        $bucket['n'] = (int) $bucket['n'] + 1;
-        $_SESSION[$key] = $bucket;
-        if ($bucket['n'] > 120) {
-            json(['ok' => false, 'error' => 'rate_limited', 'message' => 'Too many lookups. Please wait a moment.'], 429);
-            return;
-        }
+        // Durable per-IP throttle. The previous version counted in $_SESSION,
+        // which a client resets by dropping its cookie — i.e. it limited
+        // nobody who was actually trying. The bucket is the IP, never the
+        // token, so a shared clinic Wi-Fi is not punished for one phone.
+        RateLimiter::enforce(
+            'track:ip:' . Request::ip(),
+            (int) Env::get('security.track_token_per_min', 30),
+            60
+        );
 
         $service = new QueueService();
         $entry = (new QueueRepository())->entryByToken($token);
@@ -247,6 +245,14 @@ final class ApiController
             json(['ok' => false, 'error' => 'invalid'], 404);
             return;
         }
+
+        // The display key is a bearer credential on an unauthenticated URL:
+        // anyone who photographs the lobby screen has it. Two limits apply —
+        // a per-key ceiling that stops enumeration and a per-IP ceiling that
+        // stops one broken TV from spinning the database.
+        $perMin = (int) Env::get('security.display_key_per_min', 90);
+        RateLimiter::enforce('display:key:' . $key, $perMin, 60);
+        RateLimiter::enforce('display:ip:' . Request::ip(), $perMin * 2, 60);
 
         $clinicId = Db::scalar(
             "SELECT owner_id FROM settings WHERE scope='clinic' AND key_name='display_token' AND value = ?",

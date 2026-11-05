@@ -33,6 +33,12 @@ final class AdminController
             'title' => 'Platform overview',
             'clinics' => $clinics,
             'mrr' => $mrr,
+            // Monitoring is only useful if a person sees it. The same checks
+            // the /api/health probe exposes are shown here as alerts, so an
+            // operator who never curls the endpoint still learns that the
+            // worker died or a backup is stale.
+            'alerts' => (new \App\Services\MonitorService())->openAlerts(),
+            'health' => (new \App\Services\MonitorService())->run(),
             'totals' => [
                 'clinics' => count($clinics),
                 'active' => count(array_filter($clinics, fn ($c) => $c['billing_status'] === 'active')),

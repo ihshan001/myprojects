@@ -61,14 +61,22 @@ final class Auth
         return self::role() === self::ROLE_SUPER;
     }
 
+    /** @var array<int, array<string, mixed>|null> */
+    private static array $clinicCache = [];
+
     public static function clinic(): ?array
     {
         $cid = self::clinicId();
         if (!$cid) {
             return null;
         }
-        static $cache = [];
-        return $cache[$cid] ??= Db::one('SELECT * FROM clinics WHERE id = ?', [$cid]);
+        // A real static property (not a function-static) so it can be cleared
+        // deliberately — see forgetClinicCache(). Function statics are
+        // invisible and therefore impossible to invalidate.
+        if (!array_key_exists($cid, self::$clinicCache)) {
+            self::$clinicCache[$cid] = Db::one('SELECT * FROM clinics WHERE id = ?', [$cid]) ?: null;
+        }
+        return self::$clinicCache[$cid];
     }
 
     /**
@@ -174,9 +182,31 @@ final class Auth
             ]);
         }
 
+        // Step-up: a correct password is not yet a session when the account
+        // has two-factor enabled. The half-authenticated state is a *pending*
+        // marker in the session — deliberately NOT `user_id`, so every
+        // Auth::check() in the app keeps failing until the second factor
+        // arrives. That is what makes this safe to add retroactively.
+        if (!empty($user['totp_enabled_at'])) {
+            Session::regenerate();
+            Session::put('2fa_pending_user_id', (int) $user['id']);
+            Session::put('2fa_pending_at', time());
+            Log::info('auth.2fa_challenge', ['user' => $user['id'], 'ip' => $ip]);
+            return [true, $user, '2fa_required'];
+        }
+
+        self::completeLogin($user, $ip);
+        return [true, $user, null];
+    }
+
+    /** Finish authentication after either a password-only or a 2FA login. */
+    public static function completeLogin(array $user, string $ip = ''): void
+    {
         Db::run('UPDATE users SET last_login_at = ? WHERE id = ?', [Db::now(), $user['id']]);
 
         Session::regenerate();
+        Session::forget('2fa_pending_user_id');
+        Session::forget('2fa_pending_at');
         Session::put('user_id', (int) $user['id']);
         Csrf::rotate();
 
@@ -185,8 +215,45 @@ final class Auth
             Session::put('clinic_id', (int) $user['clinic_id']);
         }
 
+        // The clinic row can change under a long-lived session (plan change,
+        // suspension, rebranding), and Auth::clinic() caches it statically.
+        self::forgetClinicCache();
+
         Log::info('auth.login', ['user' => $user['id'], 'role' => $user['role'], 'ip' => $ip]);
-        return [true, $user, null];
+    }
+
+    /** The user id awaiting a second factor, if any. */
+    public static function pendingTwoFactorId(): ?int
+    {
+        $id = Session::get('2fa_pending_user_id');
+        if (!$id) {
+            return null;
+        }
+        // A password prompt left open overnight must not stay valid.
+        $started = (int) (Session::get('2fa_pending_at') ?? 0);
+        if ($started > 0 && time() - $started > 600) {
+            Session::forget('2fa_pending_user_id');
+            Session::forget('2fa_pending_at');
+            return null;
+        }
+        return (int) $id;
+    }
+
+    public static function clearTwoFactorPending(): void
+    {
+        Session::forget('2fa_pending_user_id');
+        Session::forget('2fa_pending_at');
+    }
+
+    /**
+     * Drop the per-request clinic cache after anything that can change the
+     * clinic row. Static caches are correct for one HTTP request but wrong
+     * for a long-lived worker process (tools/queue-worker.php), which is
+     * exactly where a stale row would surface as "plan limit already reached".
+     */
+    public static function forgetClinicCache(): void
+    {
+        self::$clinicCache = [];
     }
 
     public static function logout(): void

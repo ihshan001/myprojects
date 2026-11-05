@@ -6,6 +6,30 @@
   <span class="badge-violet">Super admin</span>
 </div>
 
+<?php if (($health['status'] ?? 'ok') !== 'ok' || ($alerts ?? []) !== []): ?>
+  <div class="mt-5 rounded-xl border <?= ($health['status'] ?? 'ok') === 'critical' ? 'border-rose-300 bg-rose-50' : 'border-amber-300 bg-amber-50' ?> px-4 py-3">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <p class="text-xs font-bold <?= ($health['status'] ?? 'ok') === 'critical' ? 'text-rose-900' : 'text-amber-900' ?>">
+        Platform health: <?= e((string) ($health['status'] ?? 'ok')) ?>
+      </p>
+      <a href="/api/health" class="text-[11px] font-semibold underline <?= ($health['status'] ?? 'ok') === 'critical' ? 'text-rose-800' : 'text-amber-800' ?>">
+        Full report
+      </a>
+    </div>
+    <ul class="mt-2 space-y-1">
+      <?php foreach ($alerts as $alert): ?>
+        <li class="text-[11px] leading-relaxed <?= $alert['severity'] === 'critical' ? 'text-rose-800' : 'text-amber-800' ?>">
+          <strong><?= e((string) $alert['code']) ?></strong> — <?= e((string) $alert['message']) ?>
+          <span class="text-[10px] opacity-70">(since <?= e(ago((string) $alert['created_at'])) ?>)</span>
+        </li>
+      <?php endforeach; ?>
+      <?php if (($alerts ?? []) === []): ?>
+        <li class="text-[11px] text-amber-800">No stored alerts, but the live health check is not <code>ok</code>.</li>
+      <?php endif; ?>
+    </ul>
+  </div>
+<?php endif; ?>
+
 <div class="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
   <?php
   $cards = [

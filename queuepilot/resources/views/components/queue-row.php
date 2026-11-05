@@ -46,6 +46,10 @@ $json = htmlspecialchars(json_encode([
       <?php if ($status === 'in_consultation' && !empty($entry['started_at'])): ?>
         · in room <?= e((string) minutes_between($entry['started_at'])) ?> min
       <?php endif; ?>
+      <?php if ($status === 'on_hold'): ?>
+        · <span class="font-semibold text-slate-600"><?= e((string) ($entry['hold_reason'] ?? 'Stepped away')) ?></span>
+        <?php if (!empty($entry['hold_since'])): ?>since <?= e(fmt_time($entry['hold_since'], 'g:i A')) ?><?php endif; ?>
+      <?php endif; ?>
     </p>
   </div>
 
@@ -74,6 +78,12 @@ $json = htmlspecialchars(json_encode([
       <?php endif; ?>
       <?php if (in_array('cancel', $actions, true)): ?>
         <button type="button" class="act-stop" data-act="cancel">Cancel</button>
+      <?php endif; ?>
+      <?php if (in_array('hold', $actions, true)): ?>
+        <button type="button" class="act-mute" data-act="hold">Hold</button>
+      <?php endif; ?>
+      <?php if (in_array('release_hold', $actions, true)): ?>
+        <button type="button" class="act-start" data-act="release_hold">Back to queue</button>
       <?php endif; ?>
       <?php if (in_array('transfer', $actions, true)): ?>
         <button type="button" class="act-mute" data-act="transfer">Transfer</button>

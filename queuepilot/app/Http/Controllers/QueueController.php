@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 use App\Core\Auth;
 use App\Core\Db;
 use App\Core\Request;
+use App\Core\Session;
 use App\Domain\Queue\QueueRepository;
 use App\Domain\Queue\QueueService;
 use App\Domain\Queue\QueueStateMachine;
@@ -110,25 +111,60 @@ final class QueueController
                 (new AppointmentService())->markCheckedIn($clinicId, $appointmentId);
             }
 
-            $link = rtrim((string) \App\Core\Env::get('app.url', ''), '/') . $result['track_url'];
-
-            // Reception gets straight to the printable/sendable confirmation.
-            view('queue/token_issued', [
-                'title' => 'Token ' . $result['token'],
+            // Redirect after issuing, never render the receipt straight from
+            // the POST. A receptionist who refreshes the confirmation page —
+            // which people do when the printer jams — would otherwise resubmit
+            // the form and mint a second token for the same patient.
+            Session::put('issued_token', [
                 'result' => $result,
-                'patient' => $patient,
-                'queue' => Db::one('SELECT * FROM queues WHERE id = ? AND clinic_id = ?', [$queueId, $clinicId]),
-                'fullLink' => $link,
-                'position' => $service->positionFor(
-                    Db::one('SELECT * FROM queue_entries WHERE id = ?', [$result['entry_id']]),
-                    $clinicId
-                ),
+                'patient_id' => (int) $patient['id'],
+                'queue_id' => $queueId,
             ]);
+            redirect('/queue/token-issued');
         } catch (\Throwable $e) {
             \App\Core\Log::error('token.issue.failed', ['error' => $e->getMessage(), 'user' => Auth::id()]);
             flash('error', $e->getMessage());
             redirect('/queue/new');
         }
+    }
+
+    /**
+     * Receipt for the token just issued.
+     *
+     * Reads the one-time payload out of the session, so a refresh shows the
+     * same receipt and never issues anything. If there is no payload (someone
+     * bookmarked it, or reloaded a day later) it sends them back to the desk.
+     */
+    public function tokenIssued(): void
+    {
+        $clinicId = $this->guard();
+        $payload = Session::get('issued_token');
+        if (!is_array($payload) || empty($payload['result'])) {
+            flash('warn', 'That token receipt has expired. Issue a new token or open the live board.');
+            redirect('/app');
+            return;
+        }
+
+        $result = $payload['result'];
+        $patient = (new \App\Services\PatientService())->find($clinicId, (int) $payload['patient_id']);
+        $queue = Db::one('SELECT * FROM queues WHERE id = ? AND clinic_id = ?', [(int) $payload['queue_id'], $clinicId]);
+        $entry = Db::one('SELECT * FROM queue_entries WHERE id = ? AND clinic_id = ?', [(int) $result['entry_id'], $clinicId]);
+
+        if (!$patient || !$queue || !$entry) {
+            Session::forget('issued_token');
+            flash('warn', 'That token is no longer available.');
+            redirect('/app');
+            return;
+        }
+
+        view('queue/token_issued', [
+            'title' => 'Token ' . $result['token'],
+            'result' => $result,
+            'patient' => $patient,
+            'queue' => $queue,
+            'fullLink' => rtrim((string) \App\Core\Env::get('app.url', ''), '/') . $result['track_url'],
+            'position' => (new QueueService())->positionFor($entry, $clinicId),
+        ]);
     }
 
     /** Single queue board. */

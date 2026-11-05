@@ -41,10 +41,34 @@
               <span class="badge-slate">No session today</span>
             <?php endif; ?>
             <?php if (!$doc['is_active']): ?><span class="badge-slate">Inactive</span><?php endif; ?>
+            <?php if (in_array((int) $doc['id'], $awayToday, true)): ?><span class="badge-rose">On leave today</span><?php endif; ?>
           </div>
         </div>
 
         <?php if ($canManage): ?>
+          <details class="mt-3 border-t border-slate-100 pt-3">
+            <summary class="cursor-pointer text-[11px] font-semibold text-slate-500 hover:text-slate-800">Add leave</summary>
+            <form method="post" action="/doctors/leave" class="mt-3 grid gap-2 sm:grid-cols-4">
+              <?= csrf_field() ?>
+              <input type="hidden" name="doctor_id" value="<?= (int) $doc['id'] ?>">
+              <label class="text-[11px] font-semibold text-slate-600">From
+                <input type="date" class="input mt-0.5" name="starts_on" value="<?= e(App\Core\Db::today()) ?>" required>
+              </label>
+              <label class="text-[11px] font-semibold text-slate-600">To
+                <input type="date" class="input mt-0.5" name="ends_on" value="<?= e(App\Core\Db::today()) ?>" required>
+              </label>
+              <label class="text-[11px] font-semibold text-slate-600 sm:col-span-1">Reason
+                <input class="input mt-0.5" name="reason" placeholder="Annual leave" maxlength="120">
+              </label>
+              <div class="flex items-end">
+                <button class="btn-ghost w-full">Record leave</button>
+              </div>
+            </form>
+            <p class="mt-1.5 text-[10px] leading-relaxed text-slate-500">
+              A doctor on leave is not offered on the booking form. Existing appointments are
+              <strong>not</strong> cancelled — you are shown their count and can call the patients.
+            </p>
+          </details>
           <details class="mt-3 border-t border-slate-100 pt-3">
             <summary class="cursor-pointer text-[11px] font-semibold text-slate-500 hover:text-slate-800">Edit details</summary>
             <form method="post" action="/doctors/<?= (int) $doc['id'] ?>" class="mt-3 grid gap-3 sm:grid-cols-2">
@@ -118,6 +142,34 @@
         </form>
       </div>
     <?php endif; ?>
+
+    <div class="card card-pad">
+      <h2 class="text-sm font-bold text-slate-900">Upcoming leave</h2>
+      <?php if (($leave ?? []) === []): ?>
+        <p class="mt-2 text-xs text-slate-400">No leave recorded. The booking form offers every active doctor.</p>
+      <?php else: ?>
+        <table class="table mt-2">
+          <thead><tr><th>Doctor</th><th>Dates</th><th class="hidden sm:table-cell">Reason</th><th></th></tr></thead>
+          <tbody>
+            <?php foreach ($leave as $l): ?>
+              <tr>
+                <td class="text-xs font-semibold text-slate-800"><?= e($l['doctor_name']) ?></td>
+                <td class="text-xs text-slate-600"><?= e($l['starts_on']) ?><?= $l['ends_on'] !== $l['starts_on'] ? ' → ' . e($l['ends_on']) : '' ?></td>
+                <td class="hidden sm:table-cell text-xs text-slate-500"><?= e((string) ($l['reason'] ?? '—')) ?></td>
+                <td class="text-right">
+                  <?php if ($canManage): ?>
+                    <form method="post" action="/doctors/leave/<?= (int) $l['id'] ?>/delete" class="inline">
+                      <?= csrf_field() ?>
+                      <button class="act-mute">Remove</button>
+                    </form>
+                  <?php endif; ?>
+                </td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      <?php endif; ?>
+    </div>
 
     <div class="card card-pad">
       <h2 class="text-sm font-bold text-slate-900">Rooms</h2>

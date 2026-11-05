@@ -3,6 +3,23 @@
 A backup that has never been restored is not a backup. This document is the
 whole procedure, including the verification step that most plans skip.
 
+> **The verification step is now automatic.** `tools/backup.php` takes a
+> snapshot and then *restores it into a scratch database* on every run:
+> `integrity_check`, `foreign_key_check`, required tables, row counts, and a
+> sanity check that the file is not suspiciously small. It records the outcome
+> in `storage/backups/last-backup.json`, and `/api/health` reports **critical**
+> when that record is missing or older than 48 hours.
+>
+> ```bash
+> php tools/backup.php             # back up, verify, record, apply retention
+> php tools/backup.php --verify    # re-run the drill against the newest archive
+> php tools/backup.php --keep 30   # retention override
+> ```
+>
+> What remains a *deployment* decision rather than code: GPG encryption before
+> the archive leaves the host, and the off-host copy. Those are below, because
+> they depend on your key custody and storage.
+
 ## What to back up
 
 | Item | Why | Where |

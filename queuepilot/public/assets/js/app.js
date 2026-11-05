@@ -108,8 +108,13 @@
         return;
       }
     }
-    if (action === 'cancel') {
-      reason = window.prompt('Reason (optional):', '');
+    if (action === 'cancel' || action === 'hold') {
+      // A hold without a reason is just a mystery row on the board, so the
+      // prompt defaults to something a colleague can act on.
+      reason = window.prompt(
+        action === 'hold' ? 'Why is this patient on hold? (e.g. sent for X-ray)' : 'Reason (optional):',
+        action === 'hold' ? 'Stepped away' : ''
+      );
       if (reason === null) return;
     }
 
@@ -307,12 +312,12 @@
         const label = {
           call: 'Call', recall: 'Call again', start: 'Start', complete: 'Complete',
           skip: 'Skip', no_show: 'No show', cancel: 'Cancel', transfer: 'Transfer',
-          requeue: 'Re-queue', priority: 'Priority',
+          requeue: 'Re-queue', priority: 'Priority', hold: 'Hold', release_hold: 'Back to queue',
         }[a] || a;
         const tone = {
           call: 'act-call', recall: 'act-call', start: 'act-start', complete: 'act-done',
           skip: 'act-skip', cancel: 'act-stop', no_show: 'act-mute', transfer: 'act-mute',
-          requeue: 'act-start', priority: 'act-stop',
+          requeue: 'act-start', priority: 'act-stop', hold: 'act-mute', release_hold: 'act-start',
         }[a] || 'act-mute';
         return `<button type="button" class="${tone}" data-act="${a}">${label}</button>`;
       }).join('');

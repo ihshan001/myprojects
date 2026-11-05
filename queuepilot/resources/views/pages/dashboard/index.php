@@ -148,7 +148,7 @@ $avgWait = $summary['avg_wait'] ?? null;
         Every token gets a private link. Print it on the slip or send it by SMS — the patient sees their
         position and an honest wait range, and nothing else.
       </p>
-      <a href="/queue/new?queue=<?= (int) $q['id'] ?>" class="btn-secondary mt-4 w-full">
+      <a href="/queue/new<?= isset($q) && is_array($q) ? '?queue=' . (int) $q['id'] : '' ?>" class="btn-secondary mt-4 w-full">
         <svg class="h-4 w-4"><use href="#i-plus"/></svg>
         Issue a token
       </a>

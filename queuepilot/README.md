@@ -33,8 +33,15 @@ verified against a running server.
 | Billing | plans, per-clinic subscription, invoices, usage meters, suspension keeps all data |
 | Super-admin | tenants, plan limits, MRR, suspend / reactivate |
 | Self-service signup | creates clinic + owner + room + first queue, then logs in |
-| Security | CSRF on every mutation, login rate limiting, tenant scoping on every query, audit log |
+| On-hold state | a patient who steps out keeps their place and their token; distinct from skipped and no-show |
+| Doctor leave | date ranges that remove a doctor from booking (form *and* POST) and report clashing appointments without cancelling them |
+| Staff invitations | single-use, hashed, expiring links; the admin never sets a colleague's password |
+| Two-factor auth | TOTP (RFC 6238) for any account, forced as a second step at login, encrypted secrets, one-use recovery codes |
+| Security | CSRF on every mutation, durable rate limits on login / display key / tracking / booking, tenant scoping on every query, audit log |
 | Roles | reception / doctor / clinic admin / super admin, enforced in the domain layer, not just the UI |
+| Monitoring | `/api/health` with concrete checks (worker backlog, stale sessions, long waits, backup age, schema parity), alert history |
+| Backups | `tools/backup.php` snapshots, then restores and verifies; freshness is a monitored condition |
+| Multi-branch | organisations group clinics for a counts-only roll-up; each branch stays its own tenant |
 | i18n | English, Sinhala, Tamil — navigation is actually translated, not just files on disk |
 | PWA | manifest, service worker, offline shell, installable icons |
 
@@ -197,11 +204,13 @@ tests/run.php                 the suite
 node tools/php.mjs tests/run.php     # or: npm test
 ```
 
-64 checks across the state machine, queue engine, tenant isolation, doctor
+106 checks across the state machine, queue engine, tenant isolation, doctor
 scoping, authorisation, priority ordering, range estimates, notifications,
 CSRF, password hashing, plan limits, suspension durability, QR generation,
-reporting and i18n. The suite builds and destroys its own SQLite database, so
-it never touches demo data.
+reporting, i18n, holds, doctor leave, staff invitations, TOTP (including the
+RFC 6238 reference vectors), durable rate limiting, monitoring, backups and
+organisation roll-ups. The suite builds and destroys its own SQLite database,
+so it never touches demo data.
 
 ```
  State machine          6 ✓
@@ -221,6 +230,14 @@ it never touches demo data.
  QR codes               2 ✓
  Reporting              1 ✓
  Localisation           5 ✓
+ Holds                  5 ✓
+ Doctor leave           3 ✓
+ Two-factor             4 ✓
+ Invitations            5 ✓
+ Rate limiting          4 ✓
+ Monitoring             4 ✓
+ Backups                3 ✓
+ Organisations          4 ✓
 ```
 
 ### Who can do what
@@ -257,13 +274,34 @@ The software supports both: every live surface marks itself stale after 30
 seconds without data, `/api/*` is never cached, and the audit log reconstructs
 exactly what happened while a clinic was on paper.
 
+**`docs/OPERATIONS.md`** is the on-call runbook: what each `/api/health` check
+means, the cron lines, what a stalled worker looks like, how to close an
+abandoned day, and the two settings (`APP_KEY`, `SESSION_PATH`) that break
+sign-in if changed carelessly.
+
 ## Honest status
 
 `docs/SPEC-AUDIT.md` maps every requirement in the brief to its real status:
 built and tested, built but unexercised, or **not built**. It is deliberately
-unflattering in places — the largest remaining gaps are no two-factor
-authentication for platform admins and no automated backup job (the procedure is
-written, nothing runs it yet).
+unflattering in places.
+
+Since the first audit, the two largest gaps were closed:
+
+* **Two-factor authentication** for privileged accounts — TOTP (RFC 6238)
+  with encrypted-at-rest secrets, single-use recovery codes and a mandatory
+  second step at login. A correct password on its own does not create a
+  session. Enrolment lives at `/settings/security`; the on-call notes are in
+  `docs/OPERATIONS.md`.
+* **An automated backup job** — `tools/backup.php` takes a consistent
+  snapshot, then *restores it* into a scratch database and checks integrity,
+  foreign keys and the tables that hold irreplaceable data. It records the
+  result, and `/api/health` fails when that record is stale. A backup that
+  cannot be opened is reported at 02:00, not during an incident.
+
+Still genuinely missing: live payment-gateway settlement (invoices are marked
+paid by hand), physical hardware integration (thermal printers, dispensers),
+and the Phase 3 non-medical vertical packs. `docs/SPEC-AUDIT.md` says so in
+the same words.
 
 ## Deliberate non-goals for v1
 
@@ -280,10 +318,14 @@ diagnoses. No hosting topology is prescribed.
 4. **Notifications** — done: outbox, dedupe, retry, swappable gateways.
 5. **Appointments & reports** — done.
 6. **Billing & super-admin** — done.
-7. **Hardening** — rate limits, CSV, i18n, PWA, tests, healthcheck: done.
+7. **Hardening** — durable rate limits on every public surface, CSV, i18n,
+   PWA, 106 tests, healthcheck: done.
+8. **Operational depth** — on-hold state, doctor leave, staff invitations,
+   two-factor, automated verified backups, monitoring endpoint, multi-branch
+   organisations: done.
    Remaining: load-test the token allocator, add a staging rehearsal script.
-8. **Later** — WebSocket transport, payment-gateway settlement, multi-branch
-   clinics, non-medical vertical packs.
+9. **Later** — WebSocket transport, payment-gateway settlement, hardware
+   integration, non-medical vertical packs.
 
 ## Deploying
 

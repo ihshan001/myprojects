@@ -15,6 +15,7 @@ use App\Http\Controllers\BillingController;
 use App\Http\Controllers\ClinicController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DisplayController;
+use App\Http\Controllers\MonitorController;
 use App\Http\Controllers\PatientController;
 use App\Http\Controllers\PublicController;
 use App\Http\Controllers\QueueController;
@@ -34,6 +35,19 @@ Router::get('/sw.js', [PublicController::class, 'serviceWorker']);
 /* ----------------------------------------------------------------- auth */
 Router::get('/login', [AuthController::class, 'showLogin']);
 Router::post('/login', [AuthController::class, 'login']);
+// Step-up (second factor). Public by necessity: the session is deliberately
+// not authenticated until these succeed.
+Router::get('/login/2fa', [AuthController::class, 'showTwoFactor']);
+Router::post('/login/2fa', [AuthController::class, 'submitTwoFactor']);
+Router::post('/login/2fa/cancel', [AuthController::class, 'cancelTwoFactor']);
+// Staff invitation acceptance
+Router::get('/invite/{token}', [AuthController::class, 'showInvite'], ['csrf' => false]);
+Router::post('/invite/{token}', [AuthController::class, 'acceptInvite']);
+// Account security (2FA enrolment) — any signed-in user
+Router::get('/settings/security', [AuthController::class, 'security'], ['auth' => true]);
+Router::post('/settings/security/2fa/begin', [AuthController::class, 'beginTwoFactor'], ['auth' => true]);
+Router::post('/settings/security/2fa/confirm', [AuthController::class, 'confirmTwoFactor'], ['auth' => true]);
+Router::post('/settings/security/2fa/disable', [AuthController::class, 'disableTwoFactor'], ['auth' => true]);
 Router::post('/logout', [AuthController::class, 'logout'], ['auth' => true]);
 Router::post('/locale', [AuthController::class, 'locale']);
 
@@ -42,6 +56,7 @@ Router::get('/app', [DashboardController::class, 'index'], ['auth' => true, 'abi
 Router::get('/queue/new', [QueueController::class, 'newPatient'], ['auth' => true, 'ability' => 'queue.issue']);
 Router::post('/queue/new', [QueueController::class, 'createEntry'], ['auth' => true, 'ability' => 'queue.issue']);
 Router::get('/queue', [QueueController::class, 'show'], ['auth' => true, 'ability' => 'queue.operate']);
+Router::get('/queue/token-issued', [QueueController::class, 'tokenIssued'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::get('/queue/entry', [QueueController::class, 'entry'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/action', [QueueController::class, 'action'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/session', [QueueController::class, 'sessionControl'], ['auth' => true, 'ability' => 'queue.operate']);
@@ -60,10 +75,17 @@ Router::post('/appointments/{id}/checkin', [AppointmentController::class, 'check
 /* ------------------------------------------------- doctors, rooms, staff */
 Router::get('/doctors', [ClinicController::class, 'doctors'], ['auth' => true]);
 Router::post('/doctors', [ClinicController::class, 'storeDoctor'], ['auth' => true, 'ability' => 'doctor.manage']);
+// Leave routes are declared BEFORE `/doctors/{id}`: the router takes the
+// first match, so a literal path must never sit behind a parameter route.
+Router::post('/doctors/leave', [ClinicController::class, 'addLeave'], ['auth' => true, 'ability' => 'doctor.manage']);
+Router::post('/doctors/leave/{id}/delete', [ClinicController::class, 'removeLeave'], ['auth' => true, 'ability' => 'doctor.manage']);
 Router::post('/doctors/{id}', [ClinicController::class, 'updateDoctor'], ['auth' => true, 'ability' => 'doctor.manage']);
 Router::get('/settings', [ClinicController::class, 'settings'], ['auth' => true]);
 Router::post('/settings', [ClinicController::class, 'saveSettings'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/settings/staff', [ClinicController::class, 'storeStaff'], ['auth' => true, 'ability' => 'staff.manage']);
+Router::post('/settings/invites', [ClinicController::class, 'inviteStaff'], ['auth' => true, 'ability' => 'staff.manage']);
+Router::post('/settings/invites/{id}/revoke', [ClinicController::class, 'revokeInvite'], ['auth' => true, 'ability' => 'staff.manage']);
+Router::get('/organisation', [ClinicController::class, 'organisation'], ['auth' => true, 'ability' => 'clinic.manage']);
 
 /* --------------------------------------------------- reports and audits */
 Router::get('/reports', [ReportController::class, 'index'], ['auth' => true, 'ability' => 'reports.view']);
@@ -93,3 +115,8 @@ Router::get('/board/{key}', [DisplayController::class, 'publicScreen']);
 Router::get('/book/{slug}', [PublicController::class, 'bookForm']);
 Router::post('/book/{slug}', [PublicController::class, 'book']);
 Router::get('/api/summary', [ApiController::class, 'summary'], ['auth' => true]);
+
+// Health endpoint for an external monitor. Authorisation is inside the
+// controller (bearer token or super admin) because a "signed-in" probe is not
+// how uptime monitors work.
+Router::get('/api/health', [MonitorController::class, 'show'], ['csrf' => false]);

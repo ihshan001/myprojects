@@ -56,12 +56,20 @@ $slots = ['08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
 
       <label class="label mt-4" for="doctor_id">Doctor</label>
       <select class="select" id="doctor_id" name="doctor_id" required>
+        <?php $anyBookable = false; ?>
         <?php foreach ($doctors as $d): ?>
-          <option value="<?= (int) $d['id'] ?>">
-            <?= e($d['name']) ?><?= !empty($d['specialty']) ? ' — ' . e($d['specialty']) : '' ?>
+          <?php $away = !empty($d['on_leave']); $anyBookable = $anyBookable || !$away; ?>
+          <option value="<?= (int) $d['id'] ?>" <?= $away ? 'disabled' : '' ?>>
+            <?= e($d['name']) ?><?= !empty($d['specialty']) ? ' — ' . e($d['specialty']) : '' ?><?= $away ? ' (on leave)' : '' ?>
           </option>
         <?php endforeach; ?>
       </select>
+
+      <?php if (empty($anyBookable)): ?>
+        <p class="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800">
+          No doctor is available on this date. Pick a different date.
+        </p>
+      <?php endif; ?>
 
       <div class="mt-4 grid grid-cols-2 gap-3">
         <div>

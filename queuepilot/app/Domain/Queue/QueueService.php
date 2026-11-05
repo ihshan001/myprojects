@@ -59,16 +59,18 @@ final class QueueService
             // constraint violation. Both are needed: this one gives the clear
             // message, the index closes the race between two devices.
             $already = Db::one(
-                "SELECT token_label FROM queue_entries
+                "SELECT token_label, status FROM queue_entries
                   WHERE clinic_id = ? AND queue_id = ? AND patient_id = ?
-                    AND status IN ('waiting','called','in_consultation')
+                    AND status IN ('waiting','called','in_consultation','on_hold')
                   LIMIT 1",
                 [$clinicId, $queueId, $patientId]
             );
             if ($already) {
                 throw new \RuntimeException(
                     'This patient already holds token ' . $already['token_label']
-                    . ' in this queue. Recall or complete that entry first.'
+                    . ' in this queue'
+                    . ($already['status'] === 'on_hold' ? ' (currently on hold)' : '')
+                    . '. Recall or complete that entry first.'
                 );
             }
 
@@ -394,6 +396,25 @@ final class QueueService
                     'sort_weight' => 0,
                 ],
                 'Clinical priority set for ' . $entry['token_label'] . '.',
+            ],
+
+            // A hold keeps the token and the place. `sort_weight` is left
+            // alone on purpose: the patient rejoins the line at their original
+            // standing, not at the back.
+            'hold' => [
+                QueueStateMachine::ON_HOLD,
+                [
+                    'hold_reason' => trim((string) ($ctx['reason'] ?? '')) ?: 'Stepped away',
+                    'hold_since'  => $now,
+                    'called_at'   => null,
+                ],
+                $entry['token_label'] . ' put on hold — ' . (trim((string) ($ctx['reason'] ?? '')) ?: 'stepped away') . '.',
+            ],
+
+            'release_hold' => [
+                QueueStateMachine::WAITING,
+                ['hold_reason' => null, 'hold_since' => null],
+                $entry['token_label'] . ' is back in the waiting list.',
             ],
 
             default => throw new InvalidTransition('Unknown action: ' . $action, (string) $entry['status'], '?'),

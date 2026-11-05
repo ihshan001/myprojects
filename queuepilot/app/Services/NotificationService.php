@@ -25,6 +25,10 @@ final class NotificationService
     public const TEMPLATES = [
         'token_issued'   => 'You are {token} in the {queue} queue at {clinic}. Track live: {link}',
         'entry_called'   => 'Your turn is now. Please go to {room}. Token {token} — {clinic}.',
+        // Deliberately a separate template from `entry_called`: "nearly there"
+        // and "go in now" are different instructions, and a patient who
+        // receives the second without the first is not surprised.
+        'entry_approaching' => 'Almost your turn. Token {token} is {ahead} away in the {queue} queue at {clinic}. Please stay nearby.',
         'visit_completed'=> 'Thank you for visiting {clinic}. Token {token} is complete. Get well soon.',
         'appointment_reminder' => 'Reminder: appointment at {clinic} on {when}. Reply to reschedule.',
     ];
@@ -63,6 +67,7 @@ final class NotificationService
             '{clinic}' => (string) $entry['clinic_name'],
             '{room}'   => (string) ($vars['room'] ?? 'the consultation room'),
             '{when}'   => (string) ($vars['when'] ?? ''),
+            '{ahead}'  => (string) ($vars['ahead'] ?? ''),
             '{link}'   => $link,
         ]);
 
@@ -83,6 +88,69 @@ final class NotificationService
                 throw $e;
             }
         }
+    }
+
+    /**
+     * "Your turn is approaching" — sent at most once per entry, and only for
+     * clinics that switched it on.
+     *
+     * The opt-in is per clinic because an SMS costs money and a clinic that
+     * runs a five-minute walk-in line does not want a message for something
+     * the patient can see by looking up. `approach_notified_at` is the
+     * idempotency marker, so a poller that runs every ten seconds cannot send
+     * the same message twelve times a minute.
+     */
+    public function notifyApproaching(int $clinicId, int $queueId): int
+    {
+        $clinic = Db::one(
+            'SELECT notify_approach, approach_threshold FROM clinics WHERE id = ?',
+            [$clinicId]
+        );
+        if (!$clinic || (int) ($clinic['notify_approach'] ?? 0) !== 1) {
+            return 0;
+        }
+        $threshold = max(1, (int) ($clinic['approach_threshold'] ?? 2));
+
+        // The next `threshold` patients in line, in board order (priority
+        // first, then their original standing) — never the raw id order,
+        // because that would message the wrong people in a priority queue.
+        $next = Db::all(
+            "SELECT e.id
+               FROM queue_entries e
+              WHERE e.clinic_id = ? AND e.queue_id = ?
+                AND e.status = 'waiting' AND e.approach_notified_at IS NULL
+              ORDER BY e.priority DESC, e.sort_weight ASC, e.id ASC
+              LIMIT ?",
+            [$clinicId, $queueId, $threshold]
+        );
+
+        $sent = 0;
+        foreach ($next as $row) {
+            $entryId = (int) $row['id'];
+            // Claim the right to send *before* queueing, so two workers cannot
+            // both decide to announce the same patient.
+            $claimed = Db::run(
+                'UPDATE queue_entries SET approach_notified_at = ?
+                  WHERE id = ? AND clinic_id = ? AND approach_notified_at IS NULL',
+                [Db::now(), $entryId, $clinicId]
+            )->rowCount();
+            if ($claimed !== 1) {
+                continue;
+            }
+
+            $position = (int) Db::scalar(
+                "SELECT COUNT(*) FROM queue_entries
+                  WHERE queue_id = ? AND status = 'waiting' AND id <> ?
+                    AND (priority > (SELECT priority FROM queue_entries WHERE id = ?)
+                         OR (priority = (SELECT priority FROM queue_entries WHERE id = ?)
+                             AND sort_weight <= (SELECT sort_weight FROM queue_entries WHERE id = ?)))",
+                [$queueId, $entryId, $entryId, $entryId, $entryId]
+            ) + 1;
+
+            $this->queue($clinicId, $entryId, 'entry_approaching', ['ahead' => $position . ' place' . ($position === 1 ? '' : 's')]);
+            $sent++;
+        }
+        return $sent;
     }
 
     /** Called by the worker (tools/queue-worker.php). Returns counts. */

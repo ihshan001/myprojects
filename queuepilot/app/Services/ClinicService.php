@@ -140,7 +140,8 @@ final class ClinicService
     {
         Db::run(
             'UPDATE clinics SET name = ?, phone = ?, email = ?, address_line = ?, city = ?, district = ?,
-                    brand_color = ?, locale = ?, token_prefix = ?, late_grace_minutes = ?, updated_at = ?
+                    brand_color = ?, locale = ?, token_prefix = ?, late_grace_minutes = ?,
+                    notify_approach = ?, approach_threshold = ?, updated_at = ?
               WHERE id = ?',
             [
                 $data['name'], $data['phone'] ?? null, $data['email'] ?? null,
@@ -148,9 +149,14 @@ final class ClinicService
                 $data['brand_color'] ?: '#0F766E', $data['locale'] ?: 'en',
                 strtoupper(substr(trim((string) ($data['token_prefix'] ?? '')), 0, 2)),
                 (int) ($data['late_grace_minutes'] ?? 15),
+                !empty($data['notify_approach']) ? 1 : 0,
+                max(1, min(10, (int) ($data['approach_threshold'] ?? 2))),
                 Db::now(), $clinicId,
             ]
         );
+        // The settings save can change the clinic row the current request has
+        // already cached (Auth::clinic()).
+        \App\Core\Auth::forgetClinicCache();
     }
 
     /** Suspension keeps all data; it only blocks new sessions. */
