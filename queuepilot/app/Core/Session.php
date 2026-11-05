@@ -24,12 +24,16 @@ final class Session
         }
 
         session_name((string) Env::get('security.session_name', 'qp_session'));
+        // SameSite=None lets the session cookie survive cross-origin proxying
+        // (e.g. the live preview at https://{port}-{sandboxId}.e2b.app), where
+        // Lax would be dropped on the redirect after login. Secure is required
+        // for None and is already derived from X-Forwarded-Proto above.
         session_set_cookie_params([
             'lifetime' => 0,
             'path'     => '/',
             'secure'   => $secure,
             'httponly' => true,
-            'samesite' => 'Lax',
+            'samesite' => $secure ? 'None' : 'Lax',
         ]);
         ini_set('session.use_strict_mode', '1');
         ini_set('session.use_only_cookies', '1');
