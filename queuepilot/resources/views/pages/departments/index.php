@@ -17,6 +17,9 @@
 <div class="mt-5 grid gap-5 lg:grid-cols-[1.4fr_.8fr]">
   <div class="space-y-3">
     <?php foreach ($departments as $d): ?>
+      <?php // Resolved once per card: the action row and the body both need it,
+            // and defining it inside one branch left the other undefined. ?>
+      <?php $dkey = $displayKeys[(int) $d['id']] ?? null; ?>
       <div class="card card-pad <?= (int) $d['is_active'] === 1 ? '' : 'opacity-60' ?>">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -38,6 +41,26 @@
             <?php if (!empty($d['description'])): ?>
               <p class="mt-1.5 max-w-prose text-xs leading-relaxed text-slate-500"><?= e($d['description']) ?></p>
             <?php endif; ?>
+
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <?php if ($dkey !== null): ?>
+                <span class="max-w-[24rem] truncate rounded bg-slate-50 px-2 py-1 font-mono text-[10px] text-slate-500" title="<?= e($dkey) ?>">
+                  <?= e($dkey) ?>
+                </span>
+                <a class="text-[10px] font-medium text-teal-700 hover:underline" href="<?= e($dkey) ?>" target="_blank">open display</a>
+              <?php else: ?>
+                <span class="text-[10px] text-slate-400">No display link yet — this TV would show the whole clinic.</span>
+              <?php endif; ?>
+              <?php if ($canManage): ?>
+                <form method="post" action="/departments/<?= (int) $d['id'] ?>/display-key"
+                      onsubmit="return confirm('<?= $dkey !== null ? 'Replace the existing display link? Screens using the old one stop updating.' : 'Issue a display link for this department?' ?>')">
+                  <?= csrf_field() ?>
+                  <button class="text-[10px] font-medium text-slate-500 underline hover:text-slate-700">
+                    <?= $dkey !== null ? 'rotate link' : 'issue link' ?>
+                  </button>
+                </form>
+              <?php endif; ?>
+            </div>
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <a class="btn-secondary btn-sm" href="/departments/<?= (int) $d['id'] ?>">Today's board</a>

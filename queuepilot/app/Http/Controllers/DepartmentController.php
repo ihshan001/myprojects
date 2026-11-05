@@ -39,6 +39,19 @@ final class DepartmentController
                 [$clinicId, Db::today()]
             ),
             'canManage' => Auth::can('clinic.manage'),
+            // Each department's existing display link, if one was issued.
+            'displayKeys' => array_reduce(
+                $service->all($clinicId),
+                function (array $carry, array $d) use ($clinicId): array {
+                    $key = $this->displayKeyFor($clinicId, (int) $d['id']);
+                    if ($key !== null) {
+                        $carry[(int) $d['id']] = rtrim((string) \App\Core\Env::get('app.url', ''), '/') . '/board/' . $key;
+                    }
+                    return $carry;
+                },
+                []
+            ),
+            'newDisplayKey' => \App\Core\Session::takeFlash('department_display_key'),
             'active' => 'departments',
         ]);
     }
@@ -141,6 +154,60 @@ final class DepartmentController
         ]);
         flash('success', $target === null ? 'Cleared the department assignment.' : 'Assigned to the department.');
         redirect('/departments');
+    }
+
+    /**
+     * Issue (or re-issue) the public display link for one department.
+     *
+     * A separate token per department rather than a query string, because the
+     * link is a bearer credential on a TV screen in a public corridor: it must
+     * address exactly one department and nothing else.
+     *
+     * Rotating replaces the value in place; every TV using the old link stops
+     * updating, which is the intended behaviour if a screen was stolen or a
+     * contractor kept a copy.
+     */
+    public function issueDisplayKey(string $id): void
+    {
+        $clinicId = $this->clinicId();
+        $service = new DepartmentService();
+        $department = $service->find($clinicId, (int) $id);
+        if (!$department) {
+            abort(404, 'That department does not exist in this clinic.');
+            return;
+        }
+
+        $keyName = 'display.department.' . (int) $id;
+        $token = \App\Core\Str::urlToken(20);
+
+        Db::run(
+            "INSERT INTO settings (scope, owner_id, key_name, value) VALUES ('clinic', ?, ?, ?)
+             ON CONFLICT (scope, owner_id, key_name) DO UPDATE SET value = excluded.value",
+            [$clinicId, $keyName, $token]
+        );
+
+        (new \App\Services\AuditService())->log($clinicId, 'department.display_key_issued', 'department', (int) $id);
+        \App\Core\Session::flash('department_display_key', [
+            'id' => (int) $id,
+            'url' => rtrim((string) \App\Core\Env::get('app.url', ''), '/') . '/board/' . $token,
+        ]);
+
+        flash('success', 'Display link issued for ' . $department['name'] . '. The old link, if any, no longer updates.');
+        redirect('/departments');
+    }
+
+    /**
+     * Read the department's current key. Kept in a private method so the
+     * template can be handed a URL rather than having to know the settings
+     * layout.
+     */
+    private function displayKeyFor(int $clinicId, int $departmentId): ?string
+    {
+        $value = Db::scalar(
+            "SELECT value FROM settings WHERE scope = 'clinic' AND owner_id = ? AND key_name = ?",
+            [$clinicId, 'display.department.' . $departmentId]
+        );
+        return $value !== null ? (string) $value : null;
     }
 
     /** Today's board for one department — also drives the per-department display. */

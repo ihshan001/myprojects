@@ -2134,6 +2134,78 @@ Assert::test('the printable slip is 80mm and escapes user text', function (): vo
 });
 
 /* ------------------------------------------------------------------ */
+/* 37. appointment reminders                                           */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a reminder is queued once and only once', function (): void {
+    $tomorrow = date('Y-m-d', strtotime('+1 day'));
+    $patient = Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (1,?,?,?,?)',
+        ['RM' . bin2hex(random_bytes(2)), 'Reminder Patient', '+94771234500', Db::now()]
+    );
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1 LIMIT 1');
+    $apptId = Db::insert(
+        'INSERT INTO appointments (clinic_id, doctor_id, patient_id, scheduled_for, duration_minutes, status, source, created_at)
+         VALUES (1,?,?,?,15,?,?,?)',
+        [$doctorId, $patient, $tomorrow . ' 09:15:00', 'booked', 'online', Db::now()]
+    );
+
+    $service = new App\Services\NotificationService();
+    $service->notifyAppointmentReminders($tomorrow);
+    $first = (int) Db::scalar('SELECT COUNT(*) FROM notifications WHERE dedupe_key = ?', ['appointment_reminder:' . $apptId]);
+    Assert::same(1, $first, 'one reminder after the first pass');
+
+    $service->notifyAppointmentReminders($tomorrow);
+    $service->notifyAppointmentReminders($tomorrow);
+    Assert::same(1, (int) Db::scalar('SELECT COUNT(*) FROM notifications WHERE dedupe_key = ?', ['appointment_reminder:' . $apptId]), 'still one after three passes');
+});
+
+Assert::test('no reminder for a cancelled appointment or one with no phone', function (): void {
+    $tomorrow = date('Y-m-d', strtotime('+1 day'));
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1 LIMIT 1');
+
+    $p1 = Db::insert('INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (1,?,?,?,?)',
+        ['RX' . bin2hex(random_bytes(2)), 'Cancelled', '+94771234501', Db::now()]);
+    $cancelled = Db::insert(
+        'INSERT INTO appointments (clinic_id, doctor_id, patient_id, scheduled_for, duration_minutes, status, source, created_at)
+         VALUES (1,?,?,?,15,?,?,?)',
+        [$doctorId, $p1, $tomorrow . ' 10:15:00', 'cancelled', 'online', Db::now()]
+    );
+
+    $p2 = Db::insert('INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (1,?,?,?,?)',
+        ['RN' . bin2hex(random_bytes(2)), 'No Phone', '', Db::now()]);
+    $noPhone = Db::insert(
+        'INSERT INTO appointments (clinic_id, doctor_id, patient_id, scheduled_for, duration_minutes, status, source, created_at)
+         VALUES (1,?,?,?,15,?,?,?)',
+        [$doctorId, $p2, $tomorrow . ' 11:15:00', 'booked', 'online', Db::now()]
+    );
+
+    (new App\Services\NotificationService())->notifyAppointmentReminders($tomorrow);
+
+    Assert::same(0, (int) Db::scalar('SELECT COUNT(*) FROM notifications WHERE dedupe_key = ?', ['appointment_reminder:' . $cancelled]));
+    Assert::same(0, (int) Db::scalar('SELECT COUNT(*) FROM notifications WHERE dedupe_key = ?', ['appointment_reminder:' . $noPhone]));
+});
+
+Assert::test('a reminder names the real appointment time', function (): void {
+    $tomorrow = date('Y-m-d', strtotime('+1 day'));
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1 LIMIT 1');
+    $patient = Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (1,?,?,?,?)',
+        ['RT' . bin2hex(random_bytes(2)), 'Timed Patient', '+94771234502', Db::now()]
+    );
+    $apptId = Db::insert(
+        'INSERT INTO appointments (clinic_id, doctor_id, patient_id, scheduled_for, duration_minutes, status, source, created_at)
+         VALUES (1,?,?,?,15,?,?,?)',
+        [$doctorId, $patient, $tomorrow . ' 14:45:00', 'booked', 'online', Db::now()]
+    );
+
+    (new App\Services\NotificationService())->notifyAppointmentReminders($tomorrow);
+    $payload = json_decode((string) Db::scalar('SELECT payload_json FROM notifications WHERE dedupe_key = ?', ['appointment_reminder:' . $apptId]), true);
+
+    Assert::contains('2:45 PM', (string) ($payload['body'] ?? ''), 'the body carries the appointment time');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

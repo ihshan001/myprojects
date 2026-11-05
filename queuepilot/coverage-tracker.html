@@ -103,8 +103,8 @@
   </div>
 
   <div class="legend">
-    <span><i class="dot built"></i> 100 built</span>
-    <span><i class="dot partial"></i> 23 partial</span>
+    <span><i class="dot built"></i> 102 built</span>
+    <span><i class="dot partial"></i> 21 partial</span>
     <span><i class="dot missing"></i> 0 not built</span>
   </div>
 
@@ -582,9 +582,9 @@
         <label class="row">
           <input type="checkbox" class="tick" data-id="Patient experience|Appointment reminders">
           <span class="name">Appointment reminders</span>
-          <span class="pill partial">Partial</span>
+          <span class="pill built">Built</span>
         </label>
-        <p class="note">A template exists (<code>appointment_reminder</code>). <strong>Nothing schedules or sends it</strong> — no reminder job is wired.</p>
+        <p class="note">The worker queues a reminder for every booked appointment the next day, once per appointment, skipping cancelled ones and patients with no phone. Body names the real time (<code>Fri 6 Nov, 9:30 AM</code>).</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
@@ -734,9 +734,9 @@
         <label class="row">
           <input type="checkbox" class="tick" data-id="Displays and hardware|Department-specific displays">
           <span class="name">Department-specific displays</span>
-          <span class="pill partial">Partial</span>
+          <span class="pill built">Built</span>
         </label>
-        <p class="note"><code>/departments/{id}</code> shows a department board. <strong>There is no kiosk display URL scoped to a department</strong> for a TV.</p>
+        <p class="note">Each department issues its own unguessable <code>/board/{key}</code> link, filterable to that department only, with counters matching the board. Verified: Outpatient screen shows 4 waiting, clinic screen 9.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
@@ -1183,7 +1183,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (145 automated checks, 127 files lint-clean, healthcheck green).
+    application (148 automated checks, 127 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.

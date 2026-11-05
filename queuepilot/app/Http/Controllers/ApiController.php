@@ -239,6 +239,27 @@ final class ApiController
     }
 
     /** Waiting-room display: read-only, short-lived token, no names. */
+    /**
+     * Which department, if any, this display key is scoped to.
+     *
+     * Department keys live in `settings` under `display.department.<id>`, one
+     * row each, so rotating one screen does not disturb the others.
+     */
+    private function departmentForKey(int $clinicId, string $key): ?int
+    {
+        $rows = Db::all(
+            "SELECT key_name, value FROM settings
+              WHERE scope = 'clinic' AND owner_id = ? AND key_name LIKE 'display.department.%'",
+            [$clinicId]
+        );
+        foreach ($rows as $row) {
+            if (hash_equals((string) $row['value'], $key)) {
+                return (int) substr((string) $row['key_name'], strlen('display.department.'));
+            }
+        }
+        return null;
+    }
+
     public function display(string $key): void
     {
         if (!preg_match('/^[A-Za-z0-9_-]{12,64}$/', $key)) {
@@ -258,16 +279,52 @@ final class ApiController
             "SELECT owner_id FROM settings WHERE scope='clinic' AND key_name='display_token' AND value = ?",
             [$key]
         );
+
+        // A department display key is a token of its own rather than the clinic
+        // key plus a parameter. Try it when the clinic key misses, so a screen
+        // issued for one waiting area keeps working.
+        $scopedDepartment = null;
+        if (!$clinicId) {
+            $row = Db::one(
+                "SELECT owner_id, key_name FROM settings
+                  WHERE scope='clinic' AND key_name LIKE 'display.department.%' AND value = ?",
+                [$key]
+            );
+            if ($row) {
+                $clinicId = (int) $row['owner_id'];
+                $scopedDepartment = (int) substr((string) $row['key_name'], strlen('display.department.'));
+            }
+        }
         if (!$clinicId) {
             json(['ok' => false, 'error' => 'not_found'], 404);
             return;
         }
         $clinicId = (int) $clinicId;
 
+        // A display may be scoped to one department, which is what makes a
+        // second TV in a separate waiting area show the right board instead of
+        // the whole clinic.
+        //
+        // The scope is looked up from the key itself: a department key is its
+        // own unguessable token stored alongside the clinic key. Reading the
+        // scope from the query string would let anybody holding one screen's
+        // URL display another department's patients.
+        if ($scopedDepartment === null) {
+            $scopedDepartment = $this->departmentForKey($clinicId, $key);
+        }
+
         $queues = Db::all(
-            "SELECT * FROM queues WHERE clinic_id = ? AND session_date = ? AND status <> 'closed'",
-            [$clinicId, Db::today()]
+            "SELECT * FROM queues WHERE clinic_id = ? AND session_date = ? AND status <> 'closed'"
+            . ($scopedDepartment !== null ? ' AND department_id = ?' : ''),
+            $scopedDepartment !== null
+                ? [$clinicId, Db::today(), (int) $scopedDepartment]
+                : [$clinicId, Db::today()]
         );
+
+        // The header needs a name, not an id.
+        $departmentName = $scopedDepartment !== null
+            ? Db::scalar('SELECT name FROM departments WHERE id = ? AND clinic_id = ?', [(int) $scopedDepartment, $clinicId])
+            : null;
 
         $serving = null;
         $upcoming = [];
@@ -316,6 +373,7 @@ final class ApiController
 
         json([
             'ok' => true,
+            'department' => $departmentName,
             'now_serving' => $serving,
             'upcoming' => array_slice($upcoming, 0, 6),
             'delays' => $delays,
@@ -324,12 +382,29 @@ final class ApiController
                 array_filter($queues, static fn (array $q): bool => ($q['status'] ?? '') === 'paused')
             )),
             'stats' => [
-                'waiting' => (int) Db::scalar(
-                    "SELECT COUNT(*) FROM queue_entries e JOIN queues q ON q.id = e.queue_id
-                      WHERE e.clinic_id = ? AND e.status = 'waiting' AND q.session_date = ?",
-                    [$clinicId, Db::today()]
-                ),
-                'completed' => (int) ($stats['completed'] ?? 0),
+                // The count must match the board above it. A department screen
+                // showing four tokens while the footer says nine is the kind of
+                // inconsistency that makes staff stop trusting the screen.
+                'waiting' => $scopedDepartment !== null
+                    ? (int) Db::scalar(
+                        "SELECT COUNT(*) FROM queue_entries e JOIN queues q ON q.id = e.queue_id
+                          WHERE e.clinic_id = ? AND e.status = 'waiting' AND q.session_date = ?
+                            AND q.department_id = ?",
+                        [$clinicId, Db::today(), (int) $scopedDepartment]
+                    )
+                    : (int) Db::scalar(
+                        "SELECT COUNT(*) FROM queue_entries e JOIN queues q ON q.id = e.queue_id
+                          WHERE e.clinic_id = ? AND e.status = 'waiting' AND q.session_date = ?",
+                        [$clinicId, Db::today()]
+                    ),
+                'completed' => $scopedDepartment !== null
+                    ? (int) Db::scalar(
+                        "SELECT COUNT(*) FROM queue_entries e JOIN queues q ON q.id = e.queue_id
+                          WHERE e.clinic_id = ? AND e.status = 'completed' AND q.session_date = ?
+                            AND q.department_id = ?",
+                        [$clinicId, Db::today(), (int) $scopedDepartment]
+                    )
+                    : (int) ($stats['completed'] ?? 0),
             ],
             'server_time' => date('h:i A'),
         ]);

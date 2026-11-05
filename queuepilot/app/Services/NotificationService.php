@@ -154,6 +154,84 @@ final class NotificationService
     }
 
     /** Called by the worker (tools/queue-worker.php). Returns counts. */
+    /**
+     * Queue reminders for tomorrow's appointments.
+     *
+     * Runs from the worker, not from a web request: a reminder is a scheduled
+     * obligation, and tying it to somebody visiting a page means it is sent
+     * only when the clinic happens to be busy.
+     *
+     * Idempotency is the same `dedupe_key` mechanism as every other message —
+     * `appointment_reminder:<id>` — so running the worker sixty times in an
+     * hour still sends one reminder per appointment.
+     *
+     * Nothing is sent for an appointment that is already cancelled, already
+     * checked in, or whose clinic has SMS switched off.
+     *
+     * @return int how many reminders were newly queued
+     */
+    public function notifyAppointmentReminders(?string $forDate = null): int
+    {
+        $date = $forDate ?? date('Y-m-d', strtotime('+1 day'));
+        $queued = 0;
+
+        $appointments = Db::all(
+            "SELECT a.id, a.clinic_id, a.scheduled_for, p.full_name, p.phone,
+                    c.name AS clinic_name, d.name AS doctor_name
+               FROM appointments a
+               JOIN patients p ON p.id = a.patient_id
+               JOIN clinics c ON c.id = a.clinic_id
+               JOIN doctors d ON d.id = a.doctor_id
+              WHERE a.status = 'booked'
+                AND substr(a.scheduled_for, 1, 10) = ?
+                AND p.phone IS NOT NULL AND p.phone <> ''
+                AND c.is_active = 1 AND c.suspended_at IS NULL AND c.closed_at IS NULL",
+            [$date]
+        );
+
+        foreach ($appointments as $a) {
+            $dedupe = 'appointment_reminder:' . (int) $a['id'];
+            if (Db::scalar('SELECT id FROM notifications WHERE dedupe_key = ?', [$dedupe]) !== null) {
+                continue;
+            }
+
+            $when = date('D j M, g:i A', strtotime((string) $a['scheduled_for']));
+            $body = strtr(self::TEMPLATES['appointment_reminder'], [
+                '{clinic}' => (string) $a['clinic_name'],
+                '{when}'   => $when,
+                '{token}'  => '',
+                '{queue}'  => (string) $a['doctor_name'],
+                '{room}'   => '',
+                '{ahead}'  => '',
+                '{link}'   => '',
+            ]);
+
+            try {
+                Db::insert(
+                    'INSERT INTO notifications (clinic_id, entry_id, channel, template, to_number, payload_json,
+                        dedupe_key, status, attempts, scheduled_at, created_at)
+                     VALUES (?,?,?,?,?,?,?,?,0,?,?)',
+                    [
+                        (int) $a['clinic_id'], null, 'sms', 'appointment_reminder',
+                        self::mask((string) $a['phone']),
+                        json_encode(['body' => $body, 'vars' => ['when' => $when], 'to' => (string) $a['phone']], JSON_UNESCAPED_UNICODE),
+                        $dedupe, 'queued', Db::now(), Db::now(),
+                    ]
+                );
+                $queued++;
+            } catch (\PDOException $e) {
+                if (!str_contains($e->getMessage(), 'UNIQUE') && !str_contains($e->getMessage(), 'Duplicate')) {
+                    throw $e;
+                }
+            }
+        }
+
+        if ($queued > 0) {
+            Log::info('notification.reminders_queued', ['date' => $date, 'count' => $queued]);
+        }
+        return $queued;
+    }
+
     public function processDue(int $limit = 50): array
     {
         $due = Db::all(

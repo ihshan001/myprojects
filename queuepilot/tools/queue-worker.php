@@ -34,10 +34,18 @@ do {
         $approaching += $service->notifyApproaching($clinicId, (int) $q['id']);
     }
 
+    // Appointment reminders for tomorrow. Idempotent through the dedupe key,
+    // so running this on every pass costs one indexed lookup per appointment
+    // and never sends a second message.
+    $reminders = $service->notifyAppointmentReminders();
+
     $result = $service->processDue(50);
     $stamp = date('Y-m-d H:i:s');
     if ($approaching > 0) {
         echo "[{$stamp}] queued {$approaching} approaching notice(s)\n";
+    }
+    if ($reminders > 0) {
+        echo "[{$stamp}] queued {$reminders} appointment reminder(s) for tomorrow\n";
     }
     if ($result['processed'] === 0) {
         echo "[{$stamp}] queue empty\n";

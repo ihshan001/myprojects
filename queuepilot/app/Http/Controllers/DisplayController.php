@@ -53,10 +53,31 @@ final class DisplayController
      */
     public function publicScreen(string $key): void
     {
+        // A department display key is its own token, so this screen has to
+        // recognise both kinds. Looking only at `display_token` made department
+        // links 404 even though they had just been issued.
         $clinicId = Db::scalar(
             "SELECT owner_id FROM settings WHERE scope='clinic' AND key_name='display_token' AND value = ?",
             [$key]
         );
+
+        $departmentName = null;
+        if (!$clinicId) {
+            $row = Db::one(
+                "SELECT owner_id, key_name FROM settings
+                  WHERE scope='clinic' AND key_name LIKE 'display.department.%' AND value = ?",
+                [$key]
+            );
+            if ($row) {
+                $clinicId = (int) $row['owner_id'];
+                $departmentId = (int) substr((string) $row['key_name'], strlen('display.department.'));
+                $departmentName = Db::scalar(
+                    'SELECT name FROM departments WHERE id = ? AND clinic_id = ?',
+                    [$departmentId, $clinicId]
+                );
+            }
+        }
+
         if (!$clinicId) {
             abort(404, 'This screen link is not valid. Ask the clinic for a new one.');
         }
@@ -67,12 +88,13 @@ final class DisplayController
         }
 
         view('display/screen', [
-            'title' => 'Waiting room',
+            'title' => $departmentName !== null ? $departmentName . ' — waiting room' : 'Waiting room',
             'key' => $key,
             'clinicRecord' => $clinic,
             'queues' => [],
             'canRotate' => false,
             'publicScreen' => true,
+            'departmentName' => $departmentName,
         ], false);
     }
 

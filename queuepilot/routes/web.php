@@ -109,6 +109,7 @@ Router::post('/departments/assign', [DepartmentController::class, 'assign'], ['a
 Router::get('/departments/{id}', [DepartmentController::class, 'show'], ['auth' => true]);
 Router::post('/departments/{id}', [DepartmentController::class, 'update'], ['auth' => true, 'ability' => 'department.manage']);
 Router::post('/departments/{id}/deactivate', [DepartmentController::class, 'deactivate'], ['auth' => true, 'ability' => 'department.manage']);
+Router::post('/departments/{id}/display-key', [DepartmentController::class, 'issueDisplayKey'], ['auth' => true, 'ability' => 'department.manage']);
 
 // Operating calendar: per-doctor weekly schedules and clinic closure days.
 Router::get('/calendar', [CalendarController::class, 'index'], ['auth' => true]);
