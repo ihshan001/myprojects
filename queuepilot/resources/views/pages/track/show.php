@@ -153,6 +153,73 @@ $tone = match ($s['status']) {
     </div>
   <?php endif; ?>
 
+  <?php if (($moved = \App\Core\Session::takeFlash('reschedule_ok')) !== null): ?>
+    <div class="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-3 text-xs leading-relaxed text-emerald-900">
+      <b>Your appointment has been moved to <?= e($moved) ?>.</b>
+      Your place in today's queue is unchanged. The clinic has been told.
+    </div>
+  <?php elseif (($why = \App\Core\Session::takeFlash('reschedule_refused')) !== null): ?>
+    <div class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-xs leading-relaxed text-amber-900">
+      <b>It is too late to change this booking from here.</b>
+      <?php if ($why === 'no_appointment'): ?>
+        This visit was a walk-in, not a booking, so there is nothing to reschedule.
+      <?php elseif ($why === 'called'): ?>
+        Your token has been called — please speak to reception if you need another day.
+      <?php else: ?>
+        This visit has moved past the waiting stage. Please speak to reception.
+      <?php endif; ?>
+    </div>
+  <?php endif; ?>
+
+  <?php if (!empty($appointment)): ?>
+    <div class="mt-4 rounded-xl bg-white/80 px-3.5 py-3 ring-1 ring-slate-200">
+      <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Your booking</p>
+      <p class="mt-1 text-sm text-slate-800">
+        <?= e(fmt_time((string) $appointment['scheduled_for'], 'l j M')) ?> at
+        <span class="font-semibold"><?= e(substr((string) $appointment['scheduled_for'], 11, 5)) ?></span>
+      </p>
+
+      <details class="mt-2">
+        <summary class="cursor-pointer text-xs font-medium text-teal-700">I need a different day or time</summary>
+        <form method="get" action="/t/<?= e($token) ?>" class="mt-2 flex gap-2">
+          <input class="input text-xs" type="date" name="date" value="<?= e($rescheduleDate) ?>"
+                 min="<?= e(\App\Core\Db::today()) ?>">
+          <button class="btn-secondary btn-sm shrink-0 text-xs" type="submit">Show times</button>
+        </form>
+
+        <?php if ($rescheduleSlots['reason'] !== null): ?>
+          <p class="mt-2 text-[11px] leading-relaxed text-amber-800"><?= e((string) $rescheduleSlots['reason']) ?></p>
+        <?php elseif ($rescheduleSlots['slots'] === []): ?>
+          <p class="mt-2 text-[11px] leading-relaxed text-slate-500">
+            No times are open on that day. Try another date, or call the clinic.
+          </p>
+        <?php else: ?>
+          <form method="post" action="/t/<?= e($token) ?>/reschedule" class="mt-2 space-y-2">
+            <?= csrf_field() ?>
+            <input type="hidden" name="date" value="<?= e($rescheduleDate) ?>">
+            <div class="grid grid-cols-3 gap-1.5">
+              <?php foreach ($rescheduleSlots['slots'] as $slot): ?>
+                <label class="cursor-pointer">
+                  <input type="radio" name="time" value="<?= e($slot) ?>" class="peer sr-only" required>
+                  <span class="block rounded-lg border border-slate-200 bg-white px-1 py-1.5 text-center text-[11px] text-slate-700
+                               peer-checked:border-teal-600 peer-checked:bg-teal-50 peer-checked:font-semibold peer-checked:text-teal-800">
+                    <?= e($slot) ?>
+                  </span>
+                </label>
+              <?php endforeach; ?>
+            </div>
+            <button class="btn w-full justify-center bg-teal-700 text-xs text-white" type="submit">
+              Move my appointment to this time
+            </button>
+            <p class="text-[10px] leading-relaxed text-slate-400">
+              You stay with <?= e((string) $s['doctor'] ?? 'the same doctor') ?>. To see someone else, call the clinic.
+            </p>
+          </form>
+        <?php endif; ?>
+      </details>
+    </div>
+  <?php endif; ?>
+
   <?php if ($s['status'] === 'waiting'): ?>
     <form method="post" action="/t/<?= e($token) ?>/cancel" class="mt-4"
           onsubmit="return confirm('Cancel your visit and give up your place in the queue?');">

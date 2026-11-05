@@ -127,6 +127,7 @@ final class Auth
                 'clinic.manage', 'staff.manage', 'doctor.manage', 'department.manage',
                 'queue.operate', 'queue.call', 'queue.consult', 'queue.priority',
                 'queue.issue', 'reports.view', 'billing.view', 'patient.manage',
+                'appointment.manage', 'appointment.cancel_day',
                 'support.manage', 'notification.manage',
             ],
             self::ROLE_RECEPTION => [
@@ -139,13 +140,18 @@ final class Auth
                 // runs. `queue.priority` is deliberately absent — that decision
                 // needs a clinician's judgement and a recorded reason.
                 'queue.operate', 'queue.call', 'queue.consult', 'queue.issue',
-                'patient.manage', 'appointment.manage',
+                'patient.manage', 'appointment.manage', 'appointment.cancel_day',
                 'reports.view', 'reports.view.basic', 'support.create',
             ],
             self::ROLE_DOCTOR => [
                 // A doctor works the same board as reception, but the UI hides
                 // issuing tokens and other patients' queues (isDoctor branch).
                 'queue.operate', 'queue.call', 'queue.consult', 'queue.priority',
+                // A doctor calling off their own day is clinical authority over
+                // their own list, not desk authority over the clinic's bookings:
+                // the ability is narrow (`appointment.cancel_day`) and the
+                // controller still limits it to the doctor's own record.
+                'appointment.cancel_day',
                 'reports.view.own', 'patient.view', 'support.create',
             ],
         ];

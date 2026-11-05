@@ -198,18 +198,31 @@ foreach ($public as $route) {
 // in the list above deliberately. Flag only the ones that touch clinic data.
 // Each of these is reachable precisely because the person using it is not
 // signed in yet: signing in (including the second factor), creating an
-// account, booking, the patient's own cancel link, password recovery, the
-// invitation that creates the account, and the two public health/service
-// endpoints. A POST appearing here that is not deliberate is the finding.
+// account, booking, the patient's own cancel and reschedule links, the signed
+// booking link, password recovery, the invitation that creates the account,
+// and the two public health/service endpoints. A POST appearing here that is
+// not deliberate is the finding.
+//
+// The three patient-owned routes are safe to expose for the same reason and
+// are worth naming: the credential is either a 128-bit queue token or an
+// HMAC over the appointment id and its current time. Neither can be guessed,
+// neither can be re-pointed at another patient, and the signed link stops
+// working the moment the booking moves. Rate limits are per credential, so a
+// shared phone cannot exhaust another patient's allowance.
 $expectedPublicPosts = [
-    '/login', '/register', '/book/{slug}', '/t/{token}/cancel', '/forgot-password',
-    '/reset-password/{token}', '/invite/{token}', '/login/2fa', '/login/2fa/cancel', '/logout', '/locale',
+    '/login', '/register', '/book/{slug}', '/t/{token}/cancel', '/t/{token}/reschedule',
+    '/a/{token}/reschedule', '/a/{token}/cancel',
+    '/forgot-password', '/reset-password/{token}', '/invite/{token}',
+    '/login/2fa', '/login/2fa/cancel', '/logout', '/locale',
 ];
 $unexpected = array_values(array_filter($mutating, static function (string $route) use ($expectedPublicPosts): bool {
     $path = explode(' ', $route, 2)[1] ?? '';
     foreach ($expectedPublicPosts as $allowed) {
         if (str_contains($allowed, '{')) {
             $pattern = '#^' . str_replace(['/', '{slug}', '{token}'], ['\/', '[^/]+', '[^/]+'], $allowed) . '$#';
+            // `[^/]+` already includes '.', which is what a signed booking link
+            // needs (`/a/13.4c5c…`). Spelled out here so the next person does
+            // not "tighten" it to `[A-Za-z0-9_-]+` and break the link.
             if (preg_match($pattern, $path) === 1) {
                 return false;
             }

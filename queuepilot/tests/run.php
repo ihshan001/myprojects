@@ -3781,6 +3781,105 @@ Assert::test('a whatsapp notification the log transport records is never counted
 });
 
 /* ------------------------------------------------------------------ */
+/* 56. The patient reschedules — booking page and tracking link         */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a signed booking link is the credential, and it dies when the booking moves', function (): void {
+    $svc = new App\Services\AppointmentService();
+    $sig = App\Services\AppointmentService::manageSignature(41, '2026-12-01 09:30:00');
+
+    Assert::true(
+        App\Services\AppointmentService::manageTokenValid(41, '2026-12-01 09:30:00', $sig),
+        'the link the clinic issued works'
+    );
+    Assert::false(
+        App\Services\AppointmentService::manageTokenValid(41, '2026-12-01 10:30:00', $sig),
+        'the same signature against a moved appointment does not'
+    );
+    Assert::false(
+        App\Services\AppointmentService::manageTokenValid(42, '2026-12-01 09:30:00', $sig),
+        'and it cannot be pasted onto another patient by changing the id'
+    );
+    Assert::false(
+        App\Services\AppointmentService::manageTokenValid(41, '2026-12-01 09:30:00', str_repeat('a', 32)),
+        'a guessed signature is refused'
+    );
+    Assert::contains('/a/41.', App\Services\AppointmentService::manageUrl(41, '2026-12-01 09:30:00'),
+        'the link the patient receives is the one the route serves');
+});
+
+Assert::test('a patient can move their own booking, and the day-cancel returns everybody', function (): void {
+    seedTenant(91, 'resched', 'Reschedule Clinic');
+    $svc = new App\Services\AppointmentService();
+    $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 91 ORDER BY id LIMIT 1');
+    $day = date('Y-m-d', strtotime('+3 days'));
+
+    $mine = Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (91,?,?,?,?)',
+        ['R1', 'Mover One', '0771230001', Db::now()]
+    );
+    $other = Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (91,?,?,?,?)',
+        ['R2', 'Mover Two', '0771230002', Db::now()]
+    );
+    $first = $svc->create(91, $doctorId, $mine, $day . ' 09:00:00', 'online');
+    $second = $svc->create(91, $doctorId, $other, $day . ' 09:15:00', 'online');
+
+    $moved = $svc->reschedule(91, $first, $day . ' 15:00:00', 'Patient called');
+    Assert::same($first, (int) $moved['appointment_id'], 'moving keeps the same appointment row');
+    Assert::same($day . ' 09:00:00', (string) $moved['from'], 'and reports the time it came from');
+    $row = Db::one('SELECT scheduled_for, status, notes FROM appointments WHERE id = ?', [$first]);
+    Assert::same($day . ' 15:00:00', (string) $row['scheduled_for'], 'the new time is stored');
+    Assert::same('booked', (string) $row['status'], 'and the booking is still live');
+    Assert::contains('Moved from', (string) $row['notes'], 'with a note saying where it came from');
+
+    $refused = 0;
+    foreach ([
+        [$first, $day . ' 09:15:00'],      // somebody else's slot
+        [$first, date('Y-m-d', strtotime('-1 day')) . ' 09:00:00'], // the past
+    ] as [$id, $when]) {
+        try {
+            $svc->reschedule(91, $id, $when, 'probe');
+        } catch (\RuntimeException) {
+            $refused++;
+        }
+    }
+    Assert::same(2, $refused, 'a taken slot and a past time are both refused');
+
+    // Give the row a history first, so the cancel can prove it appends.
+    $before = (string) Db::scalar('SELECT notes FROM appointments WHERE id = ?', [$first]);
+    $auditBefore = (int) Db::scalar("SELECT COUNT(*) FROM audit_logs WHERE action = 'appointment.day_cancelled' AND clinic_id = 91");
+
+    $closed = $svc->cancelDay(91, $doctorId, $day, 'Doctor unwell', 1);
+    Assert::same(2, (int) $closed['cancelled'], 'cancelling the day returns every live booking that day');
+    Assert::same(2, count($closed['patients']), 'and names every patient, so somebody can ring them');
+    Assert::true($closed['patients'][0]['phone'] !== null, 'with the number the desk needs');
+
+    $after = (string) Db::scalar('SELECT notes FROM appointments WHERE id = ?', [$first]);
+    Assert::contains($before, $after, 'cancelling appends to the note instead of erasing why it had moved');
+    Assert::contains('Doctor unavailable', $after, 'and records the reason it was cancelled');
+
+    Assert::same(
+        $auditBefore + 1,
+        (int) Db::scalar("SELECT COUNT(*) FROM audit_logs WHERE action = 'appointment.day_cancelled' AND clinic_id = 91"),
+        'exactly one audit entry, not one from the service and a copy from the controller'
+    );
+
+    $again = $svc->cancelDay(91, $doctorId, $day, 'Doctor unwell', 1);
+    Assert::same(0, (int) $again['cancelled'], 'a second cancel of the same day finds nothing');
+    Assert::same(
+        $auditBefore + 1,
+        (int) Db::scalar("SELECT COUNT(*) FROM audit_logs WHERE action = 'appointment.day_cancelled' AND clinic_id = 91"),
+        'and writes no audit entry for an action that changed nothing'
+    );
+    Assert::same(0, (int) Db::scalar(
+        "SELECT COUNT(*) FROM appointments WHERE clinic_id = 91 AND doctor_id = ? AND substr(scheduled_for,1,10) = ? AND status IN ('booked','checked_in')",
+        [$doctorId, $day]
+    ), 'and leaves nothing bookable behind');
+    Assert::true($second > 0, 'both rows existed before the cancel');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

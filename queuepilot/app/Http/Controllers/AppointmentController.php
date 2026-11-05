@@ -95,6 +95,96 @@ final class AppointmentController
         redirect('/appointments?date=' . urlencode($date));
     }
 
+    /**
+     * The doctor cannot come in: cancel their whole day in one action.
+     *
+     * Why this is not "cancel twenty appointments one at a time":
+     *
+     *   * A doctor phoning at 07:00 will not tap twenty times, so the desk
+     *     ends up cancelling a day by not telling anybody — the worst outcome,
+     *     because those patients travel.
+     *   * The response **names every patient and their number**, so the person
+     *     who does this has a call list. The software can free the slots; it
+     *     cannot apologise, and pretending otherwise is how clinics lose trust.
+     *   * Nothing is deleted. Rows keep their time and status so the day's
+     *     history still explains itself afterwards.
+     *
+     * A doctor may only cancel **their own** day. `users.doctor_id` is the
+     * link; a doctor with no doctor record cannot use this at all, which is
+     * the correct failure — the alternative is guessing.
+     */
+    public function cancelDay(): void
+    {
+        $clinicId = $this->clinicId();
+        $date = Request::string('date', Db::today());
+        $doctorId = Request::int('doctor_id');
+        $reason = trim(Request::string('reason'));
+
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) !== 1) {
+            flash('error', 'Choose the day to cancel.');
+            redirect('/appointments');
+            return;
+        }
+
+        if (Auth::role() === Auth::ROLE_DOCTOR) {
+            $own = (int) Db::scalar('SELECT doctor_id FROM users WHERE id = ?', [(int) Auth::id()]);
+            if ($own === 0) {
+                abort(403, 'Your account is not linked to a doctor record.');
+                return;
+            }
+            if ($doctorId !== 0 && $doctorId !== $own) {
+                abort(403, 'You can only cancel your own list.');
+                return;
+            }
+            $doctorId = $own;
+        }
+
+        $doctor = (new DoctorService())->find($clinicId, $doctorId);
+        if (!$doctor) {
+            flash('error', 'Choose a doctor at this clinic.');
+            redirect('/appointments?date=' . urlencode($date));
+            return;
+        }
+
+        // Deliberately refuses a day that has already gone: cancelling the past
+        // rewrites a record that has already been read, and the patients have
+        // either been seen or not. Nothing good comes of it.
+        if (strtotime($date) < strtotime(Db::today())) {
+            flash('error', 'That day has already passed. Cancel a future day instead.');
+            redirect('/appointments?date=' . urlencode($date));
+            return;
+        }
+
+        // The service writes the audit entry itself, with the count as it
+        // actually found it — logging again here produced two rows per action,
+        // one of them a copy that could disagree.
+        $result = (new AppointmentService())->cancelDay(
+            $clinicId,
+            $doctorId,
+            $date,
+            $reason === '' ? null : $reason,
+            (int) Auth::id()
+        );
+
+        if ((int) $result['cancelled'] === 0) {
+            flash('warn', 'Nothing was booked for ' . $doctor['name'] . ' on ' . $date . ', so nothing changed.');
+            redirect('/appointments?date=' . urlencode($date) . '&doctor=' . $doctorId);
+            return;
+        }
+
+        // The call list travels with the confirmation, because the next thing
+        // the person needs is the phone numbers — not a success notice.
+        \App\Core\Session::flash('cancel_day_result', [
+            'doctor' => (string) $doctor['name'],
+            'date' => $date,
+            'count' => (int) $result['cancelled'],
+            'patients' => $result['patients'],
+        ]);
+        flash('success', (string) $result['cancelled'] . ' appointment(s) cancelled for ' . $doctor['name'] . ' on '
+            . date('D j M', strtotime($date)) . '.');
+        redirect('/appointments?date=' . urlencode($date) . '&doctor=' . $doctorId);
+    }
+
     /** Check in an appointment: issues a token and links it to the booking. */
     public function checkin(string $id): void
     {

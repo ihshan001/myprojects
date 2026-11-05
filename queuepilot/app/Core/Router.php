@@ -28,9 +28,15 @@ final class Router
     private static function add(string $method, string $path, callable|array $handler, array $opts): void
     {
         // Compile /queue/{id} into a regex, capturing named params.
+        //
+        // `.` is in the charset because a self-service link carries its
+        // signature in the same segment — `/a/13.4c5c…` — so the patient sees
+        // one usable address rather than two segments to keep together. Every
+        // handler still validates its own format (`/t/{token}` rejects a dot),
+        // so widening the router does not widen what any route accepts.
         $regex = preg_replace_callback(
             '/\{([a-zA-Z_]+)\}/',
-            static fn (array $m): string => '(?P<' . $m[1] . '>[A-Za-z0-9_-]{1,128})',
+            static fn (array $m): string => '(?P<' . $m[1] . '>[A-Za-z0-9_.-]{1,128})',
             $path
         );
         self::$routes[] = [

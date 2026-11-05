@@ -48,13 +48,24 @@ $brand = $clinicRecord['brand_color'] ?: '#0F766E';
         you will join the walk-in queue instead.
       </p>
 
-      <a class="btn-secondary mt-5 w-full" href="/book/<?= e((string) $clinicRecord['slug']) ?>">
+      <div class="mt-5 rounded-xl border border-teal-200 bg-teal-50 p-4 text-left">
+        <p class="text-xs font-semibold text-teal-900">Changed your mind?</p>
+        <p class="mt-1 text-[11px] leading-relaxed text-teal-800">
+          Open your appointment page to move it to another time or cancel it. Keep the
+          link — it is your key, and you do not need a password.
+        </p>
+        <a class="btn mt-3 w-full justify-center bg-teal-700 text-xs text-white" href="<?= e($manageUrl) ?>">
+          Manage this appointment
+        </a>
+      </div>
+
+      <a class="btn-secondary mt-3 w-full" href="/book/<?= e((string) $clinicRecord['slug']) ?>">
         Book another appointment
       </a>
 
       <?php if (!empty($clinicRecord['phone'])): ?>
         <p class="mt-4 text-xs text-slate-500">
-          Need to change it? Call
+          Prefer to speak to someone? Call
           <a class="font-semibold text-teal-700" href="tel:<?= e(preg_replace('/[^0-9+]/', '', (string) $clinicRecord['phone'])) ?>">
             <?= e((string) $clinicRecord['phone']) ?>
           </a>

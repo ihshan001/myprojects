@@ -506,7 +506,7 @@
           <span class="name">Session cancellation</span>
           <span class="pill built">Built</span>
         </label>
-        <p class="note">Close with acknowledgement marks unseen patients <code>no_show</code> with a note, an event and an audit row.</p>
+        <p class="note">Two ways. Closing a queue with acknowledgement marks unseen patients <code>no_show</code> with a note, an event and an audit row. Separately, <code>POST /appointments/cancel-day</code> cancels every live <em>booking</em> for one doctor on one day in a single transaction, appends the reason to each note instead of replacing its history, cancels the queued reminders, and writes exactly one audit entry — none if there was nothing to cancel. The response is a call list naming every patient with a tappable number. A doctor can only cancel their own list: posting another doctor's id returns 403, and a doctor account with no linked record is refused rather than guessed at.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
@@ -530,7 +530,7 @@
           <span class="name">Online appointment booking</span>
           <span class="pill built">Built</span>
         </label>
-        <p class="note"><code>/book/{slug}</code> builds real slots from hours × roster − bookings − leave.</p>
+        <p class="note"><code>/book/{slug}</code> builds real slots from hours × roster − bookings − leave. The confirmation page then hands the patient a signed <code>/a/{id}.{signature}</code> link so they can move or cancel the booking themselves, with no password: the HMAC covers the id <em>and</em> the current time, so it stops working the moment the booking moves, and cannot be re-pointed at another patient. Verified live — moved a booking, landed on a freshly signed link, then cancelled it and got a 410 that explains what happened. The reminder SMS carries the same link.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
@@ -546,7 +546,7 @@
           <span class="name">Private tracking links</span>
           <span class="pill built">Built</span>
         </label>
-        <p class="note"><code>/t/{token}</code> — 128-bit token, no PII beyond the token, expiring.</p>
+        <p class="note"><code>/t/{token}</code> — 128-bit token, no PII beyond the token, expiring. A visit that came from a booking also gets a slot picker on the same page, so the patient reschedules without calling: <code>POST /t/{token}/reschedule</code> re-checks <code>SlotService::isOffered</code> rather than trusting the posted time, keeps the doctor from the entry (a patient picks a time, not a clinician), refuses once the token is <code>called</code>, and allows 5 moves an hour per link. Moving cancels the reminder queued for the old time.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">
@@ -1122,7 +1122,7 @@
           <span class="name">Security testing</span>
           <span class="pill partial">Partial</span>
         </label>
-        <p class="note">225 automated checks, adversarial curl probes each session, and <code>npm run security</code> — a standing check of dependency advisories (136 packages, 0 known), runtime settings, secrets in the tree, every unauthenticated route, and whether a finished notification still holds a patient's number. It found a real leak while being written. <strong>Still no external penetration test — that is a person's engagement, not code.</strong></p>
+        <p class="note">227 automated checks, adversarial curl probes each session, and <code>npm run security</code> — a standing check of dependency advisories (136 packages, 0 known), runtime settings, secrets in the tree, every unauthenticated route, and whether a finished notification still holds a patient's number. It found a real leak while being written. <strong>Still no external penetration test — that is a person's engagement, not code.</strong></p>
       </li>
     </ul>
   </section>
@@ -1193,7 +1193,7 @@
 
   <footer>
     Generated from a code audit on 5 November 2026, verified against the running
-    application (225 automated checks, 162 files lint-clean, healthcheck green).
+    application (227 automated checks, 164 files lint-clean, healthcheck green).
     Ticks are stored in this browser only; nothing is sent anywhere.<br>
     Companion document: <code>scenarios.md</code> maps the same features onto the
     CarePoint scenario groups with the evidence for each claim.

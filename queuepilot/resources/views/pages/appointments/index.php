@@ -95,3 +95,77 @@
     </form>
   </div>
 </div>
+
+<?php
+// The day-cancel call list. Kept on the page after the action rather than on a
+// separate screen: the person who just cancelled twenty bookings needs the
+// phone numbers in front of them, not a link to go and find them.
+$cancelResult = \App\Core\Session::takeFlash('cancel_day_result');
+?>
+<?php if (is_array($cancelResult)): ?>
+  <div class="card mt-5 overflow-hidden ring-2 ring-amber-200">
+    <div class="border-b border-amber-200 bg-amber-50 px-4 py-3">
+      <p class="text-sm font-bold text-amber-900">
+        <?= (int) $cancelResult['count'] ?> patient(s) need a call
+      </p>
+      <p class="mt-0.5 text-xs text-amber-800">
+        <?= e((string) $cancelResult['doctor']) ?> · <?= e(date('l j M', strtotime((string) $cancelResult['date']))) ?>.
+        Their slots are free again; these people do not know yet.
+      </p>
+    </div>
+    <ul class="divide-y divide-slate-100">
+      <?php foreach ($cancelResult['patients'] as $p): ?>
+        <li class="flex items-center justify-between gap-3 px-4 py-2.5">
+          <div class="min-w-0">
+            <p class="truncate text-sm text-slate-800"><?= e((string) $p['name']) ?></p>
+            <p class="text-[11px] text-slate-400">was booked for <?= e((string) $p['time']) ?></p>
+          </div>
+          <?php if (!empty($p['phone'])): ?>
+            <a class="btn-secondary btn-sm shrink-0 text-xs" href="tel:<?= e(preg_replace('/[^\d+]/', '', (string) $p['phone'])) ?>">
+              Call <?= e((string) $p['phone']) ?>
+            </a>
+          <?php else: ?>
+            <span class="text-[11px] text-rose-600">no number on file</span>
+          <?php endif; ?>
+        </li>
+      <?php endforeach; ?>
+    </ul>
+    <p class="border-t border-slate-100 px-4 py-2.5 text-[11px] leading-relaxed text-slate-500">
+      Nothing was deleted — the day's history still shows what was booked and that it was cancelled.
+    </p>
+  </div>
+<?php endif; ?>
+
+<?php
+// Only offered when there is something to cancel, and only for a day that has
+// not happened. A form that can only fail is worse than no form.
+$cancelDoctor = $doctorId ?? null;
+$futureDay = strtotime($date) >= strtotime(\App\Core\Db::today());
+?>
+<?php if ($futureDay && $appointments !== [] && $cancelDoctor !== null): ?>
+  <details class="card mt-5 p-4">
+    <summary class="cursor-pointer text-sm font-medium text-slate-700">
+      The doctor cannot come in — cancel this whole day
+    </summary>
+    <form method="post" action="/appointments/cancel-day" class="mt-3 space-y-3"
+          onsubmit="return confirm('Cancel every live booking for this doctor on this day? Each patient will need a call.');">
+      <?= csrf_field() ?>
+      <input type="hidden" name="date" value="<?= e($date) ?>">
+      <input type="hidden" name="doctor_id" value="<?= (int) $cancelDoctor ?>">
+      <div>
+        <label class="label" for="reason">Reason (recorded, shown to staff)</label>
+        <input class="input" id="reason" name="reason" maxlength="120" placeholder="Doctor unwell, rescheduled theatre list…">
+      </div>
+      <p class="text-[11px] leading-relaxed text-slate-500">
+        Every live booking for this doctor on <?= e(date('D j M', strtotime($date))) ?> becomes
+        <b>cancelled</b>, and the next screen lists every patient with their number so someone can
+        ring them. Bookings are not deleted. This cannot be undone from here.
+      </p>
+      <button class="btn w-full justify-center border border-rose-300 bg-white text-sm text-rose-700 hover:bg-rose-50"
+              <?= $doctors === [] ? 'disabled' : '' ?>>
+        Cancel <?= count(array_filter($appointments, static fn ($a) => in_array($a['status'], ['booked', 'checked_in'], true))) ?>
+        live booking(s)
+      </button>
+    </form>
+  </details>
+<?php endif; ?>

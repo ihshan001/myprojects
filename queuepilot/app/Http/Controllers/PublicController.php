@@ -71,8 +71,31 @@ final class PublicController
         // Full link for the "share/print" affordance, never exposes clinic ids.
         $fullLink = rtrim((string) Env::get('app.url', ''), '/') . '/t/' . $token;
 
+        // A visit that came from a booking carries the appointment, so the
+        // patient can move it from the same link they use to watch the queue.
+        // Only while the visit is still `waiting`: once the doctor has called
+        // the token, changing the booking underneath the consultation would
+        // contradict the board.
+        $appointment = null;
+        if (!empty($entry['appointment_id']) && (string) $entry['status'] === 'waiting') {
+            $appointment = Db::one(
+                "SELECT id, scheduled_for, status FROM appointments
+                  WHERE id = ? AND clinic_id = ? AND status IN ('booked','checked_in')",
+                [(int) $entry['appointment_id'], (int) $entry['clinic_id']]
+            );
+        }
+
         view('track/show', [
             'title' => 'Token ' . $snapshot['token'],
+            'appointment' => $appointment,
+            'rescheduleDate' => \App\Core\Request::string('date', substr((string) ($appointment['scheduled_for'] ?? Db::today()), 0, 10)),
+            'rescheduleSlots' => $appointment !== null
+                ? (new \App\Services\SlotService())->slotsFor(
+                    (int) $entry['clinic_id'],
+                    (int) $entry['doctor_id'],
+                    \App\Core\Request::string('date', substr((string) $appointment['scheduled_for'], 0, 10))
+                )
+                : ['slots' => [], 'reason' => null],
             'snapshot' => $snapshot,
             'token' => $token,
             'qr' => QrCode::dataUri($fullLink, 4, '#0f172a', '#ffffff'),
@@ -153,6 +176,104 @@ final class PublicController
             flash('error', $result['message']);
         }
 
+        redirect('/t/' . $token);
+    }
+
+    /**
+     * A patient moves their own appointment from the tracking link.
+     *
+     * Same authorisation as cancelling: the 128-bit token, held only by that
+     * patient. Same limits, and one more:
+     *
+     *   * Only a `waiting` visit with a live appointment can be moved. Once
+     *     the doctor has called the token, the patient is in the room, not
+     *     rebooking.
+     *   * The **doctor is taken from the entry**, never from the form. A
+     *     patient can pick a time, not a different doctor — moving to another
+     *     clinician is a reception conversation, not a link.
+     *   * The slot must be one the clinic is actually offering; `isOffered`
+     *     is asked rather than trusting the posted string, so a crafted POST
+     *     cannot put an appointment at 03:00 on a closed day.
+     *
+     * A `late` arrival is not moved automatically: it is still a booked
+     * appointment and arriving late does not forfeit the booking.
+     */
+    public function rescheduleTracked(string $token): void
+    {
+        if (!preg_match('/^[A-Za-z0-9_-]{16,64}$/', $token)) {
+            http_response_code(404);
+            view('track/invalid', ['title' => 'Link not valid'], false);
+            return;
+        }
+
+        $entry = (new QueueRepository())->entryByToken($token);
+        $expired = $entry && $entry['track_expires_at'] !== null
+            && strtotime((string) $entry['track_expires_at']) < time();
+        if (!$entry || $expired) {
+            http_response_code($entry ? 410 : 404);
+            view('track/invalid', [
+                'title' => $entry ? 'Link expired' : 'Link not valid',
+                'expired' => (bool) $entry,
+                'clinicPhone' => $entry['clinic_phone'] ?? null,
+            ], false);
+            return;
+        }
+
+        // A link is public. Five moves an hour is enough for anybody honest and
+        // not enough to grind through a clinic's whole day.
+        $limit = \App\Core\RateLimiter::hit('track-reschedule:' . $token, 5, 3600);
+        if (!$limit['allowed']) {
+            flash('error', 'Too many changes from this link. Please call the clinic.');
+            redirect('/t/' . $token);
+            return;
+        }
+
+        if ((string) $entry['status'] !== 'waiting') {
+            Session::flash('reschedule_refused', (string) $entry['status']);
+            redirect('/t/' . $token);
+            return;
+        }
+        if (empty($entry['appointment_id'])) {
+            Session::flash('reschedule_refused', 'no_appointment');
+            redirect('/t/' . $token);
+            return;
+        }
+
+        $date = Request::string('date');
+        $time = Request::string('time');
+        $clinicId = (int) $entry['clinic_id'];
+        $doctorId = (int) $entry['doctor_id'];
+
+        $slots = new \App\Services\SlotService();
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) !== 1
+            || preg_match('/^\d{2}:\d{2}$/', $time) !== 1
+            || !$slots->isOffered($clinicId, $doctorId, $date, $time)) {
+            flash('error', 'That time is not one of the clinic’s slots. Pick one from the list.');
+            redirect('/t/' . $token . '?date=' . urlencode($date));
+            return;
+        }
+
+        try {
+            $result = (new \App\Services\AppointmentService())->reschedule(
+                $clinicId,
+                (int) $entry['appointment_id'],
+                $date . ' ' . $time . ':00',
+                'Moved by patient from the tracking link'
+            );
+        } catch (\RuntimeException $e) {
+            flash('error', $e->getMessage());
+            redirect('/t/' . $token . '?date=' . urlencode($date));
+            return;
+        }
+
+        Db::insert(
+            'INSERT INTO audit_logs (clinic_id, actor_id, action, entity, entity_id, meta_json, created_at)
+             VALUES (?,?,?,?,?,?,?)',
+            [$clinicId, null, 'appointment.rescheduled_by_patient', 'appointment', (int) $entry['appointment_id'],
+             json_encode(['from' => $result['from'], 'to' => $result['to'], 'entry_id' => (int) $entry['id']]), Db::now()]
+        );
+
+        Session::flash('reschedule_ok', $date . ' ' . $time);
         redirect('/t/' . $token);
     }
 
@@ -255,6 +376,185 @@ final class PublicController
      * The clinic is addressed by its slug so a patient can be given a plain
      * link; nothing about the clinic's plan or billing is exposed here.
      */
+    /**
+     * `GET /a/{id}.{signature}` — the page a booked patient opens from their
+     * confirmation or reminder message.
+     *
+     * Everything is derived from the database row, never from the URL beyond
+     * the id; the signature only proves the holder was given the link. A
+     * patient therefore cannot enumerate `/a/1`, `/a/2` and read who is
+     * seeing which doctor.
+     */
+    public function manageAppointment(string $token): void
+    {
+        $post = $this->loadManagedAppointment($token);
+        if ($post === null) {
+            return; // loadManagedAppointment already rendered the 404/410
+        }
+        [$appointment, $clinic] = $post;
+
+        $slots = new \App\Services\SlotService();
+        $date = Request::string('date', substr((string) $appointment['scheduled_for'], 0, 10));
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) !== 1) {
+            $date = substr((string) $appointment['scheduled_for'], 0, 10);
+        }
+        $availability = $slots->slotsFor((int) $appointment['clinic_id'], (int) $appointment['doctor_id'], $date);
+
+        view('book/manage', [
+            'title' => 'Your appointment · ' . $clinic['name'],
+            'clinicRecord' => $clinic,
+            'appointment' => $appointment,
+            'token' => $token,
+            'date' => $date,
+            'slots' => $availability['slots'],
+            'slotReason' => $availability['reason'],
+            'horizon' => $slots->horizonDays((int) $appointment['clinic_id']),
+            'moved' => Session::takeFlash('manage_moved'),
+            'cancelled' => Session::takeFlash('manage_cancelled'),
+            'error' => Session::takeFlash('manage_error'),
+        ], false);
+    }
+
+    /** `POST /a/{id}.{signature}/reschedule` */
+    public function rescheduleManaged(string $token): void
+    {
+        $post = $this->loadManagedAppointment($token);
+        if ($post === null) {
+            return;
+        }
+        [$appointment, $clinic] = $post;
+        $appointmentId = (int) $appointment['id'];
+
+        // Rate limited per booking, not per IP: a family on one phone shares
+        // an address, and a shared clinic tablet shares one with everybody.
+        $limit = \App\Core\RateLimiter::hit('manage-reschedule:' . $appointmentId, 5, 3600);
+        if (!$limit['allowed']) {
+            Session::flash('manage_error', 'Too many changes. Please call the clinic.');
+            redirect('/a/' . $token);
+            return;
+        }
+
+        $date = Request::string('date');
+        $time = Request::string('time');
+        $slots = new \App\Services\SlotService();
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) !== 1
+            || preg_match('/^\d{2}:\d{2}$/', $time) !== 1
+            || !$slots->isOffered((int) $appointment['clinic_id'], (int) $appointment['doctor_id'], $date, $time)) {
+            Session::flash('manage_error', 'That time is not one of the clinic’s slots. Pick one from the list.');
+            redirect('/a/' . $token . '?date=' . urlencode($date));
+            return;
+        }
+
+        try {
+            $result = (new \App\Services\AppointmentService())->reschedule(
+                (int) $appointment['clinic_id'],
+                $appointmentId,
+                $date . ' ' . $time . ':00',
+                'Moved by the patient from their booking link'
+            );
+        } catch (\RuntimeException $e) {
+            Session::flash('manage_error', $e->getMessage());
+            redirect('/a/' . $token . '?date=' . urlencode($date));
+            return;
+        }
+
+        (new \App\Services\AuditService())->log((int) $appointment['clinic_id'], 'appointment.rescheduled_by_patient', 'appointment', $appointmentId, [
+            'from' => $result['from'], 'to' => $result['to'], 'via' => 'booking_link',
+        ]);
+
+        // The signature covers the old time, so the page they are redirected
+        // to is the one the new time signs — otherwise a successful move would
+        // land the patient on "this link is no longer valid".
+        $fresh = Db::one('SELECT scheduled_for FROM appointments WHERE id = ?', [$appointmentId]);
+        $nextToken = $appointmentId . '.' . \App\Services\AppointmentService::manageSignature($appointmentId, (string) $fresh['scheduled_for']);
+        Session::flash('manage_moved', $date . ' ' . $time);
+        redirect('/a/' . $nextToken);
+    }
+
+    /** `POST /a/{id}.{signature}/cancel` */
+    public function cancelManaged(string $token): void
+    {
+        $post = $this->loadManagedAppointment($token);
+        if ($post === null) {
+            return;
+        }
+        [$appointment, $clinic] = $post;
+        $appointmentId = (int) $appointment['id'];
+
+        $limit = \App\Core\RateLimiter::hit('manage-cancel:' . $appointmentId, 5, 3600);
+        if (!$limit['allowed']) {
+            Session::flash('manage_error', 'Too many changes. Please call the clinic.');
+            redirect('/a/' . $token);
+            return;
+        }
+
+        $service = new \App\Services\AppointmentService();
+        try {
+            $service->cancel((int) $appointment['clinic_id'], $appointmentId, 'Cancelled by the patient from their booking link');
+        } catch (\RuntimeException $e) {
+            Session::flash('manage_error', $e->getMessage());
+            redirect('/a/' . $token);
+            return;
+        }
+
+        (new \App\Services\AuditService())->log((int) $appointment['clinic_id'], 'appointment.cancelled_by_patient', 'appointment', $appointmentId, [
+            'via' => 'booking_link',
+        ]);
+        Session::flash('manage_cancelled', true);
+        redirect('/a/' . $token);
+    }
+
+    /**
+     * Resolve `{id}.{signature}` to a live appointment, or render the refusal.
+     *
+     * Returns null after rendering, so callers only have to `return`.
+     *
+     * @return array{0: array<string,mixed>, 1: array<string,mixed>}|null
+     */
+    private function loadManagedAppointment(string $token): ?array
+    {
+        if (preg_match('/^(\d{1,12})\.([a-f0-9]{32})$/', $token, $m) !== 1) {
+            http_response_code(404);
+            view('track/invalid', ['title' => 'Link not valid'], false);
+            return null;
+        }
+
+        $appointment = Db::one(
+            'SELECT a.*, d.name AS doctor_name, d.id AS doctor_id, p.full_name
+               FROM appointments a
+               JOIN doctors d ON d.id = a.doctor_id
+               JOIN patients p ON p.id = a.patient_id
+              WHERE a.id = ?',
+            [(int) $m[1]]
+        );
+        $clinic = $appointment !== null
+            ? Db::one('SELECT * FROM clinics WHERE id = ? AND is_active = 1', [(int) $appointment['clinic_id']])
+            : null;
+
+        $valid = $appointment !== null && $clinic !== null
+            && \App\Services\AppointmentService::manageTokenValid((int) $appointment['id'], (string) $appointment['scheduled_for'], $m[2]);
+
+        if (!$valid) {
+            http_response_code(404);
+            view('track/invalid', ['title' => 'Link not valid'], false);
+            return null;
+        }
+
+        // A used or moved link is not an error the patient caused; it means
+        // the booking moved on. Say where things stand rather than "invalid".
+        if (!in_array((string) $appointment['status'], ['booked', 'checked_in'], true)) {
+            http_response_code(410);
+            view('book/manage-gone', [
+                'title' => 'This booking has changed',
+                'clinicRecord' => $clinic,
+                'appointment' => $appointment,
+            ], false);
+            return null;
+        }
+
+        return [$appointment, $clinic];
+    }
+
     public function bookForm(string $slug): void
     {
         $clinic = Db::one('SELECT * FROM clinics WHERE slug = ? AND is_active = 1', [$slug]);
@@ -422,7 +722,7 @@ final class PublicController
                 'full_name' => $name,
                 'phone' => preg_replace('/\s+/', '', $phone),
             ]);
-            (new \App\Services\AppointmentService())->create(
+            $appointmentId = (new \App\Services\AppointmentService())->create(
                 $clinicId,
                 $doctorId,
                 (int) $patient['id'],
@@ -434,7 +734,7 @@ final class PublicController
             return;
         }
 
-        (new \App\Services\AuditService())->log($clinicId, 'appointment.booked_online', 'appointment', null, [
+        (new \App\Services\AuditService())->log($clinicId, 'appointment.booked_online', 'appointment', $appointmentId, [
             'date' => $date, 'time' => $time,
         ]);
 
@@ -445,6 +745,9 @@ final class PublicController
             'date' => $date,
             'time' => $time,
             'doctor' => (string) Db::scalar('SELECT name FROM doctors WHERE id = ?', [$doctorId]),
+            // The patient's own link, good until the booking moves. This is the
+            // whole point of booking online: no phone call to change a time.
+            'manageUrl' => \App\Services\AppointmentService::manageUrl($appointmentId, $date . ' ' . $time . ':00'),
         ], false);
     }
 

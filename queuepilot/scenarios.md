@@ -52,7 +52,7 @@ lint-clean, healthcheck all-good, all five demo logins re-checked).
 | A forged booking time is refused | ✅ | The POST re-checks the slot; verified that 03:17, a Sunday and a 120-day-ahead date all return 422 with a sentence |
 | Booking does not reveal other patients | ✅ | Fixed during this audit: the clash message named the patient holding the slot, on a public unauthenticated page |
 | Patient cancels an appointment themselves | ✅ | Patients cancel their **queue token** from the tracking link (`POST /t/{token}/cancel`). An appointment itself is still cancelled by the desk — a patient who has not arrived has no token to cancel, and letting an unauthenticated page free a slot invites abuse |
-| Patient reschedules | ○ | No route |
+| Patient reschedules | ✅ | **Built, from the booking page.** The confirmation page offers `/a/{id}.{signature}` — an HMAC over the appointment id **and its scheduled time**, so the link stops working the moment the booking moves. From it a patient moves their own appointment to a real slot or cancels it, no password. Moving re-issues the link for the new time in the same redirect, so the page they land on keeps working. A used or moved link renders 410 with an explanation, never a bare "invalid" |
 | Appointment reminder is sent automatically | ✅ | **Built.** `NotificationService::notifyAppointmentReminders()` runs from the worker each pass: every booked appointment for tomorrow gets one reminder, idempotent on `appointment_reminder:<id>`, skipping cancelled appointments and patients with no phone. The body carries the real time (`Fri 6 Nov, 9:30 AM`). Verified: two passes, one message |
 | Front desk sees today's appointments | ✅ | `GET /appointments` with status |
 
@@ -110,7 +110,7 @@ lint-clean, healthcheck all-good, all five demo logins re-checked).
 | The link stops working after the visit or after a set time | ✅ | `track_expires_at`; expired links render a 410 page |
 | **Patient cancels their own visit from the link** | ✅ | **Added today.** `POST /t/{token}/cancel`, authorised by the 128-bit token, `waiting` only, CSRF enforced (419 without a token), rate limited per link, reason audited as "Cancelled by patient from the tracking link". A forced POST on a `called` token is refused with an explanation rather than erasing a consultation |
 | Patient sees an explanation when it is too late to cancel | ✅ | Distinct copy for `called` vs. anything later |
-| Patient reschedules from the link | ○ | Cancel is one-way; no slot picker exists to rebook into |
+| Patient reschedules from the link | ✅ | **Built.** A visit that came from a booking carries `appointment_id`, so the tracking page shows the booking and a slot picker. `POST /t/{token}/reschedule` re-asks `SlotService::isOffered` before accepting, keeps the **doctor from the entry** (a patient picks a time, not a clinician), refuses once the token is `called`, and is rate limited to 5 moves an hour per link. Moving cancels the queued reminder for the old time |
 
 ## 8. Displays and signage
 
@@ -171,7 +171,7 @@ lint-clean, healthcheck all-good, all five demo logins re-checked).
 | A clinic edits its opening hours | ✅ | Settings → Opening hours: seven weekday rows plus a booking horizon. Verified end to end — saving Mon–Fri 09:00–13:00 changed the public booking grid to 09:00…12:45 and closing Sunday made the page say so |
 | Leave is recorded and blocks booking | ✅ | Leave rows block new appointments for the window |
 | A service sets its own late grace, horizon and walk-in rule | ✅ | **Built.** `/queues/appointment-policies`, per queue kind or per doctor, blank inheriting the clinic default. Verified live: a laboratory policy of 45-minute grace made a 20-minute late arrival read `on_time` where the clinic's 15-minute default reads `late`; walk-ins were refused at token issue (in the service, so the API obeys it too) while booked patients were still accepted |
-| Doctor cancels a session | ◐ | A queue can be paused and closed with the unseen-patient acknowledgement, and leave blocks new bookings. Cancelling a day's booked appointments in bulk is still not one action |
+| Doctor cancels a session | ✅ | **Built.** `POST /appointments/cancel-day` cancels every live booking for one doctor on one day in a single transaction, appends the reason to each note instead of overwriting its history, cancels the queued reminders, and writes one audit entry — none at all if there was nothing to cancel. The response is a **call list**: every patient's name, time and tappable number, because the software can free the slots but somebody has to ring them. Scoped so a doctor can only cancel their own list (403 for anybody else's; a doctor with no linked record is refused rather than guessed at) |
 | Payroll, rosters, commissions | ⛔ | Not a queue problem |
 
 ## 13. Reporting
@@ -297,26 +297,26 @@ first clinic goes live — the automated suite does not replace it.
 
 ## Summary
 
-| Group | ✅ Built | ◐ Partial | ○ Not built |
-|---|:--:|:--:|:--:|
-| Arrival & tokens | 8 | 0 | 0 |
-| Appointments | 8 | 0 | 1 |
-| Call & consult | 7 | 1 | 0 |
-| Disruption | 6 | 0 | 0 |
-| Priority | 5 | 1 | 0 |
-| Transfers | 4 | 0 | 1 |
-| Tracking | 5 | 0 | 1 |
-| Displays | 5 | 0 | 0 |
-| Notifications | 6 | 1 | 0 |
-| Accounts | 9 | 0 | 1 |
-| Tenancy | 7 | 0 | 0 |
-| Doctors | 6 | 1 | 0 |
-| Reporting | 8 | 1 | 1 |
-| Data & ops | 7 | 1 | 0 |
-| Money | 2 | 0 | 3 |
-| Hardware | 2 | 1 | 2 |
-| Other verticals | 5 | 0 | 3 |
-| **Total** | **100** | **7** | **13** |
+| Group | ✅ Built | ◐ Partial | ○ Not built | ⛔ Out of scope |
+|---|:--:|:--:|:--:|:--:|
+| 1. Patient arrival and token issuing | 8 | 0 | 0 | 0 |
+| 2. Appointment booking | 9 | 0 | 0 | 0 |
+| 3. Calling, consultation and completion | 7 | 1 | 0 | 0 |
+| 4. Queue disruption — delays, pauses, closure | 6 | 0 | 0 | 0 |
+| 5. Priority and clinical override | 5 | 1 | 0 | 0 |
+| 6. Transfers between services | 4 | 0 | 1 | 0 |
+| 7. Patient-facing tracking | 6 | 0 | 0 | 0 |
+| 8. Displays and signage | 5 | 0 | 0 | 0 |
+| 9. Notifications — SMS and WhatsApp | 6 | 1 | 0 | 0 |
+| 10. Accounts, onboarding and access | 9 | 0 | 1 | 0 |
+| 11. Multi-tenancy and organisations | 7 | 0 | 0 | 0 |
+| 12. Doctors and scheduling | 7 | 0 | 0 | 1 |
+| 13. Reporting | 8 | 1 | 1 | 0 |
+| 14. Data, privacy and operations | 7 | 1 | 0 | 1 |
+| 15. Money | 2 | 0 | 3 | 0 |
+| 16. Hardware and physical space | 2 | 1 | 2 | 0 |
+| 17. Other verticals | 5 | 0 | 3 | 0 |
+| **Total (122 scenarios)** | **103** | **6** | **11** | **2** |
 
 **What is genuinely finished.** The queue engine holds up under adversarial
 input: issuing, calling, transferring, prioritising, pausing, closing,
@@ -340,12 +340,10 @@ reporting page that answers the questions a clinic manager asks.
    mindset, and no amount of unit tests substitutes for it. (The dependency
    scan *is* now automated: `npm run security` runs `npm audit` over all 136
    packages and reports 0 known advisories — that part is no longer a gap.)
-3. **Genuine product gaps.** A patient cannot reschedule from the tracking link.
-   A doctor cannot cancel a day's appointments in bulk. There is no single
-   complete data-export archive and no patient satisfaction survey. Service
-   workflows exist as an ordered list of steps, not a drag-and-drop diagram
-   editor — the list is what decides the visit, and a diagram would draw the
-   same list.
+3. **Genuine product gaps.** There is no single complete data-export archive and
+   no patient satisfaction survey. Service workflows exist as an ordered list of
+   steps, not a drag-and-drop diagram editor — the list is what decides the
+   visit, and a diagram would draw the same list.
 4. **Deliberate boundaries.** No clinical notes, no prescription, no payroll, no
    insurance. Those change what product this is.
 

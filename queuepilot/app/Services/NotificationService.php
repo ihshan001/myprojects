@@ -30,7 +30,7 @@ final class NotificationService
         // receives the second without the first is not surprised.
         'entry_approaching' => 'Almost your turn. Token {token} is {ahead} away in the {queue} queue at {clinic}. Please stay nearby.',
         'visit_completed'=> 'Thank you for visiting {clinic}. Token {token} is complete. Get well soon.',
-        'appointment_reminder' => 'Reminder: appointment at {clinic} on {when}. Reply to reschedule.',
+        'appointment_reminder' => 'Reminder: appointment at {clinic} on {when}. Need to change it? {link}',
         'entry_delayed'    => 'Your doctor is running about {minutes} minutes late. Token {token} keeps its place at {clinic}.',
     ];
 
@@ -197,6 +197,12 @@ final class NotificationService
             }
 
             $when = date('D j M, g:i A', strtotime((string) $a['scheduled_for']));
+            // The reminder is the second place a patient keeps this link, after
+            // the confirmation page. A one-off 40-character signature makes the
+            // message two parts; that cost buys a reschedule that never needs a
+            // phone call, which is the thing patients actually complain about.
+            $link = rtrim((string) Env::get('app.url', 'http://localhost:8080'), '/')
+                . \App\Services\AppointmentService::manageUrl((int) $a['id'], (string) $a['scheduled_for']);
             $body = strtr(self::TEMPLATES['appointment_reminder'], [
                 '{clinic}' => (string) $a['clinic_name'],
                 '{when}'   => $when,
@@ -204,7 +210,7 @@ final class NotificationService
                 '{queue}'  => (string) $a['doctor_name'],
                 '{room}'   => '',
                 '{ahead}'  => '',
-                '{link}'   => '',
+                '{link}'   => $link,
             ]);
 
             try {

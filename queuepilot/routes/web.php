@@ -47,6 +47,7 @@ Router::get('/t/{token}', [PublicController::class, 'track'], ['csrf' => false])
 // Patient self-service cancellation. CSRF applies: the tracking page renders a
 // token, so a cross-site link cannot cancel somebody's visit.
 Router::post('/t/{token}/cancel', [PublicController::class, 'cancelTracked']);
+Router::post('/t/{token}/reschedule', [PublicController::class, 'rescheduleTracked']);
 Router::get('/demo/board', [PublicController::class, 'demoBoard']);
 Router::get('/manifest.webmanifest', [PublicController::class, 'manifest']);
 Router::get('/sw.js', [PublicController::class, 'serviceWorker']);
@@ -106,6 +107,7 @@ Router::post('/patients/{id}', [PatientController::class, 'update'], ['auth' => 
 Router::get('/appointments', [AppointmentController::class, 'index'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/appointments', [AppointmentController::class, 'store'], ['auth' => true, 'ability' => 'appointment.manage']);
 Router::post('/appointments/{id}/checkin', [AppointmentController::class, 'checkin'], ['auth' => true, 'ability' => 'queue.operate']);
+Router::post('/appointments/cancel-day', [AppointmentController::class, 'cancelDay'], ['auth' => true, 'ability' => 'appointment.cancel_day']);
 
 /* ------------------------------------------------- doctors, rooms, staff */
 Router::get('/doctors', [ClinicController::class, 'doctors'], ['auth' => true]);
@@ -251,6 +253,11 @@ Router::get('/board/{key}', [DisplayController::class, 'publicScreen']);
 // Online booking: 404 for clinics that have not opted in (see PublicController).
 Router::get('/book/{slug}', [PublicController::class, 'bookForm']);
 Router::post('/book/{slug}', [PublicController::class, 'book']);
+// A booked patient's own link, signed over the id and the current time (see
+// AppointmentService::manageUrl). No login: the signature is the credential.
+Router::get('/a/{token}', [PublicController::class, 'manageAppointment'], ['csrf' => false]);
+Router::post('/a/{token}/reschedule', [PublicController::class, 'rescheduleManaged']);
+Router::post('/a/{token}/cancel', [PublicController::class, 'cancelManaged']);
 Router::get('/api/summary', [ApiController::class, 'summary'], ['auth' => true]);
 
 // Health endpoint for an external monitor. Authorisation is inside the
