@@ -40,6 +40,17 @@ View::share('clinic', Auth::clinic());
 View::share('locale', $locale ?: $config['app']['default_locale']);
 View::share('locales', $config['app']['locales']);
 View::share('path', Request::path());
+
+// The branch switcher, resolved once per request. Shared only when there is a
+// genuine choice to offer: a single-branch clinic should never see a control
+// that exists to solve somebody else's problem.
+$branchChoices = [];
+if (Auth::check() && !Auth::isSuper()) {
+    $u = Auth::user();
+    $branchChoices = (new \App\Services\BranchService())->allowedFor((int) $u['id'], $u['clinic_id'] !== null ? (int) $u['clinic_id'] : null);
+}
+View::share('branchChoices', $branchChoices);
+View::share('activeBranchId', Auth::clinicId());
 View::share('requestId', $requestId);
 View::share('debug', $config['app']['debug']);
 

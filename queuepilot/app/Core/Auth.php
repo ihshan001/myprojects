@@ -78,14 +78,57 @@ final class Auth
         return $u['role'] ?? null;
     }
 
+    /**
+     * The branch this request acts in.
+     *
+     * `users.clinic_id` is the **home** branch; a user may also hold explicit
+     * grants to other branches (see BranchService). This method returns the
+     * session's chosen branch, re-validated against the grants on every call,
+     * and falls back to home when a grant was revoked or a branch closed.
+     *
+     * Resolving here rather than in each controller is what makes the feature
+     * safe: every query in the application already scopes by this value, so
+     * switching branches narrows nothing and opens nothing — it selects one
+     * of the branches this user was already allowed to use.
+     */
     public static function clinicId(): ?int
     {
         $u = self::user();
         if (!$u || $u['clinic_id'] === null) {
             return null;
         }
-        // super admins operate platform-wide; clinic scope only via impersonation
-        return (int) $u['clinic_id'];
+        $home = (int) $u['clinic_id'];
+        $id = (int) $u['id'];
+
+        // A real static property, not a function-static, for the same reason
+        // the clinic cache is: it must be clearable. A long-lived worker that
+        // switched branches inside one process would otherwise answer for the
+        // wrong clinic on the next iteration.
+        if (self::$resolvedBranchFor === $id) {
+            return self::$resolvedBranch;
+        }
+
+        $active = (new \App\Services\BranchService())->activeBranch($id, $home);
+        self::$resolvedBranchFor = $id;
+        self::$resolvedBranch = $active ?? $home;
+        return self::$resolvedBranch;
+    }
+
+    /** @var int|null  user id the memo below belongs to */
+    private static ?int $resolvedBranchFor = null;
+
+    /** @var int|null  memoised result of clinicId() for this request */
+    private static ?int $resolvedBranch = null;
+
+    /**
+     * Forget the branch decision and the clinic row, so a switch takes effect
+     * inside the same process (the worker) as well as across requests.
+     */
+    public static function forgetBranch(): void
+    {
+        self::$resolvedBranchFor = null;
+        self::$resolvedBranch = null;
+        self::forgetClinicCache();
     }
 
     public static function isSuper(): bool
@@ -300,6 +343,7 @@ final class Auth
     public static function logout(): void
     {
         $id = self::id();
+        self::forgetBranch();
         Session::destroy();
         if ($id) {
             Log::info('auth.logout', ['user' => $id]);

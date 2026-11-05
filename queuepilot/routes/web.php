@@ -207,6 +207,11 @@ Router::post('/settings/closure', [AdminController::class, 'requestClosure'], ['
 Router::post('/settings/staff', [ClinicController::class, 'storeStaff'], ['auth' => true, 'ability' => 'staff.manage']);
 Router::post('/settings/invites', [ClinicController::class, 'inviteStaff'], ['auth' => true, 'ability' => 'staff.manage']);
 Router::post('/settings/invites/{id}/revoke', [ClinicController::class, 'revokeInvite'], ['auth' => true, 'ability' => 'staff.manage']);
+Router::get('/settings/branches', [ClinicController::class, 'branches'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/settings/branches', [ClinicController::class, 'grantBranch'], ['auth' => true, 'ability' => 'staff.manage']);
+Router::post('/settings/branches/revoke', [ClinicController::class, 'revokeBranch'], ['auth' => true, 'ability' => 'staff.manage']);
+// The switcher: any signed-in user with more than one branch.
+Router::post('/branch/switch', [ClinicController::class, 'switchBranch'], ['auth' => true]);
 Router::get('/organisation', [ClinicController::class, 'organisation'], ['auth' => true, 'ability' => 'clinic.manage']);
 
 /* --------------------------------------------------- reports and audits */

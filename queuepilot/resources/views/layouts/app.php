@@ -110,6 +110,31 @@ if ($u) {
             <span class="h-1.5 w-1.5 rounded-full bg-violet-400"></span> All tenants
           <?php endif; ?>
         </p>
+
+        <?php
+        // Only shown when there is a real choice. A one-branch clinic never sees
+        // a switcher, because a control that cannot do anything is noise.
+        $choices = $branchChoices ?? [];
+        ?>
+        <?php if (count($choices) > 1): ?>
+          <form method="post" action="/branch/switch" class="mt-2">
+            <?= csrf_field() ?>
+            <input type="hidden" name="back" value="<?= e($path ?? '/app') ?>">
+            <label class="sr-only" for="branch-switch">Working in branch</label>
+            <select id="branch-switch" name="clinic_id" onchange="this.form.submit()"
+                    class="w-full rounded-md border border-white/15 bg-white/5 px-2 py-1 text-[11px] text-white
+                           focus:border-teal-400 focus:outline-none">
+              <?php foreach ($choices as $b): ?>
+                <option value="<?= (int) $b['id'] ?>" <?= (int) $b['id'] === (int) ($activeBranchId ?? 0) ? 'selected' : '' ?>>
+                  <?= e((string) $b['name']) ?><?= $b['is_home'] ? ' (home)' : '' ?>
+                </option>
+              <?php endforeach; ?>
+            </select>
+          </form>
+          <p class="mt-1 text-[10px] leading-snug text-slate-500">
+            You are seeing only this branch.
+          </p>
+        <?php endif; ?>
       </div>
     </div>
 

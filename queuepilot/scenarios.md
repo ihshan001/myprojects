@@ -146,7 +146,7 @@ lint-clean, healthcheck all-good, all five demo logins re-checked).
 | **A locked-out user can recover their password** | ✅ | **Added today.** Hashed single-use tokens, 60-minute expiry, enumeration-proof responses, session eviction on completion |
 | Sessions die when the password is reset | ✅ | Verified over curl: a live session went 200 → 302 `/login` |
 | Email verification | ✅ | **Built.** `0006_email_verification`. Registration mails a confirmation link; until it is opened the clinic can sign in and configure itself but `QueueService::issueToken()` refuses with a sentence. SHA-256 at rest, 48 hours, single use, one live link per user. Two escapes: a banner with a resend button on every signed-in page, and a super admin "Verify email" button on `/admin/clinics` that writes an audit row. Verified live: link works once, reuse refused, gate opens |
-| Per-branch staff scoping | ○ | Staff belong to a clinic. One organisation can own several clinics, but a user cannot be scoped to a branch subset |
+| Per-branch staff scoping | ✅ | **Built.** `users.clinic_id` stays the home branch; `branch_grants` adds explicit extra branches, so a user with no grants behaves exactly as before. `Auth::clinicId()` resolves the session's active branch and **re-validates it against the grants on every call** — every query in the product already scopes by that value, so switching selects one of the branches a person was already allowed to use rather than widening anything. A switcher appears in the sidebar only when there is more than one branch to choose. Verified live: a receptionist granted a second branch saw that branch's clinic and none of the first branch's patients; posting an ungranted branch id was refused; **revoking the grant snapped a live session back to home on its very next request**; a deactivated branch does the same |
 | Roles are enforced server-side | ✅ | Verified matrix: receptionist 403 on `/audit`, `/organisation`, `/admin`; doctor 403 on `/queue/new`, `/patients`, `/reports` |
 
 ## 11. Multi-tenancy and organisations
@@ -308,7 +308,7 @@ first clinic goes live — the automated suite does not replace it.
 | 7. Patient-facing tracking | 6 | 0 | 0 | 0 |
 | 8. Displays and signage | 5 | 0 | 0 | 0 |
 | 9. Notifications — SMS and WhatsApp | 6 | 1 | 0 | 0 |
-| 10. Accounts, onboarding and access | 9 | 0 | 1 | 0 |
+| 10. Accounts, onboarding and access | 10 | 0 | 0 | 0 |
 | 11. Multi-tenancy and organisations | 7 | 0 | 0 | 0 |
 | 12. Doctors and scheduling | 7 | 0 | 0 | 1 |
 | 13. Reporting | 8 | 1 | 1 | 0 |
@@ -316,7 +316,7 @@ first clinic goes live — the automated suite does not replace it.
 | 15. Money | 2 | 0 | 3 | 0 |
 | 16. Hardware and physical space | 4 | 1 | 0 | 0 |
 | 17. Other verticals | 5 | 0 | 3 | 0 |
-| **Total (122 scenarios)** | **105** | **6** | **9** | **2** |
+| **Total (122 scenarios)** | **106** | **6** | **8** | **2** |
 
 **What is genuinely finished.** The queue engine holds up under adversarial
 input: issuing, calling, transferring, prioritising, pausing, closing,

@@ -4021,6 +4021,107 @@ Assert::test('a scanned slip for a finished or ambiguous visit refuses instead o
 });
 
 /* ------------------------------------------------------------------ */
+/* 59. Per-branch staff scoping                                        */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a branch grant opens exactly one branch, and only on purpose', function (): void {
+    seedTenant(97, 'branch-home', 'Branch Home');
+    seedTenant(98, 'branch-other', 'Branch Other');
+    $branches = new App\Services\BranchService();
+    $userId = Db::insert(
+        'INSERT INTO users (clinic_id, name, email, password_hash, role, is_active, created_at, email_verified_at)
+         VALUES (97, ?, ?, ?, ?, 1, ?, ?)',
+        ['Branch Reception', 'branch-reception@example.lk', password_hash('Branch#2026', PASSWORD_DEFAULT), 'receptionist', Db::now(), Db::now()]
+    );
+
+    // No grant: exactly the old behaviour, one branch.
+    Assert::true($branches->canActIn($userId, 97, 97), 'a user can always act in their home branch');
+    Assert::false($branches->canActIn($userId, 97, 98), 'and nowhere else without a grant');
+    Assert::same(1, count($branches->allowedFor($userId, 97)), 'their switcher offers one branch, so it is hidden');
+
+    $branches->grant($userId, 98, null);
+    Assert::true($branches->canActIn($userId, 97, 98), 'the grant opens the second branch');
+    Assert::same(2, count($branches->allowedFor($userId, 97)), 'and the switcher now offers two');
+
+    // Granting twice must not produce two rows — otherwise revoking once
+    // appears to fail.
+    $branches->grant($userId, 98, null);
+    Assert::same(1, (int) Db::scalar('SELECT COUNT(*) FROM branch_grants WHERE user_id = ?', [$userId]),
+        'granting the same branch twice is idempotent');
+
+    // The home branch is the users.clinic_id column, not a grant. Removing it
+    // is a different operation with different consequences.
+    $threw = false;
+    try {
+        $branches->revoke($userId, 97, 97);
+    } catch (\RuntimeException) {
+        $threw = true;
+    }
+    Assert::true($threw, 'the home branch cannot be revoked as if it were a grant');
+
+    $branches->revoke($userId, 98, 97);
+    Assert::false($branches->canActIn($userId, 97, 98), 'revoking closes it again');
+});
+
+Assert::test('the active branch is re-checked every request, so a revoked grant cannot outlive the session', function (): void {
+    seedTenant(99, 'branch-a', 'Branch A');
+    seedTenant(100, 'branch-b', 'Branch B');
+    $branches = new App\Services\BranchService();
+    $userId = Db::insert(
+        'INSERT INTO users (clinic_id, name, email, password_hash, role, is_active, created_at, email_verified_at)
+         VALUES (99, ?, ?, ?, ?, 1, ?, ?)',
+        ['Branch Switcher', 'branch-switch@example.lk', password_hash('Switch#2026', PASSWORD_DEFAULT), 'receptionist', Db::now(), Db::now()]
+    );
+
+    $branches->grant($userId, 100, null);
+    $branches->switchTo($userId, 99, 100);
+    Assert::same(100, $branches->activeBranch($userId, 99), 'the session can move to a granted branch');
+
+    // This is the failure mode that matters: revoke while the user is still
+    // sitting in that branch. Their next request must not keep working there.
+    $branches->revoke($userId, 100, 99);
+    Assert::same(99, $branches->activeBranch($userId, 99), 'a revoked grant falls back to home on the very next request');
+
+    // A branch that is switched off must not keep serving because a session
+    // remembers it.
+    $branches->grant($userId, 100, null);
+    $branches->switchTo($userId, 99, 100);
+    Db::run('UPDATE clinics SET is_active = 0 WHERE id = 100');
+    Assert::same(99, $branches->activeBranch($userId, 99), 'a deactivated branch also falls back to home');
+});
+
+Assert::test('a branch that was never granted cannot be switched into, even by posting its id', function (): void {
+    seedTenant(101, 'branch-c', 'Branch C');
+    seedTenant(102, 'branch-d', 'Branch D');
+    $branches = new App\Services\BranchService();
+    $userId = Db::insert(
+        'INSERT INTO users (clinic_id, name, email, password_hash, role, is_active, created_at, email_verified_at)
+         VALUES (101, ?, ?, ?, ?, 1, ?, ?)',
+        ['Branch Probe', 'branch-probe@example.lk', password_hash('Probe#2026', PASSWORD_DEFAULT), 'receptionist', Db::now(), Db::now()]
+    );
+
+    $threw = false;
+    try {
+        $branches->switchTo($userId, 101, 102);
+    } catch (\RuntimeException $e) {
+        $threw = true;
+        Assert::contains('do not have access', $e->getMessage(), 'the refusal is a sentence, not a stack trace');
+    }
+    Assert::true($threw, 'switching to an ungranted branch is refused at the service boundary');
+    Assert::same(101, $branches->activeBranch($userId, 101), 'and the session stays on home');
+
+    // A grant for a clinic that does not exist must not create access to a
+    // phantom branch.
+    $threw = false;
+    try {
+        $branches->grant($userId, 99999, null);
+    } catch (\RuntimeException) {
+        $threw = true;
+    }
+    Assert::true($threw, 'a grant for a non-existent branch is refused');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

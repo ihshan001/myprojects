@@ -266,7 +266,8 @@
           <span class="name">Role-based permissions</span>
           <span class="pill built">Built</span>
         </label>
-        <p class="note">Server-side matrix. Verified: receptionist 403 on <code>/audit</code>,<code>/organisation</code>,<code>/admin</code>; doctor 403 on <code>/queue/new</code>,<code>/patients</code>,<code>/reports</code>.</p>
+        <p class="note">Server-side matrix. Verified: receptionist 403 on <code>/audit</code>,<code>/organisation</code>,<code>/admin</code>; doctor 403 on <code>/queue/new</code>,<code>/patients</code>,<code>/reports</code>.
+          <b>Plus per-branch scoping:</b> <code>users.clinic_id</code> is the home branch and <code>branch_grants</code> adds explicit extras, so a user with no grants behaves exactly as before. <code>Auth::clinicId()</code> resolves the active branch and re-validates it on every call, which means the switcher selects among branches the person may already use rather than widening any query. Verified live: a granted receptionist saw the second branch's name and none of the first branch's patients; an ungranted branch id was refused; <b>revoking a grant snapped a live session back to home on its next request</b>, and so did deactivating the branch.</p>
       </li>
       <li class="item" data-status="built">
         <label class="row">

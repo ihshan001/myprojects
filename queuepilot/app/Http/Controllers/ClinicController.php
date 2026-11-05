@@ -7,6 +7,7 @@ use App\Core\Auth;
 use App\Core\Db;
 use App\Core\Request;
 use App\Services\AuditService;
+use App\Services\BranchService;
 use App\Services\ClinicService;
 use App\Services\DoctorService;
 
@@ -303,6 +304,158 @@ final class ClinicController
      * identify another branch's patient. That restriction is the difference
      * between a useful roll-up and a privacy incident.
      */
+    /**
+     * Branches: which staff reach which branch, and the owner's grant screen.
+     *
+     * Presenting this as "who can work in branch X" rather than "user
+     * permissions" is deliberate — that is the question a practice manager
+     * actually asks, and it makes an accidental grant visible as a person's
+     * name in the wrong column.
+     */
+    public function branches(): void
+    {
+        $clinicId = $this->clinicId();
+        $branches = new BranchService();
+
+        // The full row, because the layout renders the branch name, brand
+        // colour and billing state from it — selecting three columns 500s the page.
+        $clinic = Db::one('SELECT * FROM clinics WHERE id = ?', [$clinicId]);
+        $organisationId = $clinic['organisation_id'] ?? null;
+
+        // A branch owner sees every branch in their group, because granting
+        // across a group is the whole point of the feature. A clinic with no
+        // group sees only itself, and the page still works.
+        $siblings = $organisationId !== null
+            ? Db::all(
+                'SELECT id, name, slug, city FROM clinics WHERE organisation_id = ? AND is_active = 1 ORDER BY name',
+                [(int) $organisationId]
+            )
+            : [$clinic];
+
+        $grants = Db::all(
+            "SELECT g.id, g.user_id, g.clinic_id, g.created_at, u.name AS user_name, u.email, c.name AS clinic_name
+               FROM branch_grants g
+               JOIN users u ON u.id = g.user_id
+               JOIN clinics c ON c.id = g.clinic_id
+              WHERE c.id = ? OR c.organisation_id = ?
+              ORDER BY c.name, u.name",
+            [$clinicId, $organisationId]
+        );
+
+        view('settings/branches', [
+            'title' => 'Branches',
+            'active' => 'settings',
+            'clinic' => $clinic,
+            'branches' => $siblings,
+            'grants' => $grants,
+            'staff' => $branches->staffFor($clinicId),
+            'canManage' => Auth::can('staff.manage'),
+        ]);
+    }
+
+    public function grantBranch(): void
+    {
+        $clinicId = $this->clinicId();
+        $userId = Request::int('user_id');
+        $branchId = Request::int('clinic_id');
+
+        $user = Db::one('SELECT id, name, clinic_id FROM users WHERE id = ? AND is_active = 1', [$userId]);
+        if (!$user) {
+            flash('error', 'That staff member does not exist.');
+            redirect('/settings/branches');
+            return;
+        }
+
+        try {
+            // Permission to grant is derived from the acting user's own
+            // reach: a manager of branch A cannot hand out branch B.
+            $this->assertBranchReachable($clinicId, $branchId);
+            (new BranchService())->grant($userId, $branchId, (int) Auth::id());
+        } catch (\RuntimeException $e) {
+            flash('error', $e->getMessage());
+            redirect('/settings/branches');
+            return;
+        }
+
+        (new AuditService())->log($clinicId, 'branch.granted', 'user', $userId, [
+            'clinic_id' => $branchId,
+        ]);
+        flash('success', $user['name'] . ' can now work in that branch. They choose it from the switcher.');
+        redirect('/settings/branches');
+    }
+
+    public function revokeBranch(): void
+    {
+        $clinicId = $this->clinicId();
+        $userId = Request::int('user_id');
+        $branchId = Request::int('clinic_id');
+
+        try {
+            $this->assertBranchReachable($clinicId, $branchId);
+            $home = (int) Db::scalar('SELECT clinic_id FROM users WHERE id = ?', [$userId]);
+            (new BranchService())->revoke($userId, $branchId, $home);
+        } catch (\RuntimeException $e) {
+            flash('error', $e->getMessage());
+            redirect('/settings/branches');
+            return;
+        }
+
+        (new AuditService())->log($clinicId, 'branch.revoked', 'user', $userId, [
+            'clinic_id' => $branchId,
+        ]);
+        flash('success', 'Access to that branch removed. If they were working in it, they are back on their home branch now.');
+        redirect('/settings/branches');
+    }
+
+    /**
+     * Move this session to another branch.
+     *
+     * The posted id is re-validated by BranchService; the controller never
+     * trusts it. A failed switch lands back on the page with a sentence, not
+     * a 500.
+     */
+    public function switchBranch(): void
+    {
+        $user = Auth::user();
+        if ($user === null) {
+            redirect('/login');
+            return;
+        }
+        $home = $user['clinic_id'] !== null ? (int) $user['clinic_id'] : null;
+        try {
+            (new BranchService())->switchTo((int) $user['id'], $home, Request::int('clinic_id'));
+        } catch (\RuntimeException $e) {
+            flash('error', $e->getMessage());
+            redirect(Request::string('back', '/app'));
+            return;
+        }
+
+        $name = Db::scalar('SELECT name FROM clinics WHERE id = ?', [Request::int('clinic_id')]);
+        flash('success', 'Now working in ' . (string) $name . '.');
+        redirect(Request::string('back', '/app'));
+    }
+
+    /**
+     * A branch may be granted only from a branch the actor can itself reach,
+     * and only within one organisation. Without this, a manager could widen
+     * their own group by inviting themselves into a branch they were never
+     * given.
+     */
+    private function assertBranchReachable(int $actingClinicId, int $branchId): void
+    {
+        if ($branchId === $actingClinicId) {
+            return;
+        }
+        $actingOrg = Db::scalar('SELECT organisation_id FROM clinics WHERE id = ?', [$actingClinicId]);
+        $targetOrg = Db::scalar('SELECT organisation_id FROM clinics WHERE id = ? AND is_active = 1', [$branchId]);
+        if ($targetOrg === null) {
+            throw new \RuntimeException('That branch does not exist or is not active.');
+        }
+        if ($actingOrg === null || (int) $actingOrg !== (int) $targetOrg) {
+            throw new \RuntimeException('You can only manage branches in your own group.');
+        }
+    }
+
     public function organisation(): void
     {
         $clinicId = $this->clinicId();
