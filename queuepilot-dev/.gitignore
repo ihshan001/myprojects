@@ -1,0 +1,34 @@
+# runtime state — never commit a database, log or session file
+storage/db/*.sqlite
+storage/db/*.sqlite-wal
+storage/db/*.sqlite-shm
+storage/logs/*.log
+storage/sessions/sess_*
+# Generated backups and the restore-drill record. The tool and the procedure
+# are versioned; the dumps themselves are runtime artifacts and may contain
+# patient data, so they never belong in Git.
+storage/backups/
+
+# dependencies and build tooling
+node_modules/
+.arena/
+
+# local environment
+.env
+.env.local
+
+# ---------------------------------------------------------------------------
+# DEV SANDBOX additions (queuepilot-dev only — never promoted)
+# ---------------------------------------------------------------------------
+# Front controllers generated per port by tools/dev-serve.mjs. They contain an
+# absolute path to this checkout, so they are machine-local by nature. They live
+# directly in storage/ (one level down, like public/) because index.php resolves
+# bootstrap via dirname(__DIR__).
+storage/dev-front-*.php
+# Per-port session directories (qp_dev_8080 … qp_dev_8084).
+storage/sessions/dev-*/
+# node_modules may be a SYMLINK to ../queuepilot/node_modules to avoid a second
+# 527 MB install. The inherited `node_modules/` rule has a trailing slash, which
+# matches directories only and silently lets the symlink be committed — a
+# dangling link on a fresh clone. This no-slash form catches both.
+node_modules

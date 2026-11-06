@@ -1,0 +1,49 @@
+{
+  "_comment": [
+    "Port -> identity map for the dev fleet. One port is one signed-in person.",
+    "Edit this file to change who a port becomes; restart that port to apply.",
+    "This file is DEV ONLY and is never promoted to the main system."
+  ],
+  "ports": [
+    {
+      "port": 8080,
+      "label": "Clinic owner",
+      "email": "admin@serenity.lk",
+      "role": "clinic_admin",
+      "home": "/app",
+      "purpose": "Full clinic control: settings, staff, billing, audit"
+    },
+    {
+      "port": 8081,
+      "label": "Receptionist",
+      "email": "reception@serenity.lk",
+      "role": "receptionist",
+      "home": "/app",
+      "purpose": "Front desk: issue tokens, call, complete — no clinical priority"
+    },
+    {
+      "port": 8082,
+      "label": "Doctor",
+      "email": "amara@serenity.lk",
+      "role": "doctor",
+      "home": "/app",
+      "purpose": "Own queue only, start session, set priority with a reason"
+    },
+    {
+      "port": 8083,
+      "label": "Platform admin",
+      "email": "owner@queuepilot.app",
+      "role": "super_admin",
+      "home": "/admin",
+      "purpose": "Tenants, plans, feature gates, payment verification, groups"
+    },
+    {
+      "port": 8084,
+      "label": "Second clinic (isolation)",
+      "email": "admin@lakeview.lk",
+      "role": "clinic_admin",
+      "home": "/app",
+      "purpose": "Proves tenant isolation — must never see Serenity's patients"
+    }
+  ]
+}
