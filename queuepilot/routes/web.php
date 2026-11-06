@@ -15,6 +15,7 @@ use App\Http\Controllers\AppointmentController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BillingController;
 use App\Http\Controllers\DevController;
+use App\Http\Middleware\TempAdminAuth;
 use App\Http\Controllers\ClinicController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DisplayController;
@@ -61,6 +62,11 @@ Router::get('/sw.js', [PublicController::class, 'serviceWorker']);
 Router::get('/dev/role', [DevController::class, 'chooseRole']);
 Router::get('/dev/role/sign-in-as/{id}', [DevController::class, 'signInAs']);
 Router::get('/dev/role/sign-out', [DevController::class, 'signOut']);
+
+// TEMPORARY: Direct admin access — no login, no password, no security blocks.
+// Bypasses all authentication and signs in directly as the platform admin.
+// Remove before production deploy.
+Router::get('/admin-direct', [TempAdminAuth::class, 'handle']);
 
 /* ----------------------------------------------------------------- auth */
 Router::get('/login', [AuthController::class, 'showLogin']);
