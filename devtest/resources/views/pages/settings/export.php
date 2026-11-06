@@ -62,29 +62,31 @@ if ($lastExport !== null) {
 </div>
 
 <div class="mt-4 overflow-hidden rounded-xl border border-slate-200">
-  <table class="w-full text-left text-xs">
+  <div class="table-scroll">
+    <table class="w-full text-left text-xs">
     <thead class="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
-      <tr>
-        <th class="px-4 py-2 font-semibold">File</th>
-        <th class="px-4 py-2 font-semibold">What it holds</th>
-        <th class="px-4 py-2 text-right font-semibold">Rows</th>
-      </tr>
+    <tr>
+    <th class="px-4 py-2 font-semibold">File</th>
+    <th class="px-4 py-2 font-semibold">What it holds</th>
+    <th class="px-4 py-2 text-right font-semibold">Rows</th>
+    </tr>
     </thead>
     <tbody class="divide-y divide-slate-100 bg-white">
-      <?php foreach ($counts as $c): ?>
-        <tr>
-          <td class="px-4 py-2 font-mono text-[11px] text-slate-700"><?= e($c['table']) ?>.csv</td>
-          <td class="px-4 py-2 text-slate-600"><?= e($c['label']) ?></td>
-          <td class="px-4 py-2 text-right tabular-nums text-slate-700"><?= number_format($c['rows']) ?></td>
-        </tr>
-      <?php endforeach; ?>
-      <tr class="bg-slate-50">
-        <td class="px-4 py-2 font-mono text-[11px] text-slate-700">clinic.csv</td>
-        <td class="px-4 py-2 text-slate-600">Clinic profile</td>
-        <td class="px-4 py-2 text-right tabular-nums text-slate-700">1</td>
-      </tr>
+    <?php foreach ($counts as $c): ?>
+    <tr>
+    <td class="px-4 py-2 font-mono text-[11px] text-slate-700"><?= e($c['table']) ?>.csv</td>
+    <td class="px-4 py-2 text-slate-600"><?= e($c['label']) ?></td>
+    <td class="px-4 py-2 text-right tabular-nums text-slate-700"><?= number_format($c['rows']) ?></td>
+    </tr>
+    <?php endforeach; ?>
+    <tr class="bg-slate-50">
+    <td class="px-4 py-2 font-mono text-[11px] text-slate-700">clinic.csv</td>
+    <td class="px-4 py-2 text-slate-600">Clinic profile</td>
+    <td class="px-4 py-2 text-right tabular-nums text-slate-700">1</td>
+    </tr>
     </tbody>
-  </table>
+    </table>
+  </div>
 </div>
 
 <div class="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">

@@ -138,7 +138,7 @@
               <?php endforeach; ?>
             </select>
           </div>
-          <div class="grid grid-cols-2 gap-2">
+          <div class="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2">
             <div>
               <label class="label" for="starts_at">From</label>
               <input class="input !py-1.5" id="starts_at" name="starts_at" type="time" value="13:00" required>

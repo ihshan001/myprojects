@@ -59,7 +59,7 @@
         <textarea class="input min-h-24" id="body" name="body" required maxlength="5000"
                   placeholder="Token A014, called at 10:12. The patient says no SMS arrived."></textarea>
       </div>
-      <div class="grid grid-cols-2 gap-2">
+      <div class="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2">
         <div>
           <label class="label" for="category">Category</label>
           <select class="select" id="category" name="category">

@@ -51,45 +51,47 @@
     <div class="border-b border-slate-100 px-4 py-3">
       <h2 class="text-sm font-bold text-slate-900">Branches</h2>
     </div>
-    <table class="table">
+    <div class="table-scroll">
+      <table class="table">
       <thead>
-        <tr>
-          <th>Branch</th>
-          <th class="hidden sm:table-cell">City</th>
-          <th class="numeric">Seen today</th>
-          <th class="numeric">Waiting</th>
-          <th class="numeric hidden md:table-cell">Avg wait</th>
-          <th class="numeric hidden md:table-cell">Staff</th>
-          <th>Status</th>
-        </tr>
+      <tr>
+      <th>Branch</th>
+      <th class="hidden sm:table-cell">City</th>
+      <th class="numeric">Seen today</th>
+      <th class="numeric">Waiting</th>
+      <th class="numeric hidden md:table-cell">Avg wait</th>
+      <th class="numeric hidden md:table-cell">Staff</th>
+      <th>Status</th>
+      </tr>
       </thead>
       <tbody>
-        <?php foreach ($branches as $b): ?>
-          <tr class="<?= (int) $b['id'] === $currentClinicId ? 'bg-teal-50/40' : '' ?>">
-            <td>
-              <span class="font-semibold text-slate-800"><?= e((string) $b['name']) ?></span>
-              <?php if ((int) $b['id'] === $currentClinicId): ?>
-                <span class="ml-1 badge-teal">you</span>
-              <?php endif; ?>
-            </td>
-            <td class="hidden sm:table-cell text-xs text-slate-500"><?= e((string) ($b['city'] ?? '—')) ?></td>
-            <td class="numeric tabular"><?= (int) $b['seen_today'] ?></td>
-            <td class="numeric tabular <?= (int) $b['waiting_now'] > 8 ? 'font-bold text-amber-700' : '' ?>">
-              <?= (int) $b['waiting_now'] ?>
-            </td>
-            <td class="numeric hidden md:table-cell tabular text-slate-600">
-              <?= $b['avg_wait'] === null ? '—' : (int) $b['avg_wait'] . ' min' ?>
-            </td>
-            <td class="numeric hidden md:table-cell tabular text-slate-600"><?= (int) $b['staff'] ?></td>
-            <td>
-              <span class="<?= $b['billing_status'] === 'active' ? 'badge-emerald' : ($b['billing_status'] === 'suspended' ? 'badge-rose' : 'badge-amber') ?>">
-                <?= e((string) $b['billing_status']) ?>
-              </span>
-            </td>
-          </tr>
-        <?php endforeach; ?>
+      <?php foreach ($branches as $b): ?>
+      <tr class="<?= (int) $b['id'] === $currentClinicId ? 'bg-teal-50/40' : '' ?>">
+      <td>
+      <span class="font-semibold text-slate-800"><?= e((string) $b['name']) ?></span>
+      <?php if ((int) $b['id'] === $currentClinicId): ?>
+      <span class="ml-1 badge-teal">you</span>
+      <?php endif; ?>
+      </td>
+      <td class="hidden sm:table-cell text-xs text-slate-500"><?= e((string) ($b['city'] ?? '—')) ?></td>
+      <td class="numeric tabular"><?= (int) $b['seen_today'] ?></td>
+      <td class="numeric tabular <?= (int) $b['waiting_now'] > 8 ? 'font-bold text-amber-700' : '' ?>">
+      <?= (int) $b['waiting_now'] ?>
+      </td>
+      <td class="numeric hidden md:table-cell tabular text-slate-600">
+      <?= $b['avg_wait'] === null ? '—' : (int) $b['avg_wait'] . ' min' ?>
+      </td>
+      <td class="numeric hidden md:table-cell tabular text-slate-600"><?= (int) $b['staff'] ?></td>
+      <td>
+      <span class="<?= $b['billing_status'] === 'active' ? 'badge-emerald' : ($b['billing_status'] === 'suspended' ? 'badge-rose' : 'badge-amber') ?>">
+      <?= e((string) $b['billing_status']) ?>
+      </span>
+      </td>
+      </tr>
+      <?php endforeach; ?>
       </tbody>
-    </table>
+      </table>
+    </div>
   </div>
 
   <p class="mt-4 text-[11px] leading-relaxed text-slate-400">

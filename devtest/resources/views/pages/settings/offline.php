@@ -91,35 +91,37 @@
   </div>
 <?php else: ?>
   <div class="mt-4 overflow-hidden rounded-xl border border-slate-200">
-    <table class="w-full text-left text-xs">
+    <div class="table-scroll">
+      <table class="w-full text-left text-xs">
       <thead class="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
-        <tr>
-          <th class="px-4 py-2 font-semibold">Queue</th>
-          <th class="px-4 py-2 font-semibold">Next number</th>
-          <th class="px-4 py-2 text-right font-semibold">Set aside</th>
-        </tr>
+      <tr>
+      <th class="px-4 py-2 font-semibold">Queue</th>
+      <th class="px-4 py-2 font-semibold">Next number</th>
+      <th class="px-4 py-2 text-right font-semibold">Set aside</th>
+      </tr>
       </thead>
       <tbody class="divide-y divide-slate-100 bg-white">
-        <?php foreach ($queues as $q): ?>
-          <tr>
-            <td class="px-4 py-2 font-medium text-slate-800"><?= e($q['name']) ?></td>
-            <td class="px-4 py-2 font-mono text-[11px] text-slate-600">
-              <?php $last = (int) \App\Core\Db::scalar('SELECT last_token_no FROM queues WHERE id = ?', [(int) $q['id']]); ?>
-              <?= e((string) $q['token_prefix'] . str_pad((string) ($last + 1), (int) $q['token_padding'], '0', STR_PAD_LEFT)) ?>
-            </td>
-            <td class="px-4 py-2 text-right">
-              <form method="post" action="/api/queue/offline/block" class="flex items-center justify-end gap-2"
-                    data-offline-block>
-                <?= csrf_field() ?>
-                <input type="hidden" name="queue_id" value="<?= (int) $q['id'] ?>">
-                <input class="input w-16 py-1 text-xs" type="number" name="size" value="10" min="1" max="50">
-                <button class="btn-secondary text-[11px]">Set aside</button>
-              </form>
-            </td>
-          </tr>
-        <?php endforeach; ?>
+      <?php foreach ($queues as $q): ?>
+      <tr>
+      <td class="px-4 py-2 font-medium text-slate-800"><?= e($q['name']) ?></td>
+      <td class="px-4 py-2 font-mono text-[11px] text-slate-600">
+      <?php $last = (int) \App\Core\Db::scalar('SELECT last_token_no FROM queues WHERE id = ?', [(int) $q['id']]); ?>
+      <?= e((string) $q['token_prefix'] . str_pad((string) ($last + 1), (int) $q['token_padding'], '0', STR_PAD_LEFT)) ?>
+      </td>
+      <td class="px-4 py-2 text-right">
+      <form method="post" action="/api/queue/offline/block" class="flex items-center justify-end gap-2"
+      data-offline-block>
+      <?= csrf_field() ?>
+      <input type="hidden" name="queue_id" value="<?= (int) $q['id'] ?>">
+      <input class="input w-16 py-1 text-xs" type="number" name="size" value="10" min="1" max="50">
+      <button class="btn-secondary text-[11px]">Set aside</button>
+      </form>
+      </td>
+      </tr>
+      <?php endforeach; ?>
       </tbody>
-    </table>
+      </table>
+    </div>
   </div>
 <?php endif; ?>
 
@@ -147,46 +149,48 @@
   </div>
 <?php else: ?>
   <div class="mt-4 overflow-hidden rounded-xl border border-slate-200">
-    <table class="w-full text-left text-xs">
+    <div class="table-scroll">
+      <table class="w-full text-left text-xs">
       <thead class="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
-        <tr>
-          <th class="px-4 py-2 font-semibold">Taken</th>
-          <th class="px-4 py-2 font-semibold">Queue</th>
-          <th class="px-4 py-2 font-semibold">Numbers</th>
-          <th class="px-4 py-2 text-right font-semibold">Used</th>
-          <th class="px-4 py-2 text-right font-semibold">Left</th>
-          <th class="px-4 py-2 font-semibold">State</th>
-        </tr>
+      <tr>
+      <th class="px-4 py-2 font-semibold">Taken</th>
+      <th class="px-4 py-2 font-semibold">Queue</th>
+      <th class="px-4 py-2 font-semibold">Numbers</th>
+      <th class="px-4 py-2 text-right font-semibold">Used</th>
+      <th class="px-4 py-2 text-right font-semibold">Left</th>
+      <th class="px-4 py-2 font-semibold">State</th>
+      </tr>
       </thead>
       <tbody class="divide-y divide-slate-100 bg-white">
-        <?php foreach ($report['blocks'] as $b): ?>
-          <?php
-            $pad = (int) ($b['token_padding'] ?? 3);
-            $pfx = (string) ($b['token_prefix'] ?? '');
-            $from = $pfx . str_pad((string) $b['from_no'], $pad, '0', STR_PAD_LEFT);
-            $to = $pfx . str_pad((string) $b['to_no'], $pad, '0', STR_PAD_LEFT);
-          ?>
-          <tr>
-            <td class="px-4 py-2 text-slate-600"><?= e((string) $b['created_at']) ?></td>
-            <td class="px-4 py-2 text-slate-800"><?= e((string) ($b['queue_name'] ?? '—')) ?></td>
-            <td class="px-4 py-2 font-mono text-[11px] text-slate-700"><?= e($from) ?> – <?= e($to) ?></td>
-            <td class="px-4 py-2 text-right tabular-nums text-slate-700"><?= (int) $b['used'] ?></td>
-            <td class="px-4 py-2 text-right tabular-nums <?= (int) $b['unused'] > 0 ? 'text-slate-700' : 'text-slate-400' ?>"><?= (int) $b['unused'] ?></td>
-            <td class="px-4 py-2">
-              <?php if ((int) $b['used'] === 0 && $b['is_expired']): ?>
-                <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">expired, unused</span>
-              <?php elseif ($b['is_expired']): ?>
-                <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">synced</span>
-              <?php elseif ((int) $b['unused'] === 0): ?>
-                <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">fully used</span>
-              <?php else: ?>
-                <span class="rounded-full bg-teal-50 px-2 py-0.5 text-[10px] font-semibold text-teal-700">holding</span>
-              <?php endif; ?>
-            </td>
-          </tr>
-        <?php endforeach; ?>
+      <?php foreach ($report['blocks'] as $b): ?>
+      <?php
+      $pad = (int) ($b['token_padding'] ?? 3);
+      $pfx = (string) ($b['token_prefix'] ?? '');
+      $from = $pfx . str_pad((string) $b['from_no'], $pad, '0', STR_PAD_LEFT);
+      $to = $pfx . str_pad((string) $b['to_no'], $pad, '0', STR_PAD_LEFT);
+      ?>
+      <tr>
+      <td class="px-4 py-2 text-slate-600"><?= e((string) $b['created_at']) ?></td>
+      <td class="px-4 py-2 text-slate-800"><?= e((string) ($b['queue_name'] ?? '—')) ?></td>
+      <td class="px-4 py-2 font-mono text-[11px] text-slate-700"><?= e($from) ?> – <?= e($to) ?></td>
+      <td class="px-4 py-2 text-right tabular-nums text-slate-700"><?= (int) $b['used'] ?></td>
+      <td class="px-4 py-2 text-right tabular-nums <?= (int) $b['unused'] > 0 ? 'text-slate-700' : 'text-slate-400' ?>"><?= (int) $b['unused'] ?></td>
+      <td class="px-4 py-2">
+      <?php if ((int) $b['used'] === 0 && $b['is_expired']): ?>
+      <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">expired, unused</span>
+      <?php elseif ($b['is_expired']): ?>
+      <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">synced</span>
+      <?php elseif ((int) $b['unused'] === 0): ?>
+      <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">fully used</span>
+      <?php else: ?>
+      <span class="rounded-full bg-teal-50 px-2 py-0.5 text-[10px] font-semibold text-teal-700">holding</span>
+      <?php endif; ?>
+      </td>
+      </tr>
+      <?php endforeach; ?>
       </tbody>
-    </table>
+      </table>
+    </div>
   </div>
 <?php endif; ?>
 

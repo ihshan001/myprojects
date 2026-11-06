@@ -108,7 +108,7 @@
         <p class="mt-1 text-[11px] text-slate-500">Name it the way staff say it out loud.</p>
       </div>
 
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
         <div>
           <label class="label" for="kind">Queue type</label>
           <select class="select" id="kind" name="kind">

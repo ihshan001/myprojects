@@ -112,7 +112,7 @@
                  placeholder="Display boards stopped updating">
           <p class="mt-1 text-[11px] text-slate-500">Write it for somebody woken at 03:00.</p>
         </div>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
           <div>
             <label class="label" for="severity">Severity</label>
             <select class="select" id="severity" name="severity">

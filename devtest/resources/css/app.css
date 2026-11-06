@@ -26,6 +26,27 @@
     scroll-behavior: smooth;
   }
 
+  /* Nothing may make the page wider than the phone. A single wide table used
+     to drag the whole layout sideways, which also moved the fixed top bar. */
+  html, body {
+    max-width: 100%;
+    overflow-x: clip;
+  }
+
+  /* iOS Safari zooms in when a focused input is under 16px, then never zooms
+     back out — the page stays mis-scaled for the rest of the session. */
+  @media (max-width: 640px) {
+    input, select, textarea {
+      font-size: 16px !important;
+    }
+  }
+
+  /* Body scroll is locked while the drawer is open, so the page behind it
+     does not slide around under the user's thumb. */
+  body.qp-nav-open {
+    overflow: hidden;
+  }
+
   body {
     @apply bg-[var(--canvas)] text-slate-800 antialiased;
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
@@ -66,7 +87,7 @@
     @apply rounded-xl border border-slate-200 bg-white shadow-sm;
   }
   .card-pad {
-    @apply p-5;
+    @apply p-4 sm:p-5;
   }
   .card-hover {
     @apply transition hover:border-slate-300 hover:shadow-md;
@@ -238,6 +259,84 @@
            text-[11px] font-semibold text-amber-800 ring-1 ring-amber-300;
   }
 
+  /* --------------------------------------------------- mobile drawer */
+  /* The old mobile menu was an inline list that pushed the page down and had
+     no sections, no active state and no way to close it. This is a real
+     off-canvas drawer: overlay, scroll lock, Escape, and the same grouped
+     navigation the desktop sidebar shows. */
+  .nav-overlay {
+    @apply fixed inset-0 z-40 bg-slate-900/60 backdrop-blur-sm lg:hidden;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s ease;
+  }
+  .nav-overlay.is-open {
+    opacity: 1;
+    pointer-events: auto;
+    touch-action: none;
+  }
+
+  .nav-drawer {
+    @apply fixed inset-y-0 left-0 z-50 flex w-[86vw] max-w-[20rem] flex-col
+           bg-slate-900 shadow-2xl lg:hidden;
+    transform: translateX(-100%);
+    /* visibility keeps the off-screen links out of the tab order; a drawer
+       that is merely translated away is still keyboard-reachable. */
+    visibility: hidden;
+    transition: transform .24s cubic-bezier(.4, 0, .2, 1), visibility .24s;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .nav-drawer.is-open {
+    transform: translateX(0);
+    visibility: visible;
+  }
+  /* The drawer's own list must still pan when the page behind it is locked. */
+  .nav-drawer nav {
+    touch-action: pan-y;
+  }
+
+  /* Comfortable thumb targets: 44px minimum, per the platform guidelines. */
+  .nav-drawer .nav-item {
+    @apply min-h-[44px] py-2.5 text-[15px];
+  }
+
+  .nav-section-label {
+    @apply mb-1 mt-4 px-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 first:mt-0;
+  }
+
+  .icon-btn {
+    @apply inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg
+           text-slate-600 transition hover:bg-slate-100 active:bg-slate-200;
+  }
+
+  /* ------------------------------------------------------ table scroll */
+  /* A table wider than the phone scrolls inside its own card instead of
+     stretching the page. The fade hints that there is more to the right. */
+  .table-scroll {
+    @apply w-full overflow-x-auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+  .table-scroll > table {
+    @apply min-w-full;
+  }
+  @media (max-width: 640px) {
+    /* Tap targets on phones: a 24px icon button is a miss most of the time. */
+    .btn-sm { @apply min-h-[36px] px-3; }
+    .act { @apply min-h-[44px] min-w-[44px]; }
+    .checkbox { @apply h-5 w-5; }
+    /* Long headings must wrap, not force the card wider than the screen. */
+    h1, h2, h3 { overflow-wrap: anywhere; }
+    .table thead th,
+    .table tbody td {
+      @apply px-2.5 py-2 text-[13px];
+    }
+    /* Anything explicitly marked desktop-only collapses away rather than
+       squeezing the columns that actually matter on a phone. */
+    .hide-sm { display: none !important; }
+  }
+
   /* ----------------------------------------------------------- layout */
   .shell {
     @apply flex min-h-screen;
@@ -249,7 +348,7 @@
     @apply flex min-h-screen w-full flex-col lg:pl-64;
   }
   .page {
-    @apply mx-auto w-full max-w-[1400px] flex-1 px-4 py-6 sm:px-6 lg:px-8;
+    @apply mx-auto w-full max-w-[1400px] flex-1 px-3 py-4 sm:px-6 sm:py-6 lg:px-8;
   }
   .page-narrow {
     @apply mx-auto w-full max-w-3xl px-4 py-8 sm:px-6;
@@ -305,7 +404,7 @@
 
 /* Print: reports should print clean, without chrome */
 @media print {
-  .sidebar, .no-print, .btn, .act { display: none !important; }
+  .sidebar, .nav-drawer, .nav-overlay, .no-print, .btn, .act { display: none !important; }
   .main-col { padding-left: 0 !important; }
   .card { box-shadow: none !important; border-color: #cbd5e1 !important; }
   body { background: #fff; }

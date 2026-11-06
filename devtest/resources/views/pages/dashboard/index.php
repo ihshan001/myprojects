@@ -66,7 +66,7 @@ $avgWait = $summary['avg_wait'] ?? null;
       $isOpen = $queue['status'] === 'open';
       ?>
       <section class="card overflow-hidden" data-queue-board="<?= $qid ?>">
-        <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/60 px-4 py-3">
+        <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/60 px-3 py-3 sm:px-4">
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
               <h2 class="truncate text-sm font-bold text-slate-900"><?= e($queue['name']) ?></h2>
@@ -81,7 +81,7 @@ $avgWait = $summary['avg_wait'] ?? null;
             </p>
           </div>
 
-          <div class="flex items-center gap-3">
+          <div class="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
             <div class="text-right" data-now-serving-wrap>
               <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Now serving</p>
               <p class="font-mono text-lg font-black leading-tight text-teal-700" data-now-serving>
@@ -130,7 +130,7 @@ $avgWait = $summary['avg_wait'] ?? null;
           </div>
         </header>
 
-        <div data-queue-stats class="flex items-center gap-5 border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
+        <div data-queue-stats class="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-100 px-3 py-2 text-xs text-slate-500 sm:gap-5 sm:px-4">
           <span>Waiting <b class="tabular text-slate-800" data-stat="waiting"><?= (int) ($queue['waiting_count'] ?? 0) ?></b></span>
           <span>In room <b class="tabular text-slate-800" data-stat="in_room"><?= (int) ($queue['active_count'] ?? 0) ?></b></span>
           <span class="ml-auto">Tokens issued <b class="tabular text-slate-800"><?= (int) $queue['last_token_no'] ?></b></span>

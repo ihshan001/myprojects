@@ -49,34 +49,36 @@
     <p class="text-xs font-semibold text-slate-600">Tenants</p>
     <a href="/admin/clinics" class="text-[11px] font-semibold text-teal-700 hover:underline">Manage clinics →</a>
   </div>
-  <table class="table">
+  <div class="table-scroll">
+    <table class="table">
     <thead>
-      <tr><th>Clinic</th><th class="hidden sm:table-cell">Plan</th><th>Status</th><th class="numeric hidden md:table-cell">Staff</th><th class="numeric hidden lg:table-cell">Tokens today</th><th class="hidden lg:table-cell">Joined</th></tr>
+    <tr><th>Clinic</th><th class="hidden sm:table-cell">Plan</th><th>Status</th><th class="numeric hidden md:table-cell">Staff</th><th class="numeric hidden lg:table-cell">Tokens today</th><th class="hidden lg:table-cell">Joined</th></tr>
     </thead>
     <tbody>
-      <?php foreach ($clinics as $c): ?>
-        <tr>
-          <td>
-            <div class="flex items-center gap-2.5">
-              <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold text-white"
-                    style="background: <?= e((string) $c['brand_color']) ?>"><?= e(App\Core\Str::initials((string) $c['name'])) ?></span>
-              <div class="min-w-0">
-                <p class="truncate font-medium text-slate-900"><?= e($c['name']) ?></p>
-                <p class="truncate text-[11px] text-slate-400"><?= e((string) $c['slug']) ?>.queuepilot · <?= e((string) ($c['city'] ?? '')) ?></p>
+    <?php foreach ($clinics as $c): ?>
+    <tr>
+    <td>
+    <div class="flex items-center gap-2.5">
+    <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold text-white"
+    style="background: <?= e((string) $c['brand_color']) ?>"><?= e(App\Core\Str::initials((string) $c['name'])) ?></span>
+    <div class="min-w-0">
+    <p class="truncate font-medium text-slate-900"><?= e($c['name']) ?></p>
+    <p class="truncate text-[11px] text-slate-400"><?= e((string) $c['slug']) ?>.queuepilot · <?= e((string) ($c['city'] ?? '')) ?></p>
+  </div>
               </div>
-            </div>
-          </td>
-          <td class="hidden sm:table-cell text-xs"><?= e((string) ($c['plan_name'] ?? '—')) ?></td>
-          <td>
-            <span class="<?= $c['billing_status'] === 'active' ? 'badge-emerald' : ($c['billing_status'] === 'trial' ? 'badge-amber' : 'badge-rose') ?>">
-              <?= e((string) $c['billing_status']) ?>
-            </span>
-          </td>
-          <td class="numeric hidden md:table-cell text-xs"><?= (int) $c['staff_count'] ?></td>
-          <td class="numeric hidden lg:table-cell text-xs"><?= (int) $c['today_entries'] ?></td>
-          <td class="hidden lg:table-cell text-xs text-slate-500"><?= e(date('j M Y', strtotime((string) $c['created_at']))) ?></td>
-        </tr>
-      <?php endforeach; ?>
-    </tbody>
-  </table>
+            </td>
+            <td class="hidden sm:table-cell text-xs"><?= e((string) ($c['plan_name'] ?? '—')) ?></td>
+            <td>
+              <span class="<?= $c['billing_status'] === 'active' ? 'badge-emerald' : ($c['billing_status'] === 'trial' ? 'badge-amber' : 'badge-rose') ?>">
+                <?= e((string) $c['billing_status']) ?>
+              </span>
+            </td>
+            <td class="numeric hidden md:table-cell text-xs"><?= (int) $c['staff_count'] ?></td>
+            <td class="numeric hidden lg:table-cell text-xs"><?= (int) $c['today_entries'] ?></td>
+            <td class="hidden lg:table-cell text-xs text-slate-500"><?= e(date('j M Y', strtotime((string) $c['created_at']))) ?></td>
+          </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
 </div>

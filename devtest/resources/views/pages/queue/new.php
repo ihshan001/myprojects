@@ -115,7 +115,7 @@ $selectedPatient = (int) ($preselect ?? 0);
             <label class="label" for="full_name">Patient name</label>
             <input class="input" id="full_name" name="full_name" placeholder="Nimali Wickramasinghe" autocomplete="off">
           </div>
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
             <div>
               <label class="label" for="phone">Phone</label>
               <input class="input" id="phone" name="phone" inputmode="tel" placeholder="077 123 4567"

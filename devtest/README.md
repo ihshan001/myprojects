@@ -16,8 +16,14 @@ authentication and its landing page.
 cd devtest
 npm install          # or: ln -s ../queuepilot/node_modules node_modules
 npm run migrate && npm run seed
-npm run fleet        # all five role ports at once
+npm run fleet        # all five role ports in ONE process (terminal use)
 ```
+
+> **In Arena / any preview UI, start five separate processes instead of
+> `npm run fleet`.** A preview panel is attached to a process, so one fleet
+> process surfaces only one preview even though all five ports are serving.
+> Run `npm run p8080`, `p8081`, `p8082`, `p8083`, `p8084` as five processes and
+> each role gets its own labelled preview.
 
 Open any port at **`/`** — it lands directly on that role's workspace. There is
 no login screen to get past.
@@ -42,6 +48,44 @@ npm run fleet 8081 8082  # receptionist + doctor
 
 Every page carries an amber strip naming the port, role, identity and clinic,
 plus one line describing what that role can see.
+
+### Switching roles
+
+The amber strip has a chip for every port, and the mobile drawer has the same
+list under **Switch role**. You do not need to retype URLs.
+
+Those links are built by `DevIdentity::siblingUrl()`, which rewrites the port
+in the host the browser actually used:
+
+| You are on | Link to the doctor becomes |
+|---|---|
+| `8080-<sandbox>.e2b.app` | `https://8082-<sandbox>.e2b.app/app` |
+| `localhost:8080` | `http://localhost:8082/app` |
+
+A proxied preview gives each port its own hostname, so a hard-coded
+`localhost:8082` would be dead from your browser. Each link also lands on that
+role's own `home` path, so the doctor never arrives on `/admin` and gets a 403.
+
+---
+
+## Mobile
+
+The layout is built phone-first; the desktop sidebar is the large-screen variant.
+
+- **Off-canvas drawer** below `lg`, not an inline list that pushes the page down.
+  Dimmed backdrop, page scroll locked behind it, closes on Escape / backdrop /
+  link tap / the × button. Focus is trapped inside while open and returned to
+  the menu button on close. Off-screen links are `visibility:hidden`, so they
+  stay out of the tab order.
+- **Same navigation as desktop** — grouped sections and the active-page marker,
+  not a flat dump of every link.
+- **44px touch targets** on nav rows, queue actions and the close button.
+- **No horizontal page overflow.** Every table scrolls inside its own card
+  (`.table-scroll`); `html, body` are clipped as a backstop.
+- **16px inputs on small screens**, so iOS Safari does not zoom the page in and
+  leave it mis-scaled for the rest of the session.
+- **Safe-area insets** for notched phones, and form grids stack below 420px.
+- Rotating to landscape past `lg` closes the drawer and releases the scroll lock.
 
 ---
 
@@ -134,8 +178,8 @@ touch the main system.
 ## Commands
 
 ```bash
-npm run fleet        # all role ports
-npm run p8080        # a single port (p8080 … p8084)
+npm run fleet        # all role ports in one process (terminal)
+npm run p8080        # one port = one process = one preview (p8080 … p8084)
 npm run lint         # PHP parse check
 npm test             # 221 checks
 npm run health       # schema, plans, CSS, schema parity
@@ -163,11 +207,12 @@ they no longer depend on test order.
 ## Files that only exist here
 
 ```
-dev/roles.json              port → role → identity map
-app/Core/DevIdentity.php    resolves identity from QP_PORT
-tools/serve-role.mjs        one port, one role
-tools/fleet.mjs             all ports at once
-README.md                   this file
+dev/roles.json                              port → role → identity map
+app/Core/DevIdentity.php                    identity from QP_PORT + siblingUrl()
+resources/views/components/role-switcher.php  the role chips / drawer rows
+tools/serve-role.mjs                        one port, one role
+tools/fleet.mjs                             all ports at once (terminal only)
+README.md                                   this file
 ```
 
 `public/index.php` requires `DevIdentity` and fails with a clear message if the

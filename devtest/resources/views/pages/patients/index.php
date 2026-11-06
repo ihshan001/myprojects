@@ -19,41 +19,43 @@
   <?php if ($patients === []): ?>
     <?php $title = $q !== '' ? 'No matches' : 'No patients yet'; $message = $q !== '' ? 'Try a phone number or the first few letters of the name.' : 'Register the first patient from the token desk.'; $icon = 'users'; include QP_ROOT . '/resources/views/components/empty.php'; ?>
   <?php else: ?>
-    <table class="table">
+    <div class="table-scroll">
+      <table class="table">
       <thead>
-        <tr>
-          <th>Patient</th>
-          <th class="hidden sm:table-cell">Phone</th>
-          <th class="hidden md:table-cell">Code</th>
-          <th class="numeric hidden lg:table-cell">Visits</th>
-          <th class="hidden lg:table-cell">Last seen</th>
-          <th></th>
-        </tr>
+      <tr>
+      <th>Patient</th>
+      <th class="hidden sm:table-cell">Phone</th>
+      <th class="hidden md:table-cell">Code</th>
+      <th class="numeric hidden lg:table-cell">Visits</th>
+      <th class="hidden lg:table-cell">Last seen</th>
+      <th></th>
+      </tr>
       </thead>
       <tbody>
-        <?php foreach ($patients as $p): ?>
-          <tr>
-            <td>
-              <div class="flex items-center gap-2.5">
-                <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[11px] font-bold text-slate-600">
-                  <?= e(App\Core\Str::initials((string) $p['full_name'])) ?>
-                </span>
-                <div class="min-w-0">
-                  <a href="/patients/<?= (int) $p['id'] ?>" class="block truncate font-medium text-slate-900 hover:text-teal-700"><?= e($p['full_name']) ?></a>
-                  <p class="text-[11px] text-slate-400"><?= e((string) ($p['gender'] ?? '')) ?><?= !empty($p['birth_year']) ? ' · ' . (int) (date('Y') - (int) $p['birth_year']) . ' yrs' : '' ?></p>
+      <?php foreach ($patients as $p): ?>
+      <tr>
+      <td>
+      <div class="flex items-center gap-2.5">
+      <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[11px] font-bold text-slate-600">
+      <?= e(App\Core\Str::initials((string) $p['full_name'])) ?>
+      </span>
+      <div class="min-w-0">
+      <a href="/patients/<?= (int) $p['id'] ?>" class="block truncate font-medium text-slate-900 hover:text-teal-700"><?= e($p['full_name']) ?></a>
+      <p class="text-[11px] text-slate-400"><?= e((string) ($p['gender'] ?? '')) ?><?= !empty($p['birth_year']) ? ' · ' . (int) (date('Y') - (int) $p['birth_year']) . ' yrs' : '' ?></p>
+    </div>
                 </div>
-              </div>
-            </td>
-            <td class="hidden sm:table-cell text-xs"><?= e((string) ($p['phone'] ?? '—')) ?></td>
-            <td class="hidden md:table-cell font-mono text-[11px] text-slate-500"><?= e((string) $p['code']) ?></td>
-            <td class="numeric hidden lg:table-cell text-xs"><?= (int) ($p['visits'] ?? 0) ?></td>
-            <td class="hidden lg:table-cell text-xs text-slate-500"><?= e(!empty($p['last_seen']) ? ago($p['last_seen']) : '—') ?></td>
-            <td class="text-right">
-              <a href="/patients/<?= (int) $p['id'] ?>" class="act-mute">Open</a>
-            </td>
-          </tr>
-        <?php endforeach; ?>
-      </tbody>
-    </table>
+              </td>
+              <td class="hidden sm:table-cell text-xs"><?= e((string) ($p['phone'] ?? '—')) ?></td>
+              <td class="hidden md:table-cell font-mono text-[11px] text-slate-500"><?= e((string) $p['code']) ?></td>
+              <td class="numeric hidden lg:table-cell text-xs"><?= (int) ($p['visits'] ?? 0) ?></td>
+              <td class="hidden lg:table-cell text-xs text-slate-500"><?= e(!empty($p['last_seen']) ? ago($p['last_seen']) : '—') ?></td>
+              <td class="text-right">
+                <a href="/patients/<?= (int) $p['id'] ?>" class="act-mute">Open</a>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
   <?php endif; ?>
 </div>

@@ -107,7 +107,7 @@
                value="<?= e($old['name'] ?? '') ?>" placeholder="Under-fives first">
       </div>
 
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
         <div>
           <label class="label" for="effect">Priority</label>
           <select class="select" id="effect" name="effect" required>
@@ -129,7 +129,7 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
         <div>
           <label class="label" for="kind">Queue type</label>
           <select class="select" id="kind" name="kind">
@@ -165,7 +165,7 @@
         <p class="mt-1 text-[11px] text-slate-500">A rule for one queue is how a doctor's own preference stays theirs.</p>
       </div>
 
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
         <div>
           <label class="label" for="min_age">Youngest age</label>
           <input class="input" id="min_age" name="min_age" type="number" min="0" max="130"
@@ -178,7 +178,7 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
         <div>
           <label class="label" for="from_hour">From hour</label>
           <input class="input" id="from_hour" name="from_hour" type="number" min="0" max="23"
@@ -264,34 +264,36 @@ $severityTone = static fn (string $s): string => match ($s) {
       doing the work and no one is jumping the queue by hand.
     </p>
   <?php else: ?>
-    <table class="table">
+    <div class="table-scroll">
+      <table class="table">
       <thead>
-        <tr>
-          <th>Staff member</th>
-          <th class="numeric">Overrides</th>
-          <th class="numeric">Tokens issued</th>
-          <th class="numeric">Rate</th>
-        </tr>
+      <tr>
+      <th>Staff member</th>
+      <th class="numeric">Overrides</th>
+      <th class="numeric">Tokens issued</th>
+      <th class="numeric">Rate</th>
+      </tr>
       </thead>
       <tbody>
-        <?php foreach ($overuse['per_staff'] as $row): ?>
-          <tr>
-            <td class="font-medium"><?= e((string) $row['name']) ?></td>
-            <td class="numeric"><?= (int) $row['overrides'] ?></td>
-            <td class="numeric text-slate-500"><?= (int) $row['tokens'] ?></td>
-            <td class="numeric">
-              <?php if ($row['rate'] === null): ?>
-                <span class="text-[10px] text-slate-400" title="They issued no tokens in this period, so there is no denominator">—</span>
-              <?php else: ?>
-                <span class="font-semibold <?= (float) $row['rate'] >= 40 ? 'text-rose-700' : ((float) $row['rate'] >= 25 ? 'text-amber-700' : 'text-slate-700') ?>">
-                  <?= e((string) $row['rate']) ?>%
-                </span>
-              <?php endif; ?>
-            </td>
-          </tr>
-        <?php endforeach; ?>
+      <?php foreach ($overuse['per_staff'] as $row): ?>
+      <tr>
+      <td class="font-medium"><?= e((string) $row['name']) ?></td>
+      <td class="numeric"><?= (int) $row['overrides'] ?></td>
+      <td class="numeric text-slate-500"><?= (int) $row['tokens'] ?></td>
+      <td class="numeric">
+      <?php if ($row['rate'] === null): ?>
+      <span class="text-[10px] text-slate-400" title="They issued no tokens in this period, so there is no denominator">—</span>
+      <?php else: ?>
+      <span class="font-semibold <?= (float) $row['rate'] >= 40 ? 'text-rose-700' : ((float) $row['rate'] >= 25 ? 'text-amber-700' : 'text-slate-700') ?>">
+      <?= e((string) $row['rate']) ?>%
+      </span>
+      <?php endif; ?>
+      </td>
+      </tr>
+      <?php endforeach; ?>
       </tbody>
-    </table>
+      </table>
+    </div>
   <?php endif; ?>
 
   <?php if ($overuse['reasons'] !== []): ?>

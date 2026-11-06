@@ -118,21 +118,23 @@ foreach ($grants as $g) {
   <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
     <p class="text-xs font-semibold text-slate-600">Who can reach this branch</p>
   </div>
-  <table class="table">
+  <div class="table-scroll">
+    <table class="table">
     <thead><tr><th>Name</th><th class="hidden sm:table-cell">Email</th><th>Role</th><th>Access via</th></tr></thead>
     <tbody>
-      <?php foreach ($staff as $s): ?>
-        <tr>
-          <td class="font-medium"><?= e((string) $s['name']) ?></td>
-          <td class="hidden sm:table-cell text-xs text-slate-500"><?= e((string) $s['email']) ?></td>
-          <td><span class="badge-slate"><?= e(str_replace('_', ' ', (string) $s['role'])) ?></span></td>
-          <td>
-            <span class="<?= (string) $s['via'] === 'home' ? 'badge-teal' : 'badge-violet' ?>">
-              <?= (string) $s['via'] === 'home' ? 'home branch' : 'granted' ?>
-            </span>
-          </td>
-        </tr>
-      <?php endforeach; ?>
+    <?php foreach ($staff as $s): ?>
+    <tr>
+    <td class="font-medium"><?= e((string) $s['name']) ?></td>
+    <td class="hidden sm:table-cell text-xs text-slate-500"><?= e((string) $s['email']) ?></td>
+    <td><span class="badge-slate"><?= e(str_replace('_', ' ', (string) $s['role'])) ?></span></td>
+    <td>
+    <span class="<?= (string) $s['via'] === 'home' ? 'badge-teal' : 'badge-violet' ?>">
+    <?= (string) $s['via'] === 'home' ? 'home branch' : 'granted' ?>
+    </span>
+    </td>
+    </tr>
+    <?php endforeach; ?>
     </tbody>
-  </table>
+    </table>
+  </div>
 </div>

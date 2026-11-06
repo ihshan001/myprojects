@@ -173,23 +173,86 @@ if ($u) {
     </div>
   </aside>
 
-  <!-- Main column -->
-  <div class="main-col">
-    <!-- Mobile top bar -->
-    <div class="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-slate-200 bg-white/90 px-4 backdrop-blur lg:hidden no-print">
-      <div class="flex items-center gap-2">
-        <span class="flex h-7 w-7 items-center justify-center rounded-md bg-teal-700 text-xs font-black text-white">Q</span>
-        <span class="text-sm font-bold text-slate-900"><?= e($cl['name'] ?? $appName) ?></span>
+  <!-- Mobile off-canvas navigation. Same grouped sections and active state as
+       the desktop sidebar, rather than a flat list of every link. -->
+  <div id="nav-overlay" class="nav-overlay no-print" hidden></div>
+  <aside id="nav-drawer" class="nav-drawer no-print" aria-label="Navigation" aria-hidden="true">
+    <div class="flex h-14 shrink-0 items-center gap-2 border-b border-white/10 px-3">
+      <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-500 text-sm font-black text-slate-900">Q</span>
+      <div class="min-w-0 flex-1 leading-tight">
+        <p class="truncate text-sm font-bold text-white"><?= e($appName) ?></p>
+        <p class="truncate text-[10px] text-slate-400"><?= e($cl['name'] ?? 'Platform console') ?></p>
       </div>
-      <button type="button" id="mobile-menu-btn" class="rounded-lg p-2 text-slate-600 hover:bg-slate-100" aria-label="Open menu">
-        <svg class="h-5 w-5"><use href="#i-menu"/></svg>
+      <button type="button" id="nav-close" class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-white active:bg-white/20" aria-label="Close navigation">
+        <svg class="h-5 w-5"><use href="#i-x"/></svg>
       </button>
     </div>
 
-    <div id="mobile-menu" class="hidden border-b border-slate-200 bg-slate-900 px-3 py-2 lg:hidden no-print">
-      <?php foreach ($navSections as $items): foreach ($items as [$href, $icon, $label]): ?>
-        <a href="<?= e($href) ?>" class="nav-item"><svg class="h-4 w-4"><use href="#i-<?= e($icon) ?>"/></svg><?= e($label) ?></a>
-      <?php endforeach; endforeach; ?>
+    <?php if (!empty($devRole)): ?>
+      <div class="shrink-0 border-b border-white/10 bg-amber-500/10 px-3 py-2">
+        <p class="flex items-center gap-1.5 text-[11px] font-bold text-amber-200">
+          <span class="rounded bg-amber-500 px-1.5 py-0.5 text-[9px] font-black uppercase text-white">devtest</span>
+          port <?= (int) ($devRole['port'] ?? 0) ?>
+        </p>
+        <p class="mt-0.5 truncate text-xs font-semibold text-white"><?= e($devRole['label'] ?? '') ?></p>
+        <p class="truncate text-[10px] text-slate-400"><?= e($devRole['email'] ?? '') ?></p>
+      </div>
+    <?php endif; ?>
+
+    <nav class="scrollbar-thin flex-1 overflow-y-auto overscroll-contain px-2 py-3">
+      <?php foreach ($navSections as $section => $items): ?>
+        <p class="nav-section-label"><?= e($section) ?></p>
+        <?php foreach ($items as [$href, $icon, $label, $active]): ?>
+          <a href="<?= e($href) ?>" class="nav-item <?= $active ?>"<?= $active ? ' aria-current="page"' : '' ?>>
+            <svg class="h-4 w-4 shrink-0"><use href="#i-<?= e($icon) ?>"/></svg>
+            <span class="truncate"><?= e($label) ?></span>
+          </a>
+        <?php endforeach; ?>
+      <?php endforeach; ?>
+
+      <?php if ($cl && $u['role'] !== 'super_admin'): ?>
+        <p class="nav-section-label">Display</p>
+        <a href="/display" target="_blank" class="nav-item">
+          <svg class="h-4 w-4 shrink-0"><use href="#i-monitor"/></svg>
+          <span>Waiting room TV</span>
+          <svg class="ml-auto h-3 w-3 opacity-60"><use href="#i-arrow-right"/></svg>
+        </a>
+      <?php endif; ?>
+    </nav>
+
+    <?php $switcherStyle = 'drawer'; include QP_ROOT . '/resources/views/components/role-switcher.php'; ?>
+
+    <div class="shrink-0 border-t border-white/10 p-3">
+      <div class="flex items-center gap-2.5">
+        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-teal-600/30 text-xs font-bold text-teal-100">
+          <?= e(App\Core\Str::initials((string) $u['name'])) ?>
+        </span>
+        <div class="min-w-0 flex-1 leading-tight">
+          <p class="truncate text-xs font-semibold text-white"><?= e($u['name']) ?></p>
+          <p class="truncate text-[10px] text-slate-400"><?= e($roleLabel) ?></p>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main column -->
+  <div class="main-col">
+    <!-- Mobile top bar. Sticky, safe-area aware, and the title truncates
+         instead of pushing the menu button off the screen. -->
+    <div class="sticky top-0 z-30 flex min-h-[3.5rem] items-center gap-2 border-b border-slate-200 bg-white/95 px-2 backdrop-blur lg:hidden no-print"
+         style="padding-top: env(safe-area-inset-top)">
+      <button type="button" id="mobile-menu-btn" class="icon-btn" aria-label="Open navigation"
+              aria-controls="nav-drawer" aria-expanded="false">
+        <svg class="h-5 w-5"><use href="#i-menu"/></svg>
+      </button>
+      <div class="flex min-w-0 flex-1 items-center gap-2">
+        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-teal-700 text-xs font-black text-white">Q</span>
+        <span class="truncate text-sm font-bold text-slate-900"><?= e($cl['name'] ?? $appName) ?></span>
+      </div>
+      <?php if (!empty($devRole)): ?>
+        <span class="shrink-0 rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-black text-white"
+              title="<?= e($devRole['label'] ?? '') ?>"><?= (int) ($devRole['port'] ?? 0) ?></span>
+      <?php endif; ?>
     </div>
 
     <?php if (($flash = notice()) !== null): ?>
@@ -210,23 +273,24 @@ if ($u) {
 
 
     <?php if (!empty($devRole)): ?>
-      <div class="no-print border-b border-amber-300 bg-amber-50 px-4 py-2 sm:px-6 lg:px-8">
-        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+      <div class="no-print border-b border-amber-300 bg-amber-50 px-3 py-2 sm:px-6 lg:px-8">
+        <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
           <span class="rounded bg-amber-500 px-1.5 py-0.5 font-black uppercase tracking-wide text-white">devtest</span>
-          <span class="font-bold text-amber-900">port <?= (int) ($devRole['port'] ?? 0) ?></span>
-          <span class="text-amber-400">|</span>
-          <span class="font-semibold text-amber-900"><?= e($devRole['label'] ?? '') ?></span>
-          <span class="text-amber-400">|</span>
-          <span class="font-mono text-amber-800"><?= e($devRole['email'] ?? '') ?></span>
+          <span class="font-bold text-amber-900"><?= e($devRole['label'] ?? '') ?></span>
+          <span class="hidden font-mono text-amber-800 sm:inline"><?= e($devRole['email'] ?? '') ?></span>
           <?php if (!empty($devRole['clinic'])): ?>
-            <span class="text-amber-400">|</span>
-            <span class="text-amber-800"><?= e($devRole['clinic']) ?></span>
+            <span class="hidden text-amber-800 md:inline">&middot; <?= e($devRole['clinic']) ?></span>
           <?php endif; ?>
-          <span class="ml-auto hidden text-amber-700 lg:inline">no sign-in &middot; role fixed by port</span>
+          <span class="ml-auto hidden text-amber-700 xl:inline">no sign-in &middot; role fixed by port</span>
         </div>
         <?php if (!empty($devRole['sees'])): ?>
-          <p class="mt-0.5 text-[10px] leading-snug text-amber-700"><?= e($devRole['sees']) ?></p>
+          <p class="mt-0.5 hidden text-[10px] leading-snug text-amber-700 sm:block"><?= e($devRole['sees']) ?></p>
         <?php endif; ?>
+        <!-- Every role is one tap away. Each port is its own preview, and these
+             links rewrite the preview hostname rather than pointing at localhost. -->
+        <div class="mt-1.5">
+          <?php $switcherStyle = 'bar'; include QP_ROOT . '/resources/views/components/role-switcher.php'; ?>
+        </div>
       </div>
     <?php endif; ?>
 

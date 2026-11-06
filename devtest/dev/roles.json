@@ -2,13 +2,15 @@
   "_comment": [
     "DEVTEST role map. One port = one role = one signed-in identity.",
     "There is no sign-in screen anywhere in this build: the port decides who you are.",
-    "Edit a row and restart that port to change identity."
+    "Edit a row and restart that port to change identity.",
+    "Each port has its own live preview process; the in-app role switcher links between them."
   ],
   "ports": [
     {
       "port": 8080,
       "role": "clinic_admin",
       "label": "Clinic Owner",
+      "short": "Owner",
       "email": "admin@serenity.lk",
       "clinic": "Serenity OPD & Family Clinic",
       "home": "/app",
@@ -18,6 +20,7 @@
       "port": 8081,
       "role": "receptionist",
       "label": "Receptionist",
+      "short": "Reception",
       "email": "reception@serenity.lk",
       "clinic": "Serenity OPD & Family Clinic",
       "home": "/app",
@@ -27,6 +30,7 @@
       "port": 8082,
       "role": "doctor",
       "label": "Doctor",
+      "short": "Doctor",
       "email": "amara@serenity.lk",
       "clinic": "Serenity OPD & Family Clinic",
       "home": "/app",
@@ -36,6 +40,7 @@
       "port": 8083,
       "role": "super_admin",
       "label": "Platform Admin",
+      "short": "Platform",
       "email": "owner@queuepilot.app",
       "clinic": null,
       "home": "/admin",
@@ -45,6 +50,7 @@
       "port": 8084,
       "role": "clinic_admin",
       "label": "Clinic Owner (2nd clinic)",
+      "short": "Owner · clinic 2",
       "email": "admin@lakeview.lk",
       "clinic": "Lakeview Medical Centre",
       "home": "/app",

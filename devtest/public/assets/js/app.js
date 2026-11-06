@@ -70,9 +70,77 @@
   }
   window.qpApi = api;
 
-  /* -------------------------------------------------- mobile navigation */
-  const menuBtn = $('#mobile-menu-btn');
-  if (menuBtn) menuBtn.addEventListener('click', () => $('#mobile-menu')?.classList.toggle('hidden'));
+  /* ------------------------------------------------- mobile nav drawer */
+  /* Off-canvas, not an inline list. Locks the page behind it, closes on
+     Escape / overlay / navigation, and restores focus to the button that
+     opened it — otherwise a keyboard user lands back at the top of the doc. */
+  (() => {
+    const drawer = $('#nav-drawer');
+    const overlay = $('#nav-overlay');
+    const openBtn = $('#mobile-menu-btn');
+    const closeBtn = $('#nav-close');
+    if (!drawer || !overlay || !openBtn) return;
+
+    let lastFocus = null;
+
+    const isOpen = () => drawer.classList.contains('is-open');
+
+    function open() {
+      if (isOpen()) return;
+      lastFocus = document.activeElement;
+      overlay.hidden = false;
+      // Force a frame so the transition runs from the hidden state.
+      requestAnimationFrame(() => {
+        drawer.classList.add('is-open');
+        overlay.classList.add('is-open');
+      });
+      document.body.classList.add('qp-nav-open');
+      drawer.setAttribute('aria-hidden', 'false');
+      openBtn.setAttribute('aria-expanded', 'true');
+      (closeBtn || drawer.querySelector('a'))?.focus();
+    }
+
+    function close() {
+      if (!isOpen()) return;
+      drawer.classList.remove('is-open');
+      overlay.classList.remove('is-open');
+      document.body.classList.remove('qp-nav-open');
+      drawer.setAttribute('aria-hidden', 'true');
+      openBtn.setAttribute('aria-expanded', 'false');
+      // Hide the overlay only after it has faded, so it does not blink out.
+      setTimeout(() => { if (!isOpen()) overlay.hidden = true; }, 220);
+      if (lastFocus && document.contains(lastFocus)) lastFocus.focus();
+    }
+
+    openBtn.addEventListener('click', () => (isOpen() ? close() : open()));
+    closeBtn?.addEventListener('click', close);
+    overlay.addEventListener('click', close);
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && isOpen()) { e.preventDefault(); close(); }
+      // Keep Tab inside the drawer while it is open.
+      if (e.key === 'Tab' && isOpen()) {
+        const items = $$('a[href], button:not([disabled])', drawer);
+        if (!items.length) return;
+        const first = items[0], last = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    });
+
+    // Tapping a link navigates; close first so the back button does not
+    // return to a page with the drawer still hanging open.
+    drawer.addEventListener('click', (e) => {
+      if (e.target.closest('a[href]')) close();
+    });
+
+    // Rotating a phone to landscape crosses the lg breakpoint, where the
+    // drawer is display:none but the body would stay scroll-locked.
+    const wide = window.matchMedia('(min-width: 1024px)');
+    (wide.addEventListener ? wide.addEventListener.bind(wide, 'change') : wide.addListener.bind(wide))((e) => {
+      if (e.matches) close();
+    });
+  })();
 
   /* ------------------------------------------------ confirmable actions */
   document.addEventListener('click', async (ev) => {

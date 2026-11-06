@@ -86,6 +86,53 @@ final class DevIdentity
         );
     }
 
+    /**
+     * Every port in the roster, for the role switcher in the UI.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public static function roster(): array
+    {
+        $file = QP_ROOT . '/dev/roles.json';
+        $roster = is_file($file)
+            ? (json_decode((string) file_get_contents($file), true) ?: [])
+            : [];
+        return array_values($roster['ports'] ?? []);
+    }
+
+    /**
+     * Absolute URL for another role's port, derived from the host the browser
+     * actually used.
+     *
+     * This matters more than it looks. In the Arena/E2B preview the sandbox
+     * ports are not reachable as host:port — each one gets its own hostname,
+     * `8081-<sandbox>.e2b.app`. A link to `localhost:8081` or `host:8081` is
+     * dead from the user's browser. So:
+     *
+     *   8080-abc.e2b.app  ->  https://8081-abc.e2b.app   (swap port prefix)
+     *   localhost:8080    ->  http://localhost:8081      (swap :port)
+     *
+     * The scheme is taken from the current request, so HTTPS previews never
+     * get downgraded to a mixed-content http:// link.
+     */
+    public static function siblingUrl(int $port, string $path = '/'): string
+    {
+        $host = (string) ($_SERVER['HTTP_HOST'] ?? '');
+        $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+            || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https')
+            || (($_SERVER['HTTP_X_FORWARDED_SSL'] ?? '') === 'on');
+
+        // Proxied preview: the port is the first label of the hostname.
+        if (preg_match('/^(\d+)-(.+)$/', $host, $m)) {
+            return 'https://' . $port . '-' . $m[2] . $path;
+        }
+
+        // Plain host:port (local development).
+        $bare = preg_replace('/:\d+$/', '', $host) ?: 'localhost';
+        $scheme = $https ? 'https' : 'http';
+        return $scheme . '://' . $bare . ':' . $port . $path;
+    }
+
     /** The user row for this port. Null only if the database is unseeded. */
     public static function user(): ?array
     {

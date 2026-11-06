@@ -55,18 +55,20 @@
   <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
     <p class="text-xs font-semibold text-slate-600">Recent invoices</p>
   </div>
-  <table class="table">
+  <div class="table-scroll">
+    <table class="table">
     <thead><tr><th>Invoice</th><th>Clinic</th><th class="numeric">Amount</th><th>Status</th><th class="hidden sm:table-cell">Issued</th></tr></thead>
     <tbody>
-      <?php foreach ($invoices as $inv): ?>
-        <tr>
-          <td class="font-mono text-[11px]"><?= e((string) $inv['number']) ?></td>
-          <td class="text-xs"><?= e($inv['clinic_name']) ?></td>
-          <td class="numeric text-xs"><?= e(money((float) $inv['amount'])) ?></td>
-          <td><span class="<?= $inv['status'] === 'paid' ? 'badge-emerald' : 'badge-amber' ?>"><?= e((string) $inv['status']) ?></span></td>
-          <td class="hidden sm:table-cell text-[11px] text-slate-500"><?= e(date('j M Y', strtotime((string) $inv['created_at']))) ?></td>
-        </tr>
-      <?php endforeach; ?>
+    <?php foreach ($invoices as $inv): ?>
+    <tr>
+    <td class="font-mono text-[11px]"><?= e((string) $inv['number']) ?></td>
+    <td class="text-xs"><?= e($inv['clinic_name']) ?></td>
+    <td class="numeric text-xs"><?= e(money((float) $inv['amount'])) ?></td>
+    <td><span class="<?= $inv['status'] === 'paid' ? 'badge-emerald' : 'badge-amber' ?>"><?= e((string) $inv['status']) ?></span></td>
+    <td class="hidden sm:table-cell text-[11px] text-slate-500"><?= e(date('j M Y', strtotime((string) $inv['created_at']))) ?></td>
+    </tr>
+    <?php endforeach; ?>
     </tbody>
-  </table>
+    </table>
+  </div>
 </div>

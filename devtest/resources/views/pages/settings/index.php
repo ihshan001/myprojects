@@ -154,20 +154,22 @@
         <p class="text-xs font-semibold text-slate-600">Staff accounts</p>
         <p class="text-[11px] text-slate-400"><?= count($staff) ?> of <?= (int) ($plan['max_staff'] ?? 0) ?> allowed</p>
       </div>
-      <table class="table">
+      <div class="table-scroll">
+        <table class="table">
         <thead><tr><th>Name</th><th class="hidden sm:table-cell">Email</th><th>Role</th><th class="hidden md:table-cell">Last sign-in</th></tr></thead>
         <tbody>
-          <?php foreach ($staff as $s): ?>
-            <tr>
-              <td class="font-medium"><?= e($s['name']) ?></td>
-              <td class="hidden sm:table-cell text-xs text-slate-500"><?= e($s['email']) ?></td>
-              <td><span class="<?= $s['role'] === 'clinic_admin' ? 'badge-violet' : ($s['role'] === 'doctor' ? 'badge-teal' : 'badge-slate') ?>">
-                <?= e(str_replace('_', ' ', (string) $s['role'])) ?></span></td>
-              <td class="hidden md:table-cell text-xs text-slate-500"><?= e($s['last_login_at'] ? ago($s['last_login_at']) : 'never') ?></td>
-            </tr>
-          <?php endforeach; ?>
+        <?php foreach ($staff as $s): ?>
+        <tr>
+        <td class="font-medium"><?= e($s['name']) ?></td>
+        <td class="hidden sm:table-cell text-xs text-slate-500"><?= e($s['email']) ?></td>
+        <td><span class="<?= $s['role'] === 'clinic_admin' ? 'badge-violet' : ($s['role'] === 'doctor' ? 'badge-teal' : 'badge-slate') ?>">
+        <?= e(str_replace('_', ' ', (string) $s['role'])) ?></span></td>
+        <td class="hidden md:table-cell text-xs text-slate-500"><?= e($s['last_login_at'] ? ago($s['last_login_at']) : 'never') ?></td>
+        </tr>
+        <?php endforeach; ?>
         </tbody>
-      </table>
+        </table>
+      </div>
 
       <?php if ($canManage): ?>
 

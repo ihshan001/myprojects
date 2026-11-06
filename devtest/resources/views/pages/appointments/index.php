@@ -84,7 +84,7 @@
           <?php endforeach; ?>
         </select>
       </div>
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
         <div><label class="label" for="d">Date</label>
           <input class="input" type="date" id="d" name="date" value="<?= e($date) ?>" required></div>
         <div><label class="label" for="t">Time</label>

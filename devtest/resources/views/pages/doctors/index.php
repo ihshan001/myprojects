@@ -116,7 +116,7 @@
             <input class="input" id="name" name="name" required placeholder="Dr. Kasun Bandara"></div>
           <div><label class="label" for="reg_no">SLMC registration</label>
             <input class="input" id="reg_no" name="reg_no" placeholder="Optional"></div>
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
             <div><label class="label" for="specialty_id">Specialty</label>
               <select class="select" id="specialty_id" name="specialty_id">
                 <option value="">General</option>
@@ -132,7 +132,7 @@
                 <?php endforeach; ?>
               </select></div>
           </div>
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
             <div><label class="label" for="consult_fee">Fee (LKR)</label>
               <input class="input" id="consult_fee" name="consult_fee" value="2000" inputmode="decimal"></div>
             <div><label class="label" for="avg">Avg consult (min)</label>
@@ -148,26 +148,28 @@
       <?php if (($leave ?? []) === []): ?>
         <p class="mt-2 text-xs text-slate-400">No leave recorded. The booking form offers every active doctor.</p>
       <?php else: ?>
-        <table class="table mt-2">
+        <div class="table-scroll">
+          <table class="table mt-2">
           <thead><tr><th>Doctor</th><th>Dates</th><th class="hidden sm:table-cell">Reason</th><th></th></tr></thead>
           <tbody>
-            <?php foreach ($leave as $l): ?>
-              <tr>
-                <td class="text-xs font-semibold text-slate-800"><?= e($l['doctor_name']) ?></td>
-                <td class="text-xs text-slate-600"><?= e($l['starts_on']) ?><?= $l['ends_on'] !== $l['starts_on'] ? ' → ' . e($l['ends_on']) : '' ?></td>
-                <td class="hidden sm:table-cell text-xs text-slate-500"><?= e((string) ($l['reason'] ?? '—')) ?></td>
-                <td class="text-right">
-                  <?php if ($canManage): ?>
-                    <form method="post" action="/doctors/leave/<?= (int) $l['id'] ?>/delete" class="inline">
-                      <?= csrf_field() ?>
-                      <button class="act-mute">Remove</button>
-                    </form>
-                  <?php endif; ?>
-                </td>
-              </tr>
-            <?php endforeach; ?>
+          <?php foreach ($leave as $l): ?>
+          <tr>
+          <td class="text-xs font-semibold text-slate-800"><?= e($l['doctor_name']) ?></td>
+          <td class="text-xs text-slate-600"><?= e($l['starts_on']) ?><?= $l['ends_on'] !== $l['starts_on'] ? ' → ' . e($l['ends_on']) : '' ?></td>
+          <td class="hidden sm:table-cell text-xs text-slate-500"><?= e((string) ($l['reason'] ?? '—')) ?></td>
+          <td class="text-right">
+          <?php if ($canManage): ?>
+          <form method="post" action="/doctors/leave/<?= (int) $l['id'] ?>/delete" class="inline">
+          <?= csrf_field() ?>
+          <button class="act-mute">Remove</button>
+          </form>
+          <?php endif; ?>
+          </td>
+          </tr>
+          <?php endforeach; ?>
           </tbody>
-        </table>
+          </table>
+        </div>
       <?php endif; ?>
     </div>
 

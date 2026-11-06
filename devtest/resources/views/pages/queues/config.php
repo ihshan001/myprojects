@@ -46,7 +46,7 @@
         </p>
       </div>
 
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
         <div>
           <label class="label" for="prefix">Token prefix</label>
           <input class="input font-mono uppercase" id="prefix" name="prefix" maxlength="3"

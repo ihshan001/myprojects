@@ -14,10 +14,10 @@ $json = htmlspecialchars(json_encode([
     'token' => $entry['token_label'],
 ]), ENT_QUOTES, 'UTF-8');
 ?>
-<div class="group flex flex-wrap items-center gap-3 border-b border-slate-100 px-4 py-3 last:border-0
+<div class="group flex flex-wrap items-center gap-x-2 gap-y-2 border-b border-slate-100 px-3 py-3 last:border-0 sm:gap-3 sm:px-4
             <?= $status === 'called' ? 'bg-sky-50/60' : '' ?> <?= $isPriority ? 'border-l-2 border-l-red-500' : '' ?>"
      data-entry-row data-entry='<?= $json ?>'>
-  <div class="w-10 text-center">
+  <div class="w-7 text-center sm:w-10">
     <?php if ($status === 'waiting'): ?>
       <span class="text-xs font-bold text-slate-400 tabular"><?= (int) $position ?></span>
     <?php else: ?>
@@ -54,7 +54,7 @@ $json = htmlspecialchars(json_encode([
   </div>
 
   <?php if ($actions !== []): ?>
-    <div class="flex flex-wrap items-center gap-1.5">
+    <div class="flex w-full flex-wrap items-center gap-1.5 border-t border-slate-100 pt-2 sm:w-auto sm:border-0 sm:pt-0">
       <?php if (in_array('call', $actions, true)): ?>
         <button type="button" class="act-call" data-act="call"><svg class="h-3.5 w-3.5"><use href="#i-megaphone"/></svg>Call</button>
       <?php endif; ?>

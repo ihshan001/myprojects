@@ -44,20 +44,22 @@
       <?php if ($history === []): ?>
         <?php $title = 'No visits yet'; $message = 'This patient has not been added to a queue.'; $icon = 'queue'; include QP_ROOT . '/resources/views/components/empty.php'; ?>
       <?php else: ?>
-        <table class="table">
+        <div class="table-scroll">
+          <table class="table">
           <thead><tr><th>Token</th><th>When</th><th class="hidden sm:table-cell">Doctor</th><th>Status</th><th class="numeric hidden sm:table-cell">Wait</th></tr></thead>
           <tbody>
-            <?php foreach ($history as $h): ?>
-              <tr>
-                <td><a href="/queue/entry?id=<?= (int) $h['id'] ?>" class="token-chip"><?= e((string) $h['token_label']) ?></a></td>
-                <td class="text-xs text-slate-600"><?= e(fmt_time($h['joined_at'], 'j M, g:i A')) ?></td>
-                <td class="hidden sm:table-cell text-xs"><?= e((string) ($h['doctor_name'] ?? '—')) ?></td>
-                <td><?php $b = ['status' => $h['status']]; include QP_ROOT . '/resources/views/components/badge.php'; ?></td>
-                <td class="numeric hidden sm:table-cell text-xs"><?= $h['wait_minutes'] !== null ? (int) $h['wait_minutes'] . 'm' : '—' ?></td>
-              </tr>
-            <?php endforeach; ?>
+          <?php foreach ($history as $h): ?>
+          <tr>
+          <td><a href="/queue/entry?id=<?= (int) $h['id'] ?>" class="token-chip"><?= e((string) $h['token_label']) ?></a></td>
+          <td class="text-xs text-slate-600"><?= e(fmt_time($h['joined_at'], 'j M, g:i A')) ?></td>
+          <td class="hidden sm:table-cell text-xs"><?= e((string) ($h['doctor_name'] ?? '—')) ?></td>
+          <td><?php $b = ['status' => $h['status']]; include QP_ROOT . '/resources/views/components/badge.php'; ?></td>
+          <td class="numeric hidden sm:table-cell text-xs"><?= $h['wait_minutes'] !== null ? (int) $h['wait_minutes'] . 'm' : '—' ?></td>
+          </tr>
+          <?php endforeach; ?>
           </tbody>
-        </table>
+          </table>
+        </div>
       <?php endif; ?>
     </div>
 
@@ -69,7 +71,7 @@
           <input class="input" id="full_name" name="full_name" value="<?= e((string) $patient['full_name']) ?>" required></div>
         <div><label class="label" for="phone">Phone</label>
           <input class="input" id="phone" name="phone" value="<?= e((string) ($patient['phone'] ?? '')) ?>"></div>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
           <div><label class="label" for="gender">Gender</label>
             <select class="select" id="gender" name="gender">
               <?php foreach (['' => '—', 'female' => 'Female', 'male' => 'Male', 'other' => 'Other'] as $v => $l): ?>

@@ -71,7 +71,7 @@
                       class="absolute right-0 z-20 mt-2 w-72 space-y-2 rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
                   <?= csrf_field() ?>
                   <div><label class="label">Name</label><input class="input" name="name" value="<?= e($d['name']) ?>" required maxlength="120"></div>
-                  <div class="grid grid-cols-2 gap-2">
+                  <div class="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2">
                     <div><label class="label">Code</label><input class="input" name="code" value="<?= e($d['code'] ?? '') ?>" maxlength="20"></div>
                     <div><label class="label">Floor</label><input class="input" name="floor" value="<?= e($d['floor'] ?? '') ?>" maxlength="60"></div>
                   </div>
@@ -117,7 +117,7 @@
         <form method="post" action="/departments" class="space-y-3 p-4">
           <?= csrf_field() ?>
           <div><label class="label" for="name">Name</label><input class="input" id="name" name="name" required maxlength="120" placeholder="Outpatient (OPD)"></div>
-          <div class="grid grid-cols-2 gap-2">
+          <div class="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2">
             <div><label class="label" for="code">Code</label><input class="input" id="code" name="code" maxlength="20" placeholder="OPD"></div>
             <div><label class="label" for="floor">Floor</label><input class="input" id="floor" name="floor" maxlength="60" placeholder="Ground"></div>
           </div>

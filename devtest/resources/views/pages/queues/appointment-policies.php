@@ -133,7 +133,7 @@
         <p class="mt-1 text-[11px] text-slate-500">A doctor row overrides the service row for that doctor only.</p>
       </div>
 
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
         <div>
           <label class="label" for="late_grace_minutes">Late grace</label>
           <input class="input" id="late_grace_minutes" name="late_grace_minutes" type="number" min="0" max="240"

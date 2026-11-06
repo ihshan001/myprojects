@@ -131,42 +131,44 @@ foreach ($byHour as $h) { $peak = max($peak, (int) $h['total']); }
   <?php if ($byDoctor === []): ?>
     <p class="px-4 py-10 text-center text-sm text-slate-400">No doctors to report on.</p>
   <?php else: ?>
-    <table class="table">
+    <div class="table-scroll">
+      <table class="table">
       <thead>
-        <tr>
-          <th>Doctor</th>
-          <th class="numeric">Seen</th>
-          <th class="numeric hidden sm:table-cell">Completed</th>
-          <th class="numeric hidden md:table-cell">Avg wait</th>
-          <th class="numeric hidden md:table-cell">Avg consult</th>
-          <th class="numeric hidden lg:table-cell">Priority</th>
-            <th class="numeric hidden lg:table-cell" title="Announced delays in this period">Delays</th>
-        </tr>
+      <tr>
+      <th>Doctor</th>
+      <th class="numeric">Seen</th>
+      <th class="numeric hidden sm:table-cell">Completed</th>
+      <th class="numeric hidden md:table-cell">Avg wait</th>
+      <th class="numeric hidden md:table-cell">Avg consult</th>
+      <th class="numeric hidden lg:table-cell">Priority</th>
+      <th class="numeric hidden lg:table-cell" title="Announced delays in this period">Delays</th>
+      </tr>
       </thead>
       <tbody>
-        <?php foreach ($byDoctor as $d): ?>
-          <tr>
-            <td>
-              <p class="font-medium text-slate-900"><?= e($d['name']) ?></p>
-              <p class="text-[11px] text-slate-400"><?= e($d['specialty'] ?? 'General') ?></p>
-            </td>
-            <td class="numeric"><?= (int) $d['seen'] ?></td>
-            <td class="numeric hidden sm:table-cell"><?= (int) $d['completed'] ?></td>
-            <td class="numeric hidden md:table-cell"><?= $d['avg_wait'] !== null ? round((float) $d['avg_wait']) . 'm' : '—' ?></td>
-            <td class="numeric hidden md:table-cell"><?= $d['avg_consult'] !== null ? round((float) $d['avg_consult']) . 'm' : '—' ?></td>
-            <td class="numeric hidden lg:table-cell"><?= (int) $d['prioritised'] ?></td>
-            <td class="numeric hidden lg:table-cell">
-              <?php $delayCount = (int) ($d['delays'] ?? 0); ?>
-              <?php if ($delayCount > 0): ?>
-                <span class="badge-amber"><?= $delayCount ?>×</span>
-              <?php else: ?>
-                <span class="text-slate-300">—</span>
-              <?php endif; ?>
-            </td>
-          </tr>
-        <?php endforeach; ?>
+      <?php foreach ($byDoctor as $d): ?>
+      <tr>
+      <td>
+      <p class="font-medium text-slate-900"><?= e($d['name']) ?></p>
+      <p class="text-[11px] text-slate-400"><?= e($d['specialty'] ?? 'General') ?></p>
+      </td>
+      <td class="numeric"><?= (int) $d['seen'] ?></td>
+      <td class="numeric hidden sm:table-cell"><?= (int) $d['completed'] ?></td>
+      <td class="numeric hidden md:table-cell"><?= $d['avg_wait'] !== null ? round((float) $d['avg_wait']) . 'm' : '—' ?></td>
+      <td class="numeric hidden md:table-cell"><?= $d['avg_consult'] !== null ? round((float) $d['avg_consult']) . 'm' : '—' ?></td>
+      <td class="numeric hidden lg:table-cell"><?= (int) $d['prioritised'] ?></td>
+      <td class="numeric hidden lg:table-cell">
+      <?php $delayCount = (int) ($d['delays'] ?? 0); ?>
+      <?php if ($delayCount > 0): ?>
+      <span class="badge-amber"><?= $delayCount ?>×</span>
+      <?php else: ?>
+      <span class="text-slate-300">—</span>
+      <?php endif; ?>
+      </td>
+      </tr>
+      <?php endforeach; ?>
       </tbody>
-    </table>
+      </table>
+    </div>
   <?php endif; ?>
 </div>
 
@@ -265,26 +267,28 @@ foreach ($byHour as $h) { $peak = max($peak, (int) $h['total']); }
   <?php endif; ?>
 
   <?php if ($rev['rows'] !== []): ?>
-    <table class="w-full border-t border-slate-100 text-left text-xs">
+    <div class="table-scroll">
+      <table class="w-full border-t border-slate-100 text-left text-xs">
       <thead class="bg-slate-50/60 text-[10px] uppercase tracking-wide text-slate-500">
-        <tr>
-          <th class="px-4 py-1.5 font-semibold">Doctor</th>
-          <th class="px-4 py-1.5 text-right font-semibold">Visits</th>
-          <th class="px-4 py-1.5 text-right font-semibold">Fee</th>
-          <th class="px-4 py-1.5 text-right font-semibold">Billed</th>
-        </tr>
+      <tr>
+      <th class="px-4 py-1.5 font-semibold">Doctor</th>
+      <th class="px-4 py-1.5 text-right font-semibold">Visits</th>
+      <th class="px-4 py-1.5 text-right font-semibold">Fee</th>
+      <th class="px-4 py-1.5 text-right font-semibold">Billed</th>
+      </tr>
       </thead>
       <tbody class="divide-y divide-slate-100">
-        <?php foreach ($rev['rows'] as $row): ?>
-          <tr>
-            <td class="px-4 py-1.5 text-slate-700"><?= e((string) $row['name']) ?></td>
-            <td class="px-4 py-1.5 text-right tabular-nums text-slate-600"><?= (int) $row['completed'] ?></td>
-            <td class="px-4 py-1.5 text-right tabular-nums text-slate-500"><?= e(money((float) ($row['consult_fee'] ?? 0))) ?></td>
-            <td class="px-4 py-1.5 text-right tabular-nums font-semibold text-slate-800"><?= e(money((float) $row['billed'])) ?></td>
-          </tr>
-        <?php endforeach; ?>
+      <?php foreach ($rev['rows'] as $row): ?>
+      <tr>
+      <td class="px-4 py-1.5 text-slate-700"><?= e((string) $row['name']) ?></td>
+      <td class="px-4 py-1.5 text-right tabular-nums text-slate-600"><?= (int) $row['completed'] ?></td>
+      <td class="px-4 py-1.5 text-right tabular-nums text-slate-500"><?= e(money((float) ($row['consult_fee'] ?? 0))) ?></td>
+      <td class="px-4 py-1.5 text-right tabular-nums font-semibold text-slate-800"><?= e(money((float) $row['billed'])) ?></td>
+      </tr>
+      <?php endforeach; ?>
       </tbody>
-    </table>
+      </table>
+    </div>
   <?php endif; ?>
 </div>
 
@@ -341,18 +345,20 @@ foreach ($byHour as $h) { $peak = max($peak, (int) $h['total']); }
     </div>
 
     <?php if ($feedback['by_doctor'] !== []): ?>
-      <table class="table border-t border-slate-100">
+      <div class="table-scroll">
+        <table class="table border-t border-slate-100">
         <thead><tr><th>Doctor</th><th class="numeric">Answers</th><th class="numeric">Average</th></tr></thead>
         <tbody>
-          <?php foreach ($feedback['by_doctor'] as $d): ?>
-            <tr>
-              <td class="font-medium"><?= e((string) $d['doctor']) ?></td>
-              <td class="numeric"><?= (int) $d['count'] ?></td>
-              <td class="numeric font-semibold"><?= e((string) $d['mean']) ?></td>
-            </tr>
-          <?php endforeach; ?>
+        <?php foreach ($feedback['by_doctor'] as $d): ?>
+        <tr>
+        <td class="font-medium"><?= e((string) $d['doctor']) ?></td>
+        <td class="numeric"><?= (int) $d['count'] ?></td>
+        <td class="numeric font-semibold"><?= e((string) $d['mean']) ?></td>
+        </tr>
+        <?php endforeach; ?>
         </tbody>
-      </table>
+        </table>
+      </div>
     <?php endif; ?>
 
     <?php if ($feedback['comments'] !== []): ?>
@@ -385,19 +391,21 @@ foreach ($byHour as $h) { $peak = max($peak, (int) $h['total']); }
   <?php if ($byDepartment === []): ?>
     <div class="p-4 text-xs text-slate-500">No visits in this range.</div>
   <?php else: ?>
-    <table class="table">
+    <div class="table-scroll">
+      <table class="table">
       <thead><tr><th>Department</th><th class="numeric">Seen</th><th class="numeric hidden sm:table-cell">Completed</th><th class="numeric hidden md:table-cell">Avg wait</th></tr></thead>
       <tbody>
-        <?php foreach ($byDepartment as $d): ?>
-          <tr>
-            <td class="font-medium"><?= e((string) $d['department']) ?></td>
-            <td class="numeric"><?= (int) $d['seen'] ?></td>
-            <td class="numeric hidden sm:table-cell"><?= (int) $d['completed'] ?></td>
-            <td class="numeric hidden md:table-cell"><?= $d['avg_wait_minutes'] !== null ? round((float) $d['avg_wait_minutes']) . 'm' : '—' ?></td>
-          </tr>
-        <?php endforeach; ?>
+      <?php foreach ($byDepartment as $d): ?>
+      <tr>
+      <td class="font-medium"><?= e((string) $d['department']) ?></td>
+      <td class="numeric"><?= (int) $d['seen'] ?></td>
+      <td class="numeric hidden sm:table-cell"><?= (int) $d['completed'] ?></td>
+      <td class="numeric hidden md:table-cell"><?= $d['avg_wait_minutes'] !== null ? round((float) $d['avg_wait_minutes']) . 'm' : '—' ?></td>
+      </tr>
+      <?php endforeach; ?>
       </tbody>
-    </table>
+      </table>
+    </div>
     <p class="border-t border-slate-100 px-4 py-2 text-[10px] text-slate-400">
       Queues not assigned to a department appear as (unassigned) rather than disappearing.
     </p>
@@ -412,19 +420,21 @@ foreach ($byHour as $h) { $peak = max($peak, (int) $h['total']); }
   <?php if ($delays === []): ?>
     <div class="p-4 text-xs text-slate-500">No delays or pauses recorded in this range.</div>
   <?php else: ?>
-    <table class="table">
+    <div class="table-scroll">
+      <table class="table">
       <thead><tr><th>Doctor</th><th class="numeric">Events</th><th class="numeric">Average</th><th class="numeric">Worst</th></tr></thead>
       <tbody>
-        <?php foreach ($delays as $d): ?>
-          <tr>
-            <td class="font-medium"><?= e((string) $d['doctor']) ?></td>
-            <td class="numeric"><?= (int) $d['delay_events'] ?></td>
-            <td class="numeric"><?= $d['avg_minutes'] !== null ? (int) round((float) $d['avg_minutes']) . 'm' : '—' ?></td>
-            <td class="numeric"><?= $d['worst_minutes'] !== null ? (int) round((float) $d['worst_minutes']) . 'm' : '—' ?></td>
-          </tr>
-        <?php endforeach; ?>
+      <?php foreach ($delays as $d): ?>
+      <tr>
+      <td class="font-medium"><?= e((string) $d['doctor']) ?></td>
+      <td class="numeric"><?= (int) $d['delay_events'] ?></td>
+      <td class="numeric"><?= $d['avg_minutes'] !== null ? (int) round((float) $d['avg_minutes']) . 'm' : '—' ?></td>
+      <td class="numeric"><?= $d['worst_minutes'] !== null ? (int) round((float) $d['worst_minutes']) . 'm' : '—' ?></td>
+      </tr>
+      <?php endforeach; ?>
       </tbody>
-    </table>
+      </table>
+    </div>
   <?php endif; ?>
 </div>
 
@@ -434,31 +444,33 @@ foreach ($byHour as $h) { $peak = max($peak, (int) $h['total']); }
     <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
       <p class="text-xs font-semibold text-slate-600">Staff activity</p>
     </div>
-    <table class="table">
+    <div class="table-scroll">
+      <table class="table">
       <thead>
-        <tr><th>Staff member</th><th>Role</th><th class="numeric">Actions</th>
-        <th class="numeric hidden sm:table-cell">Queue</th><th class="numeric hidden sm:table-cell">Patients</th>
-        <th class="numeric hidden md:table-cell">Cancels / no-shows</th></tr>
+      <tr><th>Staff member</th><th>Role</th><th class="numeric">Actions</th>
+      <th class="numeric hidden sm:table-cell">Queue</th><th class="numeric hidden sm:table-cell">Patients</th>
+      <th class="numeric hidden md:table-cell">Cancels / no-shows</th></tr>
       </thead>
       <tbody>
-        <?php foreach ($staffActivity as $s): ?>
-          <tr>
-            <td class="font-medium"><?= e((string) $s['name']) ?></td>
-            <td class="text-xs text-slate-500"><?= e(str_replace('_', ' ', (string) $s['role'])) ?></td>
-            <td class="numeric font-semibold"><?= (int) $s['actions'] ?></td>
-            <td class="numeric hidden sm:table-cell"><?= (int) $s['queue_actions'] ?></td>
-            <td class="numeric hidden sm:table-cell"><?= (int) $s['patient_actions'] ?></td>
-            <td class="numeric hidden md:table-cell">
-              <?php if ((int) $s['destructive'] > 0): ?>
-                <span class="badge-amber"><?= (int) $s['destructive'] ?></span>
-              <?php else: ?>
-                <span class="text-slate-300">—</span>
-              <?php endif; ?>
-            </td>
-          </tr>
-        <?php endforeach; ?>
+      <?php foreach ($staffActivity as $s): ?>
+      <tr>
+      <td class="font-medium"><?= e((string) $s['name']) ?></td>
+      <td class="text-xs text-slate-500"><?= e(str_replace('_', ' ', (string) $s['role'])) ?></td>
+      <td class="numeric font-semibold"><?= (int) $s['actions'] ?></td>
+      <td class="numeric hidden sm:table-cell"><?= (int) $s['queue_actions'] ?></td>
+      <td class="numeric hidden sm:table-cell"><?= (int) $s['patient_actions'] ?></td>
+      <td class="numeric hidden md:table-cell">
+      <?php if ((int) $s['destructive'] > 0): ?>
+      <span class="badge-amber"><?= (int) $s['destructive'] ?></span>
+      <?php else: ?>
+      <span class="text-slate-300">—</span>
+      <?php endif; ?>
+      </td>
+      </tr>
+      <?php endforeach; ?>
       </tbody>
-    </table>
+      </table>
+    </div>
     <p class="border-t border-slate-100 px-4 py-2 text-[10px] leading-relaxed text-slate-400">
       Built from the audit log, so it shows only actions the system records — every queue
       transition, patient edit and settings change. Reading a page is not an action.
