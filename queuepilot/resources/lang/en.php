@@ -1,0 +1,27 @@
+<?php
+/** English UI strings. Keys are stable; translations can lag safely. */
+return [
+    'nav.live_board' => 'Live board',
+    'nav.new_patient' => 'New patient',
+    'nav.appointments' => 'Appointments',
+    'nav.patients' => 'Patients',
+    'nav.doctors' => 'Doctors & rooms',
+    'nav.reports' => 'Reports',
+    'nav.settings' => 'Settings',
+    'queue.waiting' => 'Waiting',
+    'queue.called' => 'Called',
+    'queue.in_consultation' => 'In consultation',
+    'queue.completed' => 'Completed',
+    'queue.skipped' => 'Skipped',
+    'queue.no_show' => 'No show',
+    'queue.cancelled' => 'Cancelled',
+    'queue.transferred' => 'Transferred',
+    'action.call' => 'Call',
+    'action.start' => 'Start',
+    'action.complete' => 'Complete',
+    'action.skip' => 'Skip',
+    'action.cancel' => 'Cancel',
+    'token.issued' => 'Token issued',
+    'patient.position' => 'Your position',
+    'patient.estimate' => 'Estimated wait',
+];
