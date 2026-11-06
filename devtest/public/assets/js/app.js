@@ -10,6 +10,9 @@
   const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+  // Declared before the action delegate: the delegate binds to this element,
+  // and a `const` read above its declaration would throw.
+  const fragRoot = $('[data-board-fragment]');
 
   /* ------------------------------------------------------------ toasts */
   function toast(message, kind = 'success', ms = 3800) {
@@ -154,7 +157,7 @@
   }, true);
 
   /* --------------------------------------------------- queue row actions */
-  const board = $('[data-queue-board]');
+  const board = fragRoot || $('[data-queue-board]');
   document.addEventListener('click', async (ev) => {
     const btn = ev.target.closest('[data-act]');
     if (!btn) return;
@@ -330,8 +333,122 @@
   }
   window.qpPoller = createPoller;
 
+  /* ------------------------------------------- role switcher popover */
+  (() => {
+    const wrap = $('[data-role-menu]');
+    const btn = $('[data-role-toggle]', wrap || document);
+    const pop = $('[data-role-pop]', wrap || document);
+    if (!wrap || !btn || !pop) return;
+    const close = () => { pop.hidden = true; btn.setAttribute('aria-expanded', 'false'); };
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = pop.hidden;
+      pop.hidden = !open;
+      btn.setAttribute('aria-expanded', String(open));
+    });
+    document.addEventListener('click', (e) => { if (!wrap.contains(e.target)) close(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  })();
+
+  /* --------------------------------------- per-row overflow menu */
+  // Delegated: the board is re-rendered every 5s, so listeners bound to the
+  // buttons themselves would be dropped on the first refresh.
+  document.addEventListener('click', (e) => {
+    const trigger = e.target.closest('[data-row-more]');
+    const openMenu = $('[data-row-menu]:not(.hidden)');
+    if (openMenu && (!trigger || !openMenu.parentElement.contains(trigger))) {
+      openMenu.classList.add('hidden');
+      openMenu.parentElement.querySelector('[data-row-more]')?.setAttribute('aria-expanded', 'false');
+    }
+    if (!trigger) return;
+    e.stopPropagation();
+    const menu = trigger.parentElement.querySelector('[data-row-menu]');
+    if (!menu) return;
+    const show = menu.classList.contains('hidden');
+    menu.classList.toggle('hidden', !show);
+    trigger.setAttribute('aria-expanded', String(show));
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    $$('[data-row-menu]:not(.hidden)').forEach((m) => m.classList.add('hidden'));
+  });
+
+  /* --------------------------------------------- mobile "More" tab */
+  $('[data-more-toggle]')?.addEventListener('click', () => $('#mobile-menu-btn')?.click());
+
+  /* --------------------------------------------------- copy link */
+  $$('[data-copy]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const text = btn.getAttribute('data-copy') || '';
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        // Clipboard API needs a secure context; the preview is https, but a
+        // plain-http LAN kiosk is not. Fall back rather than silently failing.
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); } finally { ta.remove(); }
+      }
+      const old = btn.innerHTML;
+      btn.innerHTML = '<svg class="h-3 w-3"><use href="#i-check"/></svg>Copied';
+      setTimeout(() => { btn.innerHTML = old; }, 1600);
+    });
+  });
+
+  /* ------------------------------------ quick search filters the board */
+  // Typing filters the rows already on screen instantly; submitting still
+  // goes to the role's real search page for a full lookup.
+  $$('[data-board-search]').forEach((form) => {
+    const input = $('input[name=q]', form);
+    if (!input) return;
+    input.addEventListener('input', () => {
+      const q = input.value.trim().toLowerCase();
+      const rows = $$('[data-prow]');
+      if (!rows.length) return;
+      rows.forEach((r) => {
+        r.hidden = q !== '' && !r.textContent.toLowerCase().includes(q);
+      });
+    });
+    if (fragRoot) form.addEventListener('submit', (e) => { e.preventDefault(); });
+  });
+
+  /* ------------------------------------------------- live board (design) */
+  /* The redesigned board refreshes by swapping server-rendered HTML. One
+     template, in PHP, so what the poller draws can never drift away from
+     what the first paint drew. The legacy JSON board below still serves
+     /queue, which has its own denser row layout. */
+  if (fragRoot) {
+    const url = fragRoot.getAttribute('data-board-fragment');
+    let sig = '';
+    const swap = async () => {
+      try {
+        const res = await fetch(url, { headers: { 'X-Requested-With': 'fetch' }, credentials: 'same-origin' });
+        if (!res.ok) throw new Error('board refresh failed');
+        const html = await res.text();
+        if (html !== sig) {
+          sig = html;
+          const cur = $('[data-queue-board]', fragRoot);
+          const doc = new DOMParser().parseFromString(html, 'text/html');
+          const next = doc.querySelector('[data-queue-board]');
+          if (cur && next) cur.replaceWith(next);
+        }
+        const stamp = $('[data-last-updated]');
+        if (stamp) stamp.textContent = new Date().toLocaleTimeString('en-US',
+          { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+        markLive(true);
+      } catch (e) {
+        markLive(false);
+      }
+    };
+    window.qpRefreshQueue = swap;
+    $('[data-refresh-now]')?.addEventListener('click', swap);
+    setInterval(() => { if (!document.hidden) swap(); }, 5000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) swap(); });
+  }
+
   /* ------------------------------------------------- live board (reception) */
-  const queueBoard = $('[data-queue-board]');
+  const queueBoard = fragRoot ? null : $('[data-queue-board]');
   if (queueBoard) {
     const queueId = queueBoard.getAttribute('data-queue-board');
     const listEl = $('[data-queue-list]', queueBoard);

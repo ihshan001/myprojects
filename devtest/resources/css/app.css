@@ -3,22 +3,62 @@
 @tailwind utilities;
 
 /* =====================================================================
-   QueuePilot design system
-   - calm clinical palette (teal + slate), high contrast for weak daylight
-   - no external fonts, no icon fonts: system stack + inline SVG sprites
-   - sizes tuned for a receptionist working at speed on a 1366px desk
+   ClinicQueue design system  (shared by every role and every page)
+   ---------------------------------------------------------------------
+   Values are sampled from the approved reference boards, not guessed:
+     primary action   #0D7459      active nav pill   #DFF4EE
+     canvas           #F7F8FA      hairline border   #E8ECF1
+   Type is Inter, self-hosted (public/assets/fonts) so the board renders
+   identically offline and in the waiting-room kiosk.
    ===================================================================== */
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/assets/fonts/inter-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/assets/fonts/inter-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/assets/fonts/inter-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/assets/fonts/inter-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('/assets/fonts/inter-800.woff2') format('woff2');
+}
 
 @layer base {
   :root {
-    --brand: #0f766e;
-    --brand-ink: #0b4f4a;
-    --brand-soft: #ccfbf1;
+    --brand: #0d7459;
+    --brand-ink: #065f46;
+    --brand-soft: #dff4ee;
     --ink: #0f172a;
     --muted: #64748b;
-    --line: #e2e8f0;
+    --line: #e8ecf1;
     --surface: #ffffff;
-    --canvas: #f6f8fb;
+    --canvas: #f7f8fa;
+    --sidebar-w: 246px;
   }
 
   html {
@@ -49,9 +89,15 @@
 
   body {
     @apply bg-[var(--canvas)] text-slate-800 antialiased;
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
       "Noto Sans Sinhala", "Noto Sans Tamil", sans-serif;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    letter-spacing: -0.011em;
+  }
+
+  .emoji {
+    font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+    font-style: normal;
   }
 
   /* Numbers in a queue must never jitter between polls. */
@@ -70,8 +116,8 @@
   }
 
   ::selection {
-    background: #99f6e4;
-    color: #052e2b;
+    background: #a7f3d0;
+    color: #064e3b;
   }
 
   /* Sinhala/Tamil need more line height to stay legible */
@@ -84,7 +130,7 @@
 @layer components {
   /* ---------------------------------------------------------- surfaces */
   .card {
-    @apply rounded-xl border border-slate-200 bg-white shadow-sm;
+    @apply rounded-xl border border-hairline bg-white shadow-card;
   }
   .card-pad {
     @apply p-4 sm:p-5;
@@ -93,7 +139,7 @@
     @apply transition hover:border-slate-300 hover:shadow-md;
   }
   .panel {
-    @apply rounded-xl border border-slate-200 bg-white;
+    @apply rounded-xl border border-hairline bg-white;
   }
   .divider {
     @apply border-t border-slate-200;
@@ -106,10 +152,10 @@
            disabled:opacity-50;
   }
   .btn-primary {
-    @apply btn bg-teal-700 text-white shadow-sm hover:bg-teal-800;
+    @apply btn bg-brand-700 text-white shadow-sm hover:bg-brand-800;
   }
   .btn-secondary {
-    @apply btn border border-slate-300 bg-white text-slate-700 hover:bg-slate-50;
+    @apply btn border border-hairline bg-white text-ink-700 shadow-card hover:bg-slate-50;
   }
   /* Destructive or irreversible actions (close the day, cancel a visit).
      Distinct from btn-secondary so it cannot be clicked by muscle memory. */
@@ -117,7 +163,7 @@
     @apply btn bg-rose-600 text-white hover:bg-rose-700 focus-visible:ring-rose-500;
   }
   .btn-ghost {
-    @apply btn text-slate-600 hover:bg-slate-100;
+    @apply btn text-ink-500 hover:bg-slate-100;
   }
   .btn-danger {
     @apply btn bg-rose-600 text-white hover:bg-rose-700;
@@ -137,26 +183,26 @@
 
   /* Queue action buttons: big enough to hit fast, colour-coded by intent */
   .act {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2
-           text-xs font-semibold transition active:scale-[0.98] disabled:opacity-40;
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md border px-2.5 py-1
+           text-[11px] font-semibold leading-5 transition active:scale-[0.98] disabled:opacity-40;
   }
   .act-call {
-    @apply act border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100;
+    @apply act border-brand-200 bg-white text-brand-700 hover:bg-brand-50;
   }
   .act-start {
-    @apply act border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100;
+    @apply act border-brand-200 bg-white text-brand-700 hover:bg-brand-50;
   }
   .act-done {
-    @apply act border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100;
+    @apply act border-brand-200 bg-white text-brand-700 hover:bg-brand-50;
   }
   .act-skip {
-    @apply act border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100;
+    @apply act border-hairline bg-white text-ink-700 hover:bg-slate-50;
   }
   .act-stop {
-    @apply act border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100;
+    @apply act border-hairline bg-white text-rose-600 hover:bg-rose-50;
   }
   .act-mute {
-    @apply act border-slate-200 bg-white text-slate-600 hover:bg-slate-50;
+    @apply act border-hairline bg-white text-ink-700 hover:bg-slate-50;
   }
 
   /* ------------------------------------------------------------ inputs */
@@ -164,8 +210,8 @@
     @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500;
   }
   .input {
-    @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900
-           placeholder:text-slate-400 focus:border-teal-600 focus:ring-2 focus:ring-teal-600/15;
+    @apply w-full rounded-lg border border-hairline bg-white px-3 py-2.5 text-sm text-ink-900
+           placeholder:text-slate-400 focus:border-brand-600 focus:ring-2 focus:ring-brand-600/15;
   }
   .input-lg {
     @apply input px-4 py-3 text-base;
@@ -178,7 +224,7 @@
     @apply input min-h-[80px] resize-y;
   }
   .checkbox {
-    @apply h-4 w-4 rounded border-slate-300 text-teal-700 focus:ring-teal-600;
+    @apply h-4 w-4 rounded border-slate-300 text-brand-700 focus:ring-brand-600;
   }
   .help {
     @apply mt-1 text-xs text-slate-500;
@@ -211,8 +257,8 @@
     @apply w-full border-collapse text-sm;
   }
   .table thead th {
-    @apply border-b border-slate-200 px-3 py-2.5 text-left text-[11px] font-semibold
-           uppercase tracking-wide text-slate-500;
+    @apply border-b border-hairline px-3 py-2.5 text-left text-[11px] font-semibold
+           uppercase tracking-wide text-ink-500;
   }
   .table tbody td {
     @apply border-b border-slate-100 px-3 py-2.5 align-middle text-slate-700;
@@ -223,20 +269,20 @@
 
   /* --------------------------------------------------------------- nav */
   .nav-item {
-    @apply flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-slate-300
-           transition hover:bg-white/10 hover:text-white;
+    @apply flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium text-ink-700
+           transition hover:bg-slate-50 hover:text-ink-900;
   }
   .nav-item-active {
-    @apply bg-white/[0.12] text-white shadow-inner;
+    @apply bg-mint-100 font-semibold text-brand-700 hover:bg-mint-100 hover:text-brand-700;
   }
   .nav-badge {
-    @apply ml-auto rounded-md bg-teal-400/20 px-1.5 py-0.5 text-[11px] font-bold text-teal-100;
+    @apply ml-auto rounded-md bg-brand-50 px-1.5 py-0.5 text-[11px] font-bold text-brand-700;
   }
 
   /* ---------------------------------------------------------- tokens */
   .token-chip {
-    @apply inline-flex min-w-[3.25rem] items-center justify-center rounded-lg border border-slate-200
-           bg-slate-50 px-2 py-1 font-mono text-sm font-bold text-slate-800;
+    @apply inline-flex items-center justify-center rounded-md bg-brand-50 px-2.5 py-1
+           text-[13px] font-bold tracking-tight text-brand-700;
   }
   .token-hero {
     @apply font-mono text-6xl font-black leading-none tracking-tight;
@@ -259,13 +305,105 @@
            text-[11px] font-semibold text-amber-800 ring-1 ring-amber-300;
   }
 
+  /* =================================================== live board =====
+     Geometry taken from the reference: 246px sidebar, 20px panel padding,
+     a 716/352 two-column split with a 29px gutter at 1484px wide.        */
+
+  .board-panel {
+    @apply rounded-2xl border border-hairline bg-white p-4 shadow-card sm:p-5;
+  }
+
+  /* Top search bar: its own floating card, not a full-bleed strip. */
+  .topbar-card {
+    @apply flex h-12 items-center gap-3 rounded-xl border border-hairline bg-white
+           px-4 shadow-bar;
+  }
+  .topbar-search {
+    @apply h-9 w-full border-0 bg-transparent p-0 text-[13px] text-ink-900
+           placeholder:text-slate-400 focus:outline-none focus:ring-0;
+  }
+
+  /* Stat tiles: icon square + label/value/hint, five across on desktop. */
+  .stat-tile {
+    @apply flex items-center gap-3 rounded-xl border border-hairline bg-white
+           px-4 py-4 shadow-card;
+  }
+  .stat-ico {
+    @apply flex h-11 w-11 shrink-0 items-center justify-center rounded-xl;
+  }
+  .stat-label {
+    @apply text-[10px] font-semibold uppercase tracking-[0.06em] text-ink-500;
+  }
+  .stat-value {
+    @apply whitespace-nowrap text-[22px] font-bold leading-tight tracking-tight text-ink-900 tabular;
+  }
+  .stat-hint { @apply text-[11px] text-ink-500; }
+
+  /* Doctor tabs inside the live-queue card. */
+  .qtab {
+    @apply relative whitespace-nowrap px-1 pb-2.5 pt-1 text-[13px] font-medium
+           text-ink-500 transition hover:text-ink-900;
+  }
+  .qtab-active {
+    @apply font-semibold text-brand-700;
+  }
+  .qtab-active::after {
+    content: "";
+    @apply absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-brand-600;
+  }
+
+  /* The two spotlight cards: in consultation (blue) and next in line (amber). */
+  .spot {
+    @apply rounded-xl border p-3;
+  }
+  .spot-now { @apply border-sky-300 bg-sky-50/50; }
+  .spot-next { @apply border-amber-200 bg-amber-50/40; }
+  .spot-tag {
+    @apply inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold;
+  }
+  .spot-token {
+    @apply inline-flex items-center justify-center rounded-lg bg-white/80 px-3 py-1.5
+           text-[17px] font-bold tracking-tight text-ink-900 ring-1 ring-black/5;
+  }
+
+  /* One waiting patient. Columns collapse rather than scroll on a phone. */
+  .prow {
+    @apply flex items-center gap-2.5 border-b border-slate-100 px-2.5 py-1.5 last:border-0;
+  }
+  .prow-name { @apply truncate text-[13px] font-semibold text-ink-900; }
+  .prow-meta { @apply truncate text-[11px] text-ink-500; }
+
+  /* Right rail rows: label left, value right, hairline between. */
+  .glance-row {
+    @apply flex items-center justify-between border-b border-slate-100 py-2
+           text-[12px] last:border-0;
+  }
+
+  /* Bottom tab bar (mobile only). */
+  .bottom-tabs {
+    @apply fixed inset-x-0 bottom-0 z-30 flex border-t border-hairline bg-white/95
+           backdrop-blur lg:hidden;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .btab {
+    @apply flex min-h-[52px] flex-1 flex-col items-center justify-center gap-0.5
+           text-[10px] font-medium text-ink-500 transition;
+  }
+  .btab-active { @apply font-semibold text-brand-700; }
+
+  /* Role switcher popover on the sidebar user card. */
+  .role-pop {
+    @apply absolute bottom-full left-0 z-50 mb-2 w-[calc(100%+0px)] overflow-hidden
+           rounded-xl border border-hairline bg-white shadow-pop;
+  }
+
   /* --------------------------------------------------- mobile drawer */
   /* The old mobile menu was an inline list that pushed the page down and had
      no sections, no active state and no way to close it. This is a real
      off-canvas drawer: overlay, scroll lock, Escape, and the same grouped
      navigation the desktop sidebar shows. */
   .nav-overlay {
-    @apply fixed inset-0 z-40 bg-slate-900/60 backdrop-blur-sm lg:hidden;
+    @apply fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-[2px] lg:hidden;
     opacity: 0;
     pointer-events: none;
     transition: opacity .2s ease;
@@ -278,7 +416,7 @@
 
   .nav-drawer {
     @apply fixed inset-y-0 left-0 z-50 flex w-[86vw] max-w-[20rem] flex-col
-           bg-slate-900 shadow-2xl lg:hidden;
+           border-r border-hairline bg-white shadow-pop lg:hidden;
     transform: translateX(-100%);
     /* visibility keeps the off-screen links out of the tab order; a drawer
        that is merely translated away is still keyboard-reachable. */
@@ -302,7 +440,8 @@
   }
 
   .nav-section-label {
-    @apply mb-1 mt-4 px-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 first:mt-0;
+    @apply mb-1.5 mt-5 px-3 text-[10px] font-semibold uppercase tracking-[0.09em]
+           text-ink-400 first:mt-0;
   }
 
   .icon-btn {
@@ -322,6 +461,12 @@
     @apply min-w-full;
   }
   @media (max-width: 640px) {
+    .stat-tile { @apply gap-1.5 px-2 py-2.5; }
+    .stat-ico { @apply h-7 w-7 rounded-lg; }
+    .stat-ico svg { @apply h-4 w-4; }
+    .stat-value { @apply text-[16px]; }
+    .stat-label { @apply text-[7.5px] leading-[1.2]; }
+    .stat-hint { @apply text-[9px] leading-tight; }
     /* Tap targets on phones: a 24px icon button is a miss most of the time. */
     .btn-sm { @apply min-h-[36px] px-3; }
     .act { @apply min-h-[44px] min-w-[44px]; }
@@ -342,10 +487,13 @@
     @apply flex min-h-screen;
   }
   .sidebar {
-    @apply fixed inset-y-0 left-0 z-30 hidden w-64 flex-col bg-slate-900 lg:flex;
+    @apply fixed inset-y-0 left-0 z-30 hidden w-[var(--sidebar-w)] flex-col
+           border-r border-hairline bg-white lg:flex;
   }
   .main-col {
-    @apply flex min-h-screen w-full flex-col lg:pl-64;
+    /* min-w-0: a flex item defaults to min-width:auto, so one wide scroller
+       inside would stretch the whole column past the phone's width. */
+    @apply flex min-h-screen w-full min-w-0 flex-col lg:pl-[var(--sidebar-w)];
   }
   .page {
     @apply mx-auto w-full max-w-[1400px] flex-1 px-3 py-4 sm:px-6 sm:py-6 lg:px-8;
@@ -404,7 +552,7 @@
 
 /* Print: reports should print clean, without chrome */
 @media print {
-  .sidebar, .nav-drawer, .nav-overlay, .no-print, .btn, .act { display: none !important; }
+  .sidebar, .nav-drawer, .nav-overlay, .bottom-tabs, .no-print, .btn, .act { display: none !important; }
   .main-col { padding-left: 0 !important; }
   .card { box-shadow: none !important; border-color: #cbd5e1 !important; }
   body { background: #fff; }

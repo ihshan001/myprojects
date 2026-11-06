@@ -1379,9 +1379,15 @@ Assert::test('a platform admin is never rendered a clinic dashboard', function (
     Assert::contains('Auth::isSuper() && Auth::clinicId() === null', $controller);
     Assert::contains("redirect('/admin')", $controller);
 
-    // And the view must not hard-fail if a brand-new clinic has no queue yet.
-    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/dashboard/index.php');
-    Assert::contains("isset(\$q)", $view, 'the token link tolerates a clinic with no queue');
+    // And the board must not hard-fail if a brand-new clinic has no queue.
+    // Render it for real rather than grepping the template for a guard: the
+    // previous string check passed even when the surrounding markup changed.
+    $html = \App\Core\View::partial('board-panel', [
+        'queues' => [], 'activeQueue' => null, 'activeId' => 0,
+        'inRoom' => null, 'nextUp' => null, 'waitingRows' => [], 'estimates' => [],
+    ]);
+    Assert::contains('No sessions open today', $html, 'an empty clinic gets an empty state, not a fatal');
+    Assert::contains('data-queue-board="0"', $html, 'the poller still has a board root to swap');
 });
 
 Assert::test('the plan editor refuses values that would corrupt billing', function (): void {

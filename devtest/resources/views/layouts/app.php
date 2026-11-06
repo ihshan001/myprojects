@@ -14,17 +14,25 @@ $roleLabel = $u ? [
     'receptionist' => 'Reception', 'doctor' => 'Doctor',
 ][$u['role']] ?? $u['role'] : '';
 $navSections = [];
+$navFooter = [];
 if ($u) {
     if ($u['role'] === 'super_admin') {
         $navSections = [
-            'Platform' => [
+            'Main' => [
                 ['/admin', 'grid', 'Overview', $isActive('/admin')],
+            ],
+            'Tenants' => [
                 ['/admin/clinics', 'building', 'Clinics', $isActive('/admin/clinics')],
+                ['/admin/organisations', 'users', 'Groups', $isActive('/admin/organisations')],
+                ['/admin/features', 'switch', 'Feature gates', $isActive('/admin/features')],
+            ],
+            'Revenue' => [
                 ['/admin/plans', 'card', 'Plans & billing', $isActive('/admin/plans')],
                 ['/admin/billing', 'check-circle', 'Payment verification', $isActive('/admin/billing')],
-                ['/admin/support', 'lifebuoy', 'Support queue', $isActive('/admin/support')],
-                ['/admin/organisations', 'users', 'Groups', $isActive('/admin/organisations')],
             ],
+        ];
+        $navFooter = [
+            ['/admin/support', 'lifebuoy', 'Support queue', $isActive('/admin/support')],
         ];
     } else {
         $isDoctor = $u['role'] === 'doctor';
@@ -32,175 +40,177 @@ if ($u) {
         // Only show destinations the current role can actually open. A doctor
         // who sees a "Patients" link that 403s learns to distrust the UI.
         $navSections = [
-            'Queue' => array_values(array_filter([
+            'Main' => array_values(array_filter([
                 ['/app', 'grid', t('nav.live_board', 'Live board'), $isActive('/app')],
-                $isDoctor ? null : ['/queue/new', 'plus', t('nav.new_patient', 'New patient'), $isActive('/queue/new')],
+                $isDoctor ? null : ['/queue/new', 'user-plus', t('nav.new_patient', 'New patient'), $isActive('/queue/new')],
             ])),
-            'Clinic' => array_values(array_filter([
+            'Operations' => array_values(array_filter([
                 $isDoctor ? null : ['/appointments', 'calendar', t('nav.appointments', 'Appointments'), $isActive('/appointments')],
                 $isDoctor ? null : ['/patients', 'users', t('nav.patients', 'Patients'), $isActive('/patients')],
-                ['/doctors', 'stethoscope', t('nav.doctors', 'Doctors & rooms'), $isActive('/doctors')],
-                ['/rooms', 'building', 'Rooms', $isActive('/rooms')],
-                ['/queues/config', 'switch', 'Queue settings', $isActive('/queues/config')],
-                ['/queues/priority-rules', 'alert', 'Priority rules', $isActive('/queues/priority-rules')],
-                ['/queues/workflows', 'check-circle', 'Service workflows', $isActive('/queues/workflows')],
-                ['/queues/appointment-policies', 'clock', 'Appointment policies', $isActive('/queues/appointment-policies')],
-                ['/incidents', 'shield', 'Incidents', $isActive('/incidents')],
-                ['/getting-started', 'sparkles', 'Getting started', $isActive('/getting-started')],
+                ['/doctors', 'stethoscope', t('nav.doctors', 'Doctors & rooms'), $isActive('/doctors') || $isActive('/rooms')],
+                ['/queues/config', 'settings', 'Queue settings', $isActive('/queues/config')],
+                ['/queues/priority-rules', 'sparkles', 'Priority rules', $isActive('/queues/priority-rules')],
+                ['/queues/workflows', 'switch', 'Service workflows', $isActive('/queues/workflows')],
+                ['/queues/appointment-policies', 'info', 'Policies', $isActive('/queues/appointment-policies')],
+                ['/incidents', 'alert', 'Incidents', $isActive('/incidents')],
                 ['/breaks', 'pause', 'Breaks', $isActive('/breaks')],
-                // Departments and the operating calendar are clinic structure;
-                // a doctor does not need to see them, reception does not edit
-                // them, and the page itself hides the write controls by role.
+                ['/calendar', 'clock', 'Schedules & holidays', $isActive('/calendar')],
                 $isDoctor ? null : ['/departments', 'grid', 'Departments', $isActive('/departments')],
-                ['/calendar', 'calendar', 'Schedules & holidays', $isActive('/calendar')],
             ])),
-            'Insight' => array_values(array_filter([
+            'Insights' => array_values(array_filter([
                 Auth::can('reports.view') ? ['/reports', 'chart', t('nav.reports', 'Reports'), $isActive('/reports')] : null,
-                // Only shown to a clinic owner whose clinic is actually in a
-                // group — a link to an empty page trains people to ignore links.
+                Auth::can('clinic.manage') ? ['/audit', 'file', 'Audit log', $isActive('/audit')] : null,
+                Auth::can('billing.view') ? ['/billing', 'activity', 'Subscription', $isActive('/billing')] : null,
                 (Auth::can('clinic.manage') && (Auth::clinic()['organisation_id'] ?? null) !== null)
                     ? ['/organisation', 'building', 'Group', $isActive('/organisation')] : null,
-                Auth::can('clinic.manage') ? ['/audit', 'shield', 'Audit log', $isActive('/audit')] : null,
-                ['/settings', 'settings', t('nav.settings', 'Settings'), $isActive('/settings')],
-                Auth::can('billing.view') ? ['/billing', 'card', 'Subscription', $isActive('/billing')] : null,
-                ['/notifications', 'bell', 'Notifications', $isActive('/notifications')],
-                ['/support', 'lifebuoy', 'Support', $isActive('/support')],
             ])),
         ];
+        $navFooter = array_values(array_filter([
+            ['/notifications', 'bell', 'Notifications', $isActive('/notifications')],
+            ['/settings', 'settings', t('nav.settings', 'Settings'), $isActive('/settings')],
+            ['/support', 'lifebuoy', 'Support', $isActive('/support')],
+            ['/getting-started', 'sparkles', 'Getting started', $isActive('/getting-started')],
+        ]));
     }
 }
+// Bottom tab bar (mobile): the four destinations a phone user reaches for.
+$tabBar = [];
+if ($u) {
+    $tabBar = $u['role'] === 'super_admin'
+        ? [['/admin', 'grid', 'Overview'], ['/admin/clinics', 'building', 'Clinics'],
+           ['/admin/billing', 'card', 'Billing']]
+        : array_values(array_filter([
+            ['/app', 'grid', 'Live board'],
+            $u['role'] === 'doctor' ? null : ['/appointments', 'calendar', 'Appointments'],
+            $u['role'] === 'doctor' ? ['/doctors', 'stethoscope', 'Rooms'] : ['/patients', 'users', 'Patients'],
+        ]));
+}
+$searchAction = $u ? ($u['role'] === 'super_admin' ? '/admin/clinics' : ($u['role'] === 'doctor' ? '/app' : '/patients')) : '/patients';
 ?>
 <!DOCTYPE html>
 <html lang="<?= e($locale ?? 'en') ?>" class="h-full">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="<?= e($cl['brand_color'] ?? '#0F766E') ?>">
+  <meta name="theme-color" content="#0d7459">
   <meta name="csrf-token" content="<?= e(csrf_token()) ?>">
   <meta name="robots" content="noindex, nofollow">
-  <title><?= e($title ?? 'QueuePilot') ?> · <?= e($appName) ?></title>
+  <title><?= e($title ?? 'ClinicQueue') ?> · <?= e($appName) ?></title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/assets/img/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/assets/img/icon-192.png">
+  <link rel="preload" href="/assets/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/assets/fonts/inter-600.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="<?= e(asset('build/app.css')) ?>">
 </head>
 <body class="h-full">
 <?php include QP_ROOT . '/resources/views/partials/icons.php'; ?>
 
 <?php if ($u): ?>
+<?php
+  $brandName = 'ClinicQueue';
+  $brandTag  = 'Smart Queue. Better Care.';
+  $initials  = App\Core\Str::initials((string) $u['name']);
+  // "Dr. Malini" style short greeting: first two words of the display name.
+  $nameParts = preg_split('/\s+/', trim((string) $u['name'])) ?: [];
+  $shortName = implode(' ', array_slice($nameParts, 0, 2));
+?>
 <div class="shell">
-  <!-- Sidebar (desktop) -->
+  <!-- ===================================================== sidebar ===== -->
   <aside class="sidebar no-print">
-    <div class="flex h-16 items-center gap-2.5 border-b border-white/10 px-5">
-      <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-500 text-sm font-black text-slate-900">Q</span>
-      <div class="leading-tight">
-        <p class="text-sm font-bold text-white"><?= e($appName) ?></p>
-        <p class="text-[10px] uppercase tracking-widest text-slate-400">Clinic Edition</p>
+    <div class="flex h-[68px] shrink-0 items-center gap-2.5 px-4">
+      <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-700 shadow-sm">
+        <svg class="h-5 w-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/>
+        </svg>
+      </span>
+      <div class="min-w-0 leading-tight">
+        <p class="truncate text-[15px] font-bold tracking-tight text-ink-900"><?= e($brandName) ?></p>
+        <p class="truncate text-[10.5px] text-ink-500"><?= e($brandTag) ?></p>
       </div>
     </div>
 
-    <div class="border-b border-white/10 px-3 py-3">
-      <div class="rounded-lg bg-white/5 px-3 py-2">
-        <p class="truncate text-xs font-semibold text-white"><?= e($cl['name'] ?? 'Platform console') ?></p>
-        <p class="mt-0.5 flex items-center gap-1.5 text-[10px] text-slate-400">
-          <?php if ($cl): ?>
-            <span class="h-1.5 w-1.5 rounded-full <?= $cl['billing_status'] === 'active' ? 'bg-emerald-400' : 'bg-amber-400' ?>"></span>
-            <?= e(ucfirst(str_replace('_', ' ', $cl['billing_status']))) ?> plan
-          <?php else: ?>
-            <span class="h-1.5 w-1.5 rounded-full bg-violet-400"></span> All tenants
-          <?php endif; ?>
-        </p>
+    <?php $choices = $branchChoices ?? []; ?>
+    <?php if (count($choices) > 1): ?>
+      <form method="post" action="/branch/switch" class="px-4 pb-2">
+        <?= csrf_field() ?>
+        <input type="hidden" name="back" value="<?= e($path ?? '/app') ?>">
+        <label class="sr-only" for="branch-switch">Working in branch</label>
+        <select id="branch-switch" name="clinic_id" onchange="this.form.submit()"
+                class="w-full rounded-lg border border-hairline bg-white px-2 py-1.5 text-[11px] text-ink-700">
+          <?php foreach ($choices as $b): ?>
+            <option value="<?= (int) $b['id'] ?>" <?= (int) $b['id'] === (int) ($activeBranchId ?? 0) ? 'selected' : '' ?>>
+              <?= e((string) $b['name']) ?><?= $b['is_home'] ? ' (home)' : '' ?>
+            </option>
+          <?php endforeach; ?>
+        </select>
+      </form>
+    <?php endif; ?>
 
-        <?php
-        // Only shown when there is a real choice. A one-branch clinic never sees
-        // a switcher, because a control that cannot do anything is noise.
-        $choices = $branchChoices ?? [];
-        ?>
-        <?php if (count($choices) > 1): ?>
-          <form method="post" action="/branch/switch" class="mt-2">
-            <?= csrf_field() ?>
-            <input type="hidden" name="back" value="<?= e($path ?? '/app') ?>">
-            <label class="sr-only" for="branch-switch">Working in branch</label>
-            <select id="branch-switch" name="clinic_id" onchange="this.form.submit()"
-                    class="w-full rounded-md border border-white/15 bg-white/5 px-2 py-1 text-[11px] text-white
-                           focus:border-teal-400 focus:outline-none">
-              <?php foreach ($choices as $b): ?>
-                <option value="<?= (int) $b['id'] ?>" <?= (int) $b['id'] === (int) ($activeBranchId ?? 0) ? 'selected' : '' ?>>
-                  <?= e((string) $b['name']) ?><?= $b['is_home'] ? ' (home)' : '' ?>
-                </option>
-              <?php endforeach; ?>
-            </select>
-          </form>
-          <p class="mt-1 text-[10px] leading-snug text-slate-500">
-            You are seeing only this branch.
-          </p>
-        <?php endif; ?>
-      </div>
-    </div>
-
-    <nav class="scrollbar-thin flex-1 overflow-y-auto px-2 py-3">
+    <nav class="scrollbar-thin flex-1 overflow-y-auto px-3 pb-2 pt-1">
       <?php foreach ($navSections as $section => $items): ?>
-        <p class="mb-1 mt-3 px-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 first:mt-0"><?= e($section) ?></p>
+        <?php if ($items === []) continue; ?>
+        <p class="nav-section-label"><?= e($section) ?></p>
         <?php foreach ($items as [$href, $icon, $label, $active]): ?>
-          <a href="<?= e($href) ?>" class="nav-item <?= $active ?>">
-            <svg class="h-4 w-4"><use href="#i-<?= e($icon) ?>"/></svg>
-            <span><?= e($label) ?></span>
+          <a href="<?= e($href) ?>" class="nav-item <?= $active ?>"<?= $active ? ' aria-current="page"' : '' ?>>
+            <svg class="h-[17px] w-[17px] shrink-0"><use href="#i-<?= e($icon) ?>"/></svg>
+            <span class="truncate"><?= e($label) ?></span>
           </a>
         <?php endforeach; ?>
       <?php endforeach; ?>
+
+      <?php if ($navFooter !== []): ?>
+        <div class="mt-4 border-t border-hairline pt-2">
+          <?php foreach ($navFooter as [$href, $icon, $label, $active]): ?>
+            <a href="<?= e($href) ?>" class="nav-item <?= $active ?>"<?= $active ? ' aria-current="page"' : '' ?>>
+              <svg class="h-[17px] w-[17px] shrink-0"><use href="#i-<?= e($icon) ?>"/></svg>
+              <span class="truncate"><?= e($label) ?></span>
+            </a>
+          <?php endforeach; ?>
+        </div>
+      <?php endif; ?>
     </nav>
 
-    <?php if ($cl && $u['role'] !== 'super_admin'): ?>
-      <div class="px-3 pb-2">
-        <a href="/display" target="_blank" class="nav-item">
-          <svg class="h-4 w-4"><use href="#i-monitor"/></svg>
-          <span>Waiting room TV</span>
-          <svg class="ml-auto h-3 w-3 opacity-60"><use href="#i-arrow-right"/></svg>
-        </a>
-      </div>
-    <?php endif; ?>
-
-    <div class="border-t border-white/10 p-3">
-      <div class="flex items-center gap-2.5 rounded-lg px-2 py-2">
-        <span class="flex h-8 w-8 items-center justify-center rounded-full bg-teal-600/30 text-xs font-bold text-teal-100">
-          <?= e(App\Core\Str::initials((string) $u['name'])) ?>
+    <!-- User card. In devtest the chevron opens the role switcher: each port
+         is a different signed-in role, so this is how you move between them. -->
+    <div class="relative shrink-0 p-3" data-role-menu>
+      <?php $switcherStyle = 'pop'; include QP_ROOT . '/resources/views/components/role-switcher.php'; ?>
+      <button type="button" data-role-toggle aria-expanded="false" aria-controls="role-pop"
+              class="flex w-full items-center gap-2.5 rounded-xl border border-hairline bg-white px-2.5 py-2.5 text-left shadow-card transition hover:bg-slate-50">
+        <span class="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-700 text-[12px] font-bold text-white">
+          <?= e($initials) ?>
+          <?php if (!empty($devRole)): ?>
+            <span class="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-amber-400" title="devtest build"></span>
+          <?php endif; ?>
         </span>
-        <div class="min-w-0 flex-1 leading-tight">
-          <p class="truncate text-xs font-semibold text-white"><?= e($u['name']) ?></p>
-          <p class="truncate text-[10px] text-slate-400"><?= e($roleLabel) ?></p>
-        </div>
-      </div>
+        <span class="min-w-0 flex-1 leading-tight">
+          <span class="block truncate text-[12.5px] font-bold text-ink-900"><?= e($u['name']) ?></span>
+          <span class="block truncate text-[11px] text-ink-500"><?= e($roleLabel) ?></span>
+        </span>
+        <svg class="h-4 w-4 shrink-0 text-ink-400"><use href="#i-chevron-down"/></svg>
+      </button>
     </div>
   </aside>
 
-  <!-- Mobile off-canvas navigation. Same grouped sections and active state as
-       the desktop sidebar, rather than a flat list of every link. -->
+  <!-- ============================================ mobile off-canvas ==== -->
   <div id="nav-overlay" class="nav-overlay no-print" hidden></div>
   <aside id="nav-drawer" class="nav-drawer no-print" aria-label="Navigation" aria-hidden="true">
-    <div class="flex h-14 shrink-0 items-center gap-2 border-b border-white/10 px-3">
-      <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-500 text-sm font-black text-slate-900">Q</span>
+    <div class="flex h-14 shrink-0 items-center gap-2 border-b border-hairline px-3">
+      <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-400 to-brand-700">
+        <svg class="h-4 w-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+      </span>
       <div class="min-w-0 flex-1 leading-tight">
-        <p class="truncate text-sm font-bold text-white"><?= e($appName) ?></p>
-        <p class="truncate text-[10px] text-slate-400"><?= e($cl['name'] ?? 'Platform console') ?></p>
+        <p class="truncate text-sm font-bold text-ink-900"><?= e($brandName) ?></p>
+        <p class="truncate text-[10px] text-ink-500"><?= e($cl['name'] ?? 'Platform console') ?></p>
       </div>
-      <button type="button" id="nav-close" class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-white active:bg-white/20" aria-label="Close navigation">
+      <button type="button" id="nav-close" class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-ink-500 hover:bg-slate-100" aria-label="Close navigation">
         <svg class="h-5 w-5"><use href="#i-x"/></svg>
       </button>
     </div>
 
-    <?php if (!empty($devRole)): ?>
-      <div class="shrink-0 border-b border-white/10 bg-amber-500/10 px-3 py-2">
-        <p class="flex items-center gap-1.5 text-[11px] font-bold text-amber-200">
-          <span class="rounded bg-amber-500 px-1.5 py-0.5 text-[9px] font-black uppercase text-white">devtest</span>
-          port <?= (int) ($devRole['port'] ?? 0) ?>
-        </p>
-        <p class="mt-0.5 truncate text-xs font-semibold text-white"><?= e($devRole['label'] ?? '') ?></p>
-        <p class="truncate text-[10px] text-slate-400"><?= e($devRole['email'] ?? '') ?></p>
-      </div>
-    <?php endif; ?>
-
-    <nav class="scrollbar-thin flex-1 overflow-y-auto overscroll-contain px-2 py-3">
+    <nav class="scrollbar-thin flex-1 overflow-y-auto overscroll-contain px-3 py-3">
       <?php foreach ($navSections as $section => $items): ?>
+        <?php if ($items === []) continue; ?>
         <p class="nav-section-label"><?= e($section) ?></p>
         <?php foreach ($items as [$href, $icon, $label, $active]): ?>
           <a href="<?= e($href) ?>" class="nav-item <?= $active ?>"<?= $active ? ' aria-current="page"' : '' ?>>
@@ -209,12 +219,17 @@ if ($u) {
           </a>
         <?php endforeach; ?>
       <?php endforeach; ?>
-
+      <?php if ($navFooter !== []): ?>
+        <div class="mt-4 border-t border-hairline pt-2">
+          <?php foreach ($navFooter as [$href, $icon, $label, $active]): ?>
+            <a href="<?= e($href) ?>" class="nav-item <?= $active ?>"><svg class="h-4 w-4 shrink-0"><use href="#i-<?= e($icon) ?>"/></svg><span class="truncate"><?= e($label) ?></span></a>
+          <?php endforeach; ?>
+        </div>
+      <?php endif; ?>
       <?php if ($cl && $u['role'] !== 'super_admin'): ?>
         <p class="nav-section-label">Display</p>
         <a href="/display" target="_blank" class="nav-item">
-          <svg class="h-4 w-4 shrink-0"><use href="#i-monitor"/></svg>
-          <span>Waiting room TV</span>
+          <svg class="h-4 w-4 shrink-0"><use href="#i-monitor"/></svg><span>Waiting room TV</span>
           <svg class="ml-auto h-3 w-3 opacity-60"><use href="#i-arrow-right"/></svg>
         </a>
       <?php endif; ?>
@@ -222,97 +237,108 @@ if ($u) {
 
     <?php $switcherStyle = 'drawer'; include QP_ROOT . '/resources/views/components/role-switcher.php'; ?>
 
-    <div class="shrink-0 border-t border-white/10 p-3">
+    <div class="shrink-0 border-t border-hairline p-3">
       <div class="flex items-center gap-2.5">
-        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-teal-600/30 text-xs font-bold text-teal-100">
-          <?= e(App\Core\Str::initials((string) $u['name'])) ?>
-        </span>
+        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-700 text-xs font-bold text-white"><?= e($initials) ?></span>
         <div class="min-w-0 flex-1 leading-tight">
-          <p class="truncate text-xs font-semibold text-white"><?= e($u['name']) ?></p>
-          <p class="truncate text-[10px] text-slate-400"><?= e($roleLabel) ?></p>
+          <p class="truncate text-xs font-bold text-ink-900"><?= e($u['name']) ?></p>
+          <p class="truncate text-[10px] text-ink-500"><?= e($roleLabel) ?></p>
         </div>
       </div>
     </div>
   </aside>
 
-  <!-- Main column -->
+  <!-- ================================================== main column ==== -->
   <div class="main-col">
-    <!-- Mobile top bar. Sticky, safe-area aware, and the title truncates
-         instead of pushing the menu button off the screen. -->
-    <div class="sticky top-0 z-30 flex min-h-[3.5rem] items-center gap-2 border-b border-slate-200 bg-white/95 px-2 backdrop-blur lg:hidden no-print"
-         style="padding-top: env(safe-area-inset-top)">
-      <button type="button" id="mobile-menu-btn" class="icon-btn" aria-label="Open navigation"
-              aria-controls="nav-drawer" aria-expanded="false">
-        <svg class="h-5 w-5"><use href="#i-menu"/></svg>
-      </button>
-      <div class="flex min-w-0 flex-1 items-center gap-2">
-        <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-teal-700 text-xs font-black text-white">Q</span>
-        <span class="truncate text-sm font-bold text-slate-900"><?= e($cl['name'] ?? $appName) ?></span>
+    <!-- Desktop search bar -->
+    <div class="hidden px-6 pt-4 lg:block xl:px-12 no-print">
+      <div class="topbar-card">
+        <svg class="h-4 w-4 shrink-0 text-slate-400"><use href="#i-search"/></svg>
+        <form method="get" action="<?= e($searchAction) ?>" class="min-w-0 flex-1" data-board-search>
+          <label class="sr-only" for="q-desk">Search</label>
+          <input id="q-desk" name="q" type="search" class="topbar-search" autocomplete="off"
+                 placeholder="Search patients, tokens, appointments...">
+        </form>
+        <a href="/notifications" class="relative shrink-0 rounded-lg p-1.5 text-ink-500 transition hover:bg-slate-100" aria-label="Notifications">
+          <svg class="h-[18px] w-[18px]"><use href="#i-bell"/></svg>
+          <?php if ((int) ($bellCount ?? 0) > 0): ?>
+            <span class="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-600 px-1 text-[9px] font-bold text-white"><?= (int) $bellCount ?></span>
+          <?php endif; ?>
+        </a>
+        <?php if ($u['role'] === 'clinic_admin' || $u['role'] === 'receptionist'): ?>
+          <a href="/queue/new" class="btn-primary shrink-0 !px-3.5 !py-2 !text-[13px]">
+            <svg class="h-4 w-4"><use href="#i-plus"/></svg>New patient
+          </a>
+        <?php elseif ($u['role'] === 'super_admin'): ?>
+          <a href="/admin/clinics" class="btn-primary shrink-0 !px-3.5 !py-2 !text-[13px]">
+            <svg class="h-4 w-4"><use href="#i-building"/></svg>Clinics
+          </a>
+        <?php endif; ?>
       </div>
-      <?php if (!empty($devRole)): ?>
-        <span class="shrink-0 rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-black text-white"
-              title="<?= e($devRole['label'] ?? '') ?>"><?= (int) ($devRole['port'] ?? 0) ?></span>
-      <?php endif; ?>
     </div>
 
-    <?php if (($flash = notice()) !== null): ?>
-      <div class="px-4 pt-4 sm:px-6 lg:px-8">
-        <div class="rise flex items-start gap-3 rounded-xl border px-4 py-3 text-sm
-          <?= $flash['type'] === 'error'
-              ? 'border-rose-200 bg-rose-50 text-rose-800'
-              : ($flash['type'] === 'warn'
-                ? 'border-amber-200 bg-amber-50 text-amber-900'
-                : 'border-emerald-200 bg-emerald-50 text-emerald-800') ?>">
-          <svg class="mt-0.5 h-4 w-4 shrink-0">
-            <use href="#i-<?= $flash['type'] === 'error' ? 'alert' : ($flash['type'] === 'warn' ? 'alert' : 'check-circle') ?>"/>
-          </svg>
-          <p><?= e($flash['message']) ?></p>
+    <!-- Mobile header -->
+    <div class="sticky top-0 z-30 bg-canvas/95 backdrop-blur lg:hidden no-print"
+         style="padding-top: env(safe-area-inset-top)">
+      <div class="flex min-h-[60px] items-center gap-2.5 px-4">
+        <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-700 shadow-sm">
+          <svg class="h-5 w-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+        </span>
+        <div class="min-w-0 flex-1 leading-tight">
+          <p class="truncate text-[15px] font-bold tracking-tight text-ink-900"><?= e($brandName) ?></p>
+          <p class="truncate text-[10.5px] text-ink-500"><?= e($brandTag) ?></p>
         </div>
-      </div>
-    <?php endif; ?>
-
-
-    <?php if (!empty($devRole)): ?>
-      <div class="no-print border-b border-amber-300 bg-amber-50 px-3 py-2 sm:px-6 lg:px-8">
-        <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
-          <span class="rounded bg-amber-500 px-1.5 py-0.5 font-black uppercase tracking-wide text-white">devtest</span>
-          <span class="font-bold text-amber-900"><?= e($devRole['label'] ?? '') ?></span>
-          <span class="hidden font-mono text-amber-800 sm:inline"><?= e($devRole['email'] ?? '') ?></span>
-          <?php if (!empty($devRole['clinic'])): ?>
-            <span class="hidden text-amber-800 md:inline">&middot; <?= e($devRole['clinic']) ?></span>
+        <a href="/notifications" class="relative rounded-lg p-2 text-ink-700" aria-label="Notifications">
+          <svg class="h-5 w-5"><use href="#i-bell"/></svg>
+          <?php if ((int) ($bellCount ?? 0) > 0): ?>
+            <span class="absolute right-0 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-600 px-1 text-[9px] font-bold text-white"><?= (int) $bellCount ?></span>
           <?php endif; ?>
-          <span class="ml-auto hidden text-amber-700 xl:inline">no sign-in &middot; role fixed by port</span>
-        </div>
-        <?php if (!empty($devRole['sees'])): ?>
-          <p class="mt-0.5 hidden text-[10px] leading-snug text-amber-700 sm:block"><?= e($devRole['sees']) ?></p>
-        <?php endif; ?>
-        <!-- Every role is one tap away. Each port is its own preview, and these
-             links rewrite the preview hostname rather than pointing at localhost. -->
-        <div class="mt-1.5">
-          <?php $switcherStyle = 'bar'; include QP_ROOT . '/resources/views/components/role-switcher.php'; ?>
-        </div>
+        </a>
+        <button type="button" id="mobile-menu-btn" class="rounded-lg p-2 text-ink-700" aria-label="Open navigation"
+                aria-controls="nav-drawer" aria-expanded="false">
+          <svg class="h-5 w-5"><use href="#i-menu"/></svg>
+        </button>
       </div>
-    <?php endif; ?>
+      <div class="flex items-center gap-2 px-4 pb-3">
+        <form method="get" action="<?= e($searchAction) ?>" class="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-xl border border-hairline bg-white px-3 shadow-card" data-board-search>
+          <svg class="h-4 w-4 shrink-0 text-slate-400"><use href="#i-search"/></svg>
+          <label class="sr-only" for="q-mob">Quick search</label>
+          <input id="q-mob" name="q" type="search" autocomplete="off" placeholder="Quick search..."
+                 class="min-w-0 flex-1 border-0 bg-transparent p-0 text-[13px] placeholder:text-slate-400 focus:outline-none focus:ring-0">
+        </form>
+        <button type="button" data-filter-toggle class="flex h-10 w-11 shrink-0 items-center justify-center rounded-xl border border-hairline bg-white text-ink-700 shadow-card" aria-label="Filters">
+          <svg class="h-4 w-4"><use href="#i-filter"/></svg>
+        </button>
+      </div>
+    </div>
 
-    <main class="page">
+    <main class="page !px-4 !pt-1 lg:!px-6 lg:!pt-5 xl:!px-12">
       <?= $content ?>
     </main>
 
-    <footer class="mt-auto border-t border-slate-200 px-4 py-4 text-center text-[11px] text-slate-400 sm:px-6 lg:px-8 no-print">
-      <?= e($appName) ?> · multi-tenant queue management · <?= e(date('Y')) ?>
-      · clinic data isolated per tenant · request <?= e($requestId ?? '') ?>
+    <footer class="mt-auto px-4 py-5 text-center text-[11px] text-ink-400 no-print">
+      <?= e($brandName) ?>&trade; <?= e(date('Y')) ?> &middot; v2.0.0 &middot; Secure &middot; Reliable &middot; Built for modern clinics
+      <span class="text-brand-600">&#9829;</span>
     </footer>
+
+    <?php if ($tabBar !== []): ?>
+      <nav class="bottom-tabs no-print" aria-label="Primary">
+        <?php foreach ($tabBar as [$href, $icon, $label]): $on = $href === '/app' ? $current === '/app' : str_starts_with($current, $href); ?>
+          <a href="<?= e($href) ?>" class="btab <?= $on ? 'btab-active' : '' ?>"<?= $on ? ' aria-current="page"' : '' ?>>
+            <svg class="h-[18px] w-[18px]"><use href="#i-<?= e($icon) ?>"/></svg>
+            <span><?= e($label) ?></span>
+          </a>
+        <?php endforeach; ?>
+        <button type="button" class="btab" data-more-toggle aria-label="More">
+          <svg class="h-[18px] w-[18px]"><use href="#i-dots"/></svg>
+          <span>More</span>
+        </button>
+      </nav>
+      <div class="h-[52px] lg:hidden" style="margin-bottom: env(safe-area-inset-bottom)"></div>
+    <?php endif; ?>
   </div>
 </div>
 <?php else: ?>
-  <?php if (($flash = notice()) !== null): ?>
-    <div class="fixed left-1/2 top-4 z-50 w-[min(92vw,28rem)] -translate-x-1/2">
-      <div class="rise rounded-xl border px-4 py-3 text-sm shadow-lg
-        <?= $flash['type'] === 'error' ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800' ?>">
-        <?= e($flash['message']) ?>
-      </div>
-    </div>
-  <?php endif; ?>
   <?= $content ?>
 <?php endif; ?>
 

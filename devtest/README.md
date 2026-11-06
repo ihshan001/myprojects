@@ -68,24 +68,54 @@ role's own `home` path, so the doctor never arrives on `/admin` and gets a 403.
 
 ---
 
-## Mobile
+## Design
 
-The layout is built phone-first; the desktop sidebar is the large-screen variant.
+The UI follows the approved ClinicQueue reference boards. Both the reference
+images and screenshots of this build are in `docs/design/`.
 
-- **Off-canvas drawer** below `lg`, not an inline list that pushes the page down.
-  Dimmed backdrop, page scroll locked behind it, closes on Escape / backdrop /
-  link tap / the × button. Focus is trapped inside while open and returned to
-  the menu button on close. Off-screen links are `visibility:hidden`, so they
-  stay out of the tab order.
-- **Same navigation as desktop** — grouped sections and the active-page marker,
-  not a flat dump of every link.
-- **44px touch targets** on nav rows, queue actions and the close button.
-- **No horizontal page overflow.** Every table scrolls inside its own card
-  (`.table-scroll`); `html, body` are clipped as a backstop.
-- **16px inputs on small screens**, so iOS Safari does not zoom the page in and
-  leave it mis-scaled for the rest of the session.
-- **Safe-area insets** for notched phones, and form grids stack below 420px.
-- Rotating to landscape past `lg` closes the drawer and releases the scroll lock.
+| Token | Value | Where it came from |
+|---|---|---|
+| Primary action | `#0D7459` | sampled from the reference's buttons |
+| Active nav pill | `#DFF4EE` | sampled from the reference's sidebar |
+| Canvas | `#F7F8FA` | area outside the board panel |
+| Hairline | `#E8ECF1` | card and table borders |
+| Sidebar | `246px` | measured from the reference |
+| Board split | `1fr / 352px`, 28px gutter | measured at 1484px wide |
+| Type | Inter, self-hosted | `public/assets/fonts/`, no CDN |
+
+**One design, every role.** The shell (`layouts/app.php`) and the primitives in
+`resources/css/app.css` are shared, so all ~60 pages and all five ports inherit
+the same sidebar, top bar, cards, buttons, tables and mobile behaviour. The
+clinic board and the platform console are built from the same parts — greeting,
+five stat tiles, a main card and a right rail — with each role's own data.
+
+### The board refreshes without a second template
+
+`GET /app/panel` returns the live-queue card as rendered HTML, and the poller
+swaps it in every 5s. There is deliberately **no JS row template**: a duplicate
+template is how a redesign silently reverts five seconds after load. The older
+JSON board endpoint still serves `/queue`, which has its own denser layout.
+
+### Mobile
+
+- Off-canvas drawer with backdrop, scroll lock, Escape, focus trap and restore.
+- Bottom tab bar (Live board / Appointments / Patients / More); More opens the drawer.
+- Stat tiles become a swipeable strip; the rail cards sit two-up.
+- 44px touch targets, safe-area insets, 16px inputs (no iOS zoom-on-focus).
+- Every table scrolls inside its own card. Verified no horizontal page scroll
+  at 360px, 426px and 1484px across all five roles.
+
+### Where the build differs from the reference, on purpose
+
+- **Waiting rows say "Call", not "Start".** `waiting → call` is the real state
+  machine transition; `start` only applies to an already-called token. The
+  button is labelled with the action it actually performs.
+- **Estimated wait is a range** (`8–19 min`), not a single number. That is the
+  domain's existing `QueueService::estimate()`, which refuses false precision.
+- **No "Analytics" nav item.** There is no analytics route; Reports covers it.
+  A link that 403s or 404s is worse than a shorter sidebar.
+- **Names, counts and the tracking URL are live data**, so they differ from the
+  mockup's sample values.
 
 ---
 
@@ -209,7 +239,10 @@ they no longer depend on test order.
 ```
 dev/roles.json                              port → role → identity map
 app/Core/DevIdentity.php                    identity from QP_PORT + siblingUrl()
-resources/views/components/role-switcher.php  the role chips / drawer rows
+resources/views/components/role-switcher.php  role popover / drawer rows
+resources/views/partials/board-panel.php      the live-queue card (also the refresh fragment)
+resources/views/components/board/patient-row.php  one waiting patient
+docs/design/                                  reference boards + build screenshots
 tools/serve-role.mjs                        one port, one role
 tools/fleet.mjs                             all ports at once (terminal only)
 README.md                                   this file
