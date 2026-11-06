@@ -14,7 +14,6 @@ use App\Http\Controllers\ApiController;
 use App\Http\Controllers\AppointmentController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BillingController;
-use App\Http\Controllers\DevController;
 use App\Http\Controllers\ClinicController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DisplayController;
@@ -54,13 +53,6 @@ Router::post('/t/{token}/rate', [PublicController::class, 'rateVisit']);
 Router::get('/demo/board', [PublicController::class, 'demoBoard']);
 Router::get('/manifest.webmanifest', [PublicController::class, 'manifest']);
 Router::get('/sw.js', [PublicController::class, 'serviceWorker']);
-
-/* ---------------------------------------------------------------- dev (temp) */
-// Direct role access for testing — no login, no password. Replaced by real
-// auth once every role and feature has been exercised.
-Router::get('/dev/role', [DevController::class, 'chooseRole']);
-Router::get('/dev/role/sign-in-as/{id}', [DevController::class, 'signInAs']);
-Router::get('/dev/role/sign-out', [DevController::class, 'signOut']);
 
 /* ----------------------------------------------------------------- auth */
 Router::get('/login', [AuthController::class, 'showLogin']);

@@ -1,8 +1,0 @@
-node_modules
-.git
-.arena
-storage/db/*.sqlite*
-storage/logs/*
-storage/sessions/*
-.env
-*.log
