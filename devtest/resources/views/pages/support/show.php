@@ -1,12 +1,12 @@
-<div class="flex flex-wrap items-start justify-between gap-3">
+<div class="page-head">
   <div>
-    <div class="flex items-center gap-2 text-xs text-slate-500">
+    <div class="flex items-center gap-2 text-xs text-ink-500">
       <a href="/support" class="hover:underline">Support</a>
       <span>/</span>
-      <span class="font-medium text-slate-700">#<?= (int) $ticket['id'] ?></span>
+      <span class="font-medium text-ink-700">#<?= (int) $ticket['id'] ?></span>
     </div>
-    <h1 class="mt-1 text-2xl font-bold tracking-tight text-slate-900"><?= e($ticket['subject']) ?></h1>
-    <p class="mt-1 text-sm text-slate-500">
+    <h1 class="page-title mt-1"><?= e($ticket['subject']) ?></h1>
+    <p class="page-sub">
       Opened by <?= e($ticket['opened_by'] ?? 'unknown') ?> <?= e(ago($ticket['created_at'])) ?>
       · <?= e($ticket['category']) ?> · <?= e($ticket['priority']) ?>
     </p>
@@ -19,20 +19,20 @@
 
 <div class="mt-5 space-y-3">
   <div class="card card-pad">
-    <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Original request</p>
-    <p class="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-slate-800"><?= e($ticket['body']) ?></p>
+    <p class="stat-label">Original request</p>
+    <p class="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-ink-900"><?= e($ticket['body']) ?></p>
   </div>
 
   <?php foreach ($replies as $r): ?>
-    <div class="card card-pad <?= (int) $r['is_staff'] === 1 ? 'border-teal-200 bg-teal-50/40' : '' ?>">
+    <div class="card card-pad <?= (int) $r['is_staff'] === 1 ? 'border-brand-200 bg-brand-50/40' : '' ?>">
       <div class="flex items-center justify-between">
-        <p class="text-xs font-semibold text-slate-700">
+        <p class="text-xs font-semibold text-ink-700">
           <?= e($r['author_name'] ?? 'Support') ?>
           <?php if ((int) $r['is_staff'] === 1): ?><span class="badge-teal ml-1">support</span><?php endif; ?>
         </p>
-        <p class="text-[11px] text-slate-400"><?= e(ago($r['created_at'])) ?></p>
+        <p class="text-[11px] text-ink-400"><?= e(ago($r['created_at'])) ?></p>
       </div>
-      <p class="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-slate-800"><?= e($r['body']) ?></p>
+      <p class="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-ink-900"><?= e($r['body']) ?></p>
     </div>
   <?php endforeach; ?>
 
@@ -47,7 +47,7 @@
       </form>
     </div>
   <?php else: ?>
-    <p class="text-xs text-slate-500">
+    <p class="text-xs text-ink-500">
       This ticket is <?= e($ticket['status']) ?>. If the problem came back, open a new ticket — a
       closed thread is not read.
     </p>

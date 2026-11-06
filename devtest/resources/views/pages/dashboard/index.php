@@ -42,7 +42,7 @@ $glance = [
     ['Longest wait', $longest > 0 ? $hm($longest) : '—'],
 ];
 ?>
-<div class="lg:board-panel" data-board-fragment="/app/panel?queue=<?= (int) $activeId ?>">
+<div data-board-fragment="/app/panel?queue=<?= (int) $activeId ?>">
 
   <!-- ---------------------------------------------------- greeting ---- -->
   <div class="card p-4 lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
@@ -71,7 +71,7 @@ $glance = [
   <!-- ------------------------------------------------------- stats ---- -->
   <div class="mt-3 flex gap-1.5 overflow-x-auto pb-1 sm:mt-6 sm:grid sm:grid-cols-3 sm:gap-4 sm:overflow-visible sm:pb-0 lg:grid-cols-5">
     <?php foreach ($stats as [$label, $value, $hint, $icon, $tone]): ?>
-      <div class="stat-tile w-[104px] shrink-0 sm:w-auto">
+      <div class="stat-tile w-[112px] shrink-0 sm:w-auto">
         <span class="stat-ico <?= e($tone) ?>">
           <svg class="h-5 w-5"><use href="#i-<?= e($icon) ?>"/></svg>
         </span>
@@ -90,20 +90,20 @@ $glance = [
     <?php include QP_ROOT . '/resources/views/partials/board-panel.php'; ?>
 
     <!-- ================================================= right rail === -->
-    <div class="grid min-w-0 grid-cols-2 gap-3 lg:block lg:space-y-5">
+    <div class="grid min-w-0 grid-cols-1 gap-3 min-[380px]:grid-cols-2 lg:block lg:space-y-5">
 
       <!-- Patient tracking -->
       <section class="card p-3 sm:p-4">
         <div class="flex items-start justify-between gap-2">
           <h2 class="text-[12px] font-bold tracking-tight text-ink-900 sm:text-[15px]">Patient tracking</h2>
-          <span class="shrink-0 rounded-full bg-brand-50 px-1.5 py-0.5 text-[8.5px] font-semibold text-brand-700 sm:px-2 sm:text-[10px]">No app needed</span>
+          <span class="shrink-0 rounded-full bg-brand-50 px-1.5 py-0.5 text-[9.5px] font-semibold text-brand-700 sm:px-2 sm:text-[10px]">No app needed</span>
         </div>
         <p class="mt-1.5 text-[11.5px] leading-snug text-ink-500">
           Share this QR or link with patients to check their position in queue.
         </p>
         <?php if ($trackUrl): ?>
-          <div class="mt-2.5 flex items-center gap-2.5 rounded-xl bg-slate-50 p-2.5">
-            <div class="h-[68px] w-[68px] shrink-0 overflow-hidden rounded bg-white [&>svg]:h-full [&>svg]:w-full">
+          <div class="mt-2.5 flex items-center gap-2 rounded-xl bg-slate-50 p-2 sm:gap-2.5 sm:p-2.5">
+            <div class="h-[56px] w-[56px] shrink-0 overflow-hidden rounded bg-white [&>svg]:h-full [&>svg]:w-full sm:h-[68px] sm:w-[68px]">
               <?= $trackQr ?>
             </div>
             <div class="min-w-0">
@@ -112,7 +112,7 @@ $glance = [
                 <?= e($activeQueue['room_name'] ?? 'Waiting room') ?> &middot; <?= e($activeQueue['specialty'] ?? $clinic['name'] ?? '') ?>
               </p>
               <button type="button" data-copy="<?= e($trackUrl) ?>"
-                      class="mt-1.5 inline-flex items-center gap-1 whitespace-nowrap rounded-lg border border-hairline bg-white px-1.5 py-1 text-[10.5px] font-semibold text-ink-700 shadow-card hover:bg-slate-50 sm:gap-1.5 sm:px-2 sm:text-[11px]">
+                      class="mt-1.5 inline-flex min-h-[32px] items-center gap-1 whitespace-nowrap rounded-lg border border-hairline bg-white px-2 py-1 text-[10.5px] font-semibold text-ink-700 shadow-card hover:bg-slate-50 sm:gap-1.5 sm:text-[11px]">
                 <svg class="h-3 w-3"><use href="#i-link"/></svg>Copy link
               </button>
             </div>
@@ -144,23 +144,23 @@ $glance = [
           <?php endforeach; ?>
         </div>
         <?php if (Auth::can('reports.view')): ?>
-          <a href="/reports" class="mt-2 flex items-center justify-center gap-1.5 py-1 text-[12px] font-semibold text-ink-700 hover:text-brand-700">
+          <a href="/reports" class="mt-1 flex min-h-[36px] items-center justify-center gap-1.5 py-1 text-[12px] font-semibold text-ink-700 hover:text-brand-700">
             <svg class="h-3.5 w-3.5"><use href="#i-external"/></svg>Open full reports
           </a>
         <?php endif; ?>
       </section>
 
       <!-- System status -->
-      <section class="card col-span-2 p-3 sm:p-4">
+      <section class="card p-3 min-[380px]:col-span-2 sm:p-4">
         <h2 class="text-[14px] font-bold tracking-tight text-ink-900 sm:text-[15px]">System status</h2>
         <div class="mt-2 flex flex-wrap items-center gap-x-6 gap-y-1.5">
-          <p class="flex items-center gap-2 text-[12px] font-semibold text-brand-700" data-live-text>
+          <p class="flex min-w-0 items-center gap-1.5 text-[11.5px] font-semibold text-brand-700 sm:gap-2 sm:text-[12px]" data-live-text>
             <svg class="h-[18px] w-[18px]"><use href="#i-shield-check"/></svg>
             All systems operational
           </p>
-          <p class="flex items-center gap-2 text-[11px] text-ink-500">
+          <p class="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-ink-500 sm:gap-2">
             Last updated: <span class="tabular" data-last-updated><?= e(date('g:i:s A')) ?></span>
-            <button type="button" data-refresh-now class="text-ink-500 hover:text-brand-700" aria-label="Refresh now">
+            <button type="button" data-refresh-now class="-m-2 inline-flex h-8 w-8 items-center justify-center rounded-lg text-ink-500 hover:bg-slate-100 hover:text-brand-700" aria-label="Refresh now">
               <svg class="h-3.5 w-3.5"><use href="#i-refresh"/></svg>
             </button>
           </p>

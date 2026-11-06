@@ -1,8 +1,8 @@
 <?php $c = $clinicRecord; ?>
-<div class="flex flex-wrap items-start justify-between gap-3">
+<div class="page-head">
   <div>
-    <h1 class="text-2xl font-bold tracking-tight text-slate-900">Settings</h1>
-    <p class="mt-1 text-sm text-slate-500">Clinic identity, staff accounts and queue policy.</p>
+    <h1 class="page-title">Settings</h1>
+    <p class="page-sub">Clinic identity, staff accounts and queue policy.</p>
   </div>
   <a href="/billing" class="btn-secondary"><svg class="h-4 w-4"><use href="#i-card"/></svg><?= e($plan['name'] ?? 'No plan') ?></a>
 </div>
@@ -14,8 +14,8 @@
       No mail transport is configured, so nothing was emailed. This link works once and expires in 72 hours.
     </p>
     <div class="mt-2 flex items-center gap-2 rounded-lg bg-white px-3 py-2">
-      <code class="flex-1 truncate text-[11px] text-slate-700"><?= e(rtrim((string) App\Core\Env::get('app.url', ''), '/') . $inviteLink) ?></code>
-      <button class="rounded p-1 text-slate-400 hover:bg-slate-50 hover:text-slate-700"
+      <code class="flex-1 truncate text-[11px] text-ink-700"><?= e(rtrim((string) App\Core\Env::get('app.url', ''), '/') . $inviteLink) ?></code>
+      <button class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-ink-400 hover:bg-slate-100 hover:bg-slate-50 hover:text-ink-700"
               data-copy="<?= e(rtrim((string) App\Core\Env::get('app.url', ''), '/') . $inviteLink) ?>">
         <svg class="h-3.5 w-3.5"><use href="#i-copy"/></svg>
       </button>
@@ -23,11 +23,11 @@
   </div>
 <?php endif; ?>
 
-<div class="mt-5 grid gap-5 lg:grid-cols-[1.15fr_.85fr]">
+<div class="mt-3 grid gap-3 sm:mt-6 sm:gap-5 lg:grid-cols-[1.15fr_.85fr]">
   <div class="space-y-5">
     <div class="card card-pad">
-      <h2 class="text-sm font-bold text-slate-900">Clinic profile</h2>
-      <p class="mt-1 text-xs text-slate-500">Shown on patient tracking pages and printed tokens.</p>
+      <h2 class="text-sm font-bold text-ink-900">Clinic profile</h2>
+      <p class="mt-1 text-xs text-ink-500">Shown on patient tracking pages and printed tokens.</p>
       <form method="post" action="/settings" class="mt-4 space-y-3" <?= $canManage ? '' : 'inert' ?>>
         <?= csrf_field() ?>
         <div class="grid gap-3 sm:grid-cols-2">
@@ -45,7 +45,7 @@
             <input class="input" id="district" name="district" value="<?= e((string) ($c['district'] ?? '')) ?>"></div>
           <div><label class="label" for="brand_color">Brand colour</label>
             <div class="flex gap-2">
-              <input class="h-10 w-12 cursor-pointer rounded-lg border border-slate-300" type="color"
+              <input class="h-10 w-12 cursor-pointer rounded-lg border border-hairline" type="color"
                      id="brand_color" name="brand_color" value="<?= e((string) $c['brand_color']) ?>">
               <input class="input" value="<?= e((string) $c['brand_color']) ?>" readonly aria-label="Colour value">
             </div></div>
@@ -58,7 +58,7 @@
         </div>
 
         <div class="border-t border-slate-100 pt-3">
-          <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400">Queue policy</h3>
+          <h3 class="text-xs font-bold uppercase tracking-wider text-ink-400">Queue policy</h3>
           <div class="mt-3 grid gap-3 sm:grid-cols-2">
             <div><label class="label" for="token_prefix">Token prefix</label>
               <input class="input" id="token_prefix" name="token_prefix" maxlength="2"
@@ -70,24 +70,24 @@
               <p class="help">How long before a patient is marked absent.</p></div>
           </div>
 
-          <div class="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+          <div class="mt-4 rounded-lg border border-hairline bg-slate-50 px-3 py-2.5">
             <label class="flex items-start gap-2">
               <input type="checkbox" class="checkbox mt-0.5" name="notify_approach" value="1"
                      <?= (int) ($c['notify_approach'] ?? 0) === 1 ? 'checked' : '' ?>>
               <span>
-                <span class="block text-[11px] font-semibold text-slate-800">SMS "your turn is approaching"</span>
-                <span class="block text-[10px] leading-relaxed text-slate-500">
+                <span class="block text-[11px] font-semibold text-ink-900">SMS "your turn is approaching"</span>
+                <span class="block text-[10px] leading-relaxed text-ink-500">
                   One extra message per patient when they are near the front. Costs one SMS each — most
                   clinics leave this off and rely on the tracking link.
                 </span>
               </span>
             </label>
             <div class="mt-2 flex items-center gap-2 pl-6">
-              <label class="text-[10px] font-semibold text-slate-600" for="approach_threshold">Message the next</label>
+              <label class="text-[10px] font-semibold text-ink-700" for="approach_threshold">Message the next</label>
               <input class="input !w-14 !px-2 !py-1 text-center text-[11px]" id="approach_threshold"
                      name="approach_threshold" inputmode="numeric" min="1" max="10"
                      value="<?= (int) ($c['approach_threshold'] ?? 2) ?>">
-              <span class="text-[10px] text-slate-600">patient(s) in line</span>
+              <span class="text-[10px] text-ink-700">patient(s) in line</span>
             </div>
           </div>
         </div>
@@ -95,19 +95,19 @@
         <?php if ($canManage): ?>
           <button class="btn-primary w-full">Save settings</button>
         <?php else: ?>
-          <p class="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">Only a clinic owner can change these settings.</p>
+          <p class="rounded-lg bg-slate-50 px-3 py-2 text-xs text-ink-500">Only a clinic owner can change these settings.</p>
         <?php endif; ?>
       </form>
     </div>
 
     <?php $dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']; ?>
     <div class="card overflow-hidden">
-      <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
-        <p class="text-xs font-semibold text-slate-600">Opening hours and booking</p>
+      <div class="section-head">
+        <p class="section-title">Opening hours and booking</p>
       </div>
       <form method="post" action="/settings/hours" class="space-y-3 px-4 py-4">
         <?= csrf_field() ?>
-        <p class="text-[11px] leading-relaxed text-slate-500">
+        <p class="text-[11px] leading-relaxed text-ink-500">
           The public booking page builds its times from this grid — the clinic's hours on each
           weekday, divided by each doctor's own consultation length, minus appointments already
           booked. Days left empty use the 8:30&nbsp;AM&ndash;12:30&nbsp;PM default and say so to the patient.
@@ -116,19 +116,19 @@
         <?php foreach ($dayNames as $dow => $dayName): ?>
           <?php $row = $weekHours[$dow] ?? ['open' => null, 'close' => null, 'closed' => true, 'configured' => false]; ?>
           <div class="grid grid-cols-[7.5rem_1fr_1fr_auto] items-center gap-2">
-            <label class="text-xs font-medium text-slate-600" for="open_<?= $dow ?>"><?= e($dayName) ?></label>
+            <label class="text-xs font-medium text-ink-700" for="open_<?= $dow ?>"><?= e($dayName) ?></label>
             <input class="input py-1.5 text-xs" type="time" id="open_<?= $dow ?>" name="open_<?= $dow ?>"
                    value="<?= e($row['open'] ?? '') ?>" <?= $canManage ? '' : 'disabled' ?>>
             <input class="input py-1.5 text-xs" type="time" name="close_<?= $dow ?>"
                    value="<?= e($row['close'] ?? '') ?>" <?= $canManage ? '' : 'disabled' ?>
                    aria-label="<?= e($dayName) ?> closing time">
-            <label class="flex items-center gap-1.5 text-[11px] text-slate-500">
-              <input type="checkbox" name="closed_<?= $dow ?>" value="1"
+            <label class="flex items-center gap-1.5 text-[11px] text-ink-500">
+              <input class="checkbox" type="checkbox" name="closed_<?= $dow ?>" value="1"
                      <?= $row['closed'] ? 'checked' : '' ?> <?= $canManage ? '' : 'disabled' ?>>
               closed
             </label>
             <?php if (!$row['configured']): ?>
-              <span class="col-start-2 col-span-3 text-[10px] text-slate-400">default — not yet set by this clinic</span>
+              <span class="col-start-2 col-span-3 text-[10px] text-ink-400">default — not yet set by this clinic</span>
             <?php endif; ?>
           </div>
         <?php endforeach; ?>
@@ -144,15 +144,15 @@
         <?php if ($canManage): ?>
           <button class="btn-primary w-full">Save opening hours</button>
         <?php else: ?>
-          <p class="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">Only a clinic owner can change opening hours.</p>
+          <p class="rounded-lg bg-slate-50 px-3 py-2 text-xs text-ink-500">Only a clinic owner can change opening hours.</p>
         <?php endif; ?>
       </form>
     </div>
 
     <div class="card overflow-hidden">
-      <div class="flex items-center justify-between border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
-        <p class="text-xs font-semibold text-slate-600">Staff accounts</p>
-        <p class="text-[11px] text-slate-400"><?= count($staff) ?> of <?= (int) ($plan['max_staff'] ?? 0) ?> allowed</p>
+      <div class="section-head">
+        <p class="section-title">Staff accounts</p>
+        <p class="text-[11px] text-ink-400"><?= count($staff) ?> of <?= (int) ($plan['max_staff'] ?? 0) ?> allowed</p>
       </div>
       <div class="table-scroll">
         <table class="table">
@@ -161,10 +161,10 @@
         <?php foreach ($staff as $s): ?>
         <tr>
         <td class="font-medium"><?= e($s['name']) ?></td>
-        <td class="hidden sm:table-cell text-xs text-slate-500"><?= e($s['email']) ?></td>
+        <td class="hidden sm:table-cell text-xs text-ink-500"><?= e($s['email']) ?></td>
         <td><span class="<?= $s['role'] === 'clinic_admin' ? 'badge-violet' : ($s['role'] === 'doctor' ? 'badge-teal' : 'badge-slate') ?>">
         <?= e(str_replace('_', ' ', (string) $s['role'])) ?></span></td>
-        <td class="hidden md:table-cell text-xs text-slate-500"><?= e($s['last_login_at'] ? ago($s['last_login_at']) : 'never') ?></td>
+        <td class="hidden md:table-cell text-xs text-ink-500"><?= e($s['last_login_at'] ? ago($s['last_login_at']) : 'never') ?></td>
         </tr>
         <?php endforeach; ?>
         </tbody>
@@ -179,13 +179,13 @@
 
   <div class="space-y-5">
     <div class="card card-pad">
-      <h2 class="text-sm font-bold text-slate-900">Waiting-room display</h2>
-      <p class="mt-1 text-xs leading-relaxed text-slate-500">
+      <h2 class="text-sm font-bold text-ink-900">Waiting-room display</h2>
+      <p class="mt-1 text-xs leading-relaxed text-ink-500">
         A revocable key just for lobby screens. It shows tokens and rooms — never patient names.
       </p>
       <div class="mt-3 flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2">
-        <code class="flex-1 truncate text-[10px] text-slate-600"><?= e($displayToken ?: '—') ?></code>
-        <button class="rounded p-1 text-slate-400 hover:bg-white hover:text-slate-700"
+        <code class="flex-1 truncate text-[10px] text-ink-700"><?= e($displayToken ?: '—') ?></code>
+        <button class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-ink-400 hover:bg-slate-100 hover:bg-white hover:text-ink-700"
                 data-copy="<?= e(($displayToken ?? '')) ?>"><svg class="h-3.5 w-3.5"><use href="#i-copy"/></svg></button>
       </div>
       <a href="/display" target="_blank" class="btn-secondary mt-3 w-full">
@@ -194,16 +194,16 @@
     </div>
 
     <div class="card card-pad">
-      <h2 class="text-sm font-bold text-slate-900">Notifications</h2>
+      <h2 class="text-sm font-bold text-ink-900">Notifications</h2>
       <div class="mt-3 grid grid-cols-3 gap-2 text-center">
         <?php foreach ([['Queued', $notifStats['queued'] ?? 0, 'text-amber-600'], ['Sent', $notifStats['sent'] ?? 0, 'text-emerald-600'], ['Failed', $notifStats['failed'] ?? 0, 'text-rose-600']] as [$l, $v, $tone]): ?>
           <div class="rounded-lg bg-slate-50 py-2.5">
             <p class="text-lg font-bold tabular <?= $tone ?>"><?= (int) $v ?></p>
-            <p class="text-[10px] text-slate-500"><?= e($l) ?></p>
+            <p class="text-[10px] text-ink-500"><?= e($l) ?></p>
           </div>
         <?php endforeach; ?>
       </div>
-      <p class="mt-3 text-[11px] leading-relaxed text-slate-500">
+      <p class="mt-3 text-[11px] leading-relaxed text-ink-500">
         Messages are queued inside the same transaction as the queue change, so one is never lost.
         SMS and WhatsApp usage is billed separately from your plan.
       </p>
@@ -214,12 +214,12 @@
 
     <?php if ($canManage): ?>
       <div class="card card-pad">
-        <h2 class="text-sm font-bold text-slate-900">Your data</h2>
-        <p class="mt-1 text-xs leading-relaxed text-slate-500">
+        <h2 class="text-sm font-bold text-ink-900">Your data</h2>
+        <p class="mt-1 text-xs leading-relaxed text-ink-500">
           Every patient record, token and history entry is yours. Take the whole clinic as one zip of CSV
           files whenever you want — no support ticket, no waiting.
         </p>
-        <ul class="mt-3 space-y-1 text-[11px] leading-relaxed text-slate-500">
+        <ul class="mt-3 space-y-1 text-[11px] leading-relaxed text-ink-500">
           <li>· Password hashes and two-factor secrets are never included.</li>
           <li>· The display token only on request, because it is a live credential.</li>
           <li>· Every export is recorded in the audit log.</li>
@@ -230,8 +230,8 @@
     <?php endif; ?>
 
     <div class="card card-pad">
-      <h2 class="text-sm font-bold text-slate-900">Language</h2>
-      <p class="mt-1 text-xs text-slate-500">Interface language for your staff. Patients always see the clinic's default.</p>
+      <h2 class="text-sm font-bold text-ink-900">Language</h2>
+      <p class="mt-1 text-xs text-ink-500">Interface language for your staff. Patients always see the clinic's default.</p>
       <form method="post" action="/locale" class="mt-3 flex gap-2">
         <?= csrf_field() ?>
         <select class="select" name="locale">
@@ -245,14 +245,14 @@
   </div>
 
   <?php if ($canManage): ?>
-    <div class="card mt-5 overflow-hidden" id="account">
-      <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
-        <p class="text-xs font-semibold text-slate-600">Account closure</p>
+    <div class="card mt-3 sm:mt-5 overflow-hidden" id="account">
+      <div class="section-head">
+        <p class="section-title">Account closure</p>
       </div>
       <div class="px-4 py-4">
-        <p class="text-[11px] leading-relaxed text-slate-500">
+        <p class="text-[11px] leading-relaxed text-ink-500">
           Closing the clinic signs out every staff member immediately and hides the public
-          booking page and display. <b class="text-slate-700">Nothing is deleted for 90 days</b>,
+          booking page and display. <b class="text-ink-700">Nothing is deleted for 90 days</b>,
           which is the window in which support can restore access if this was a mistake. After
           that the patient and visit records are purged; invoices are kept for accounting.
         </p>

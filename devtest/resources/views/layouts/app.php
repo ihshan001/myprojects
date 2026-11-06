@@ -313,7 +313,11 @@ $searchAction = $u ? ($u['role'] === 'super_admin' ? '/admin/clinics' : ($u['rol
     </div>
 
     <main class="page !px-4 !pt-1 lg:!px-6 lg:!pt-5 xl:!px-12">
-      <?= $content ?>
+      <!-- One panel for every page, so the whole app shares the board's
+           framing instead of each view inventing its own. -->
+      <div class="lg:board-panel">
+        <?= $content ?>
+      </div>
     </main>
 
     <footer class="mt-auto px-4 py-5 text-center text-[11px] text-ink-400 no-print">

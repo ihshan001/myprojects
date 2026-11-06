@@ -57,10 +57,10 @@ $verbsFor = static function (string $status) use ($canPriority): array {
             </a>
           <?php endforeach; ?>
           <?php if (count($queues) > 3): ?>
-            <form method="get" action="/app" class="shrink-0 pb-2.5">
+            <form method="get" action="/app" class="shrink-0 pb-1">
               <label class="sr-only" for="queue-pick">Jump to another doctor</label>
               <select id="queue-pick" name="queue" onchange="this.form.submit()"
-                      class="h-6 cursor-pointer rounded border-0 bg-transparent py-0 pl-0 pr-6 text-[13px] font-medium text-ink-500 focus:ring-0">
+                      class="qselect h-8 cursor-pointer truncate rounded border-0 bg-transparent py-0 pl-0 pr-5 text-[12px] font-medium text-ink-500 focus:ring-0">
                 <option value="" selected>All doctors</option>
                 <?php foreach (array_slice($queues, 3) as $q): ?>
                   <option value="<?= (int) $q['id'] ?>"><?= e($q['doctor_name'] ?? $q['name']) ?></option>
@@ -68,7 +68,7 @@ $verbsFor = static function (string $status) use ($canPriority): array {
               </select>
             </form>
           <?php else: ?>
-            <span class="pb-2.5 text-[13px] text-ink-400">All doctors</span>
+            <span class="whitespace-nowrap pb-2.5 text-[11.5px] text-ink-400 sm:text-[13px]">All doctors</span>
           <?php endif; ?>
         </div>
 

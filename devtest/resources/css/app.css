@@ -81,6 +81,19 @@
     }
   }
 
+  /* Grid and flex children default to min-width:auto, which lets one long
+     input or nowrap label stretch the whole page past a phone's width.
+     Content columns in this app never want min-content sizing. */
+  main .grid > *,
+  main .flex > * {
+    min-width: 0;
+  }
+  /* Only controls with an intrinsic size keep it. Text inputs and selects
+     must still shrink, or a search field plus its button overflow the card. */
+  main :is(button, svg, input[type=checkbox], input[type=radio]) {
+    flex-shrink: 0;
+  }
+
   /* Body scroll is locked while the drawer is open, so the page behind it
      does not slide around under the user's thumb. */
   body.qp-nav-open {
@@ -224,7 +237,7 @@
     @apply input min-h-[80px] resize-y;
   }
   .checkbox {
-    @apply h-4 w-4 rounded border-slate-300 text-brand-700 focus:ring-brand-600;
+    @apply h-4 w-4 shrink-0 rounded border-slate-300 text-brand-700 focus:ring-brand-600;
   }
   .help {
     @apply mt-1 text-xs text-slate-500;
@@ -313,6 +326,46 @@
     @apply rounded-2xl border border-hairline bg-white p-4 shadow-card sm:p-5;
   }
 
+  /* ================================================ shared page kit ====
+     Every authenticated page is wrapped in .board-panel by the layout, so
+     these headers/sections are the same objects the Live board uses.     */
+
+  /* Page title block: a card on a phone, bare inside the desktop panel. */
+  .page-head {
+    @apply flex flex-wrap items-start justify-between gap-3 rounded-xl border
+           border-hairline bg-white p-4 shadow-card
+           lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none;
+  }
+  .page-title {
+    @apply text-[17px] font-bold leading-snug tracking-tight text-ink-900 sm:text-[22px];
+  }
+  .page-sub {
+    @apply mt-1.5 text-[11px] leading-snug text-ink-500 sm:text-[12px];
+  }
+
+  /* Card section header: white with a hairline, never the old grey strip. */
+  .section-head {
+    @apply flex flex-wrap items-center justify-between gap-2 border-b border-hairline
+           px-3 py-2.5 sm:px-4;
+  }
+  .section-title {
+    @apply text-[13px] font-bold tracking-tight text-ink-900 sm:text-[15px];
+  }
+  .section-link {
+    @apply text-[11px] font-semibold text-brand-700 hover:underline sm:text-[12px];
+  }
+
+  /* Filter / search rows above a list. */
+  .filter-bar {
+    @apply mt-3 flex flex-wrap items-end gap-2 sm:mt-5;
+  }
+
+  /* Body copy inside a card. */
+  .field-help { @apply mt-1 text-[11px] leading-relaxed text-ink-500; }
+  .kbd {
+    @apply rounded bg-slate-100 px-1 font-mono text-[11px] text-ink-700;
+  }
+
   /* Top search bar: its own floating card, not a full-bleed strip. */
   .topbar-card {
     @apply flex h-12 items-center gap-3 rounded-xl border border-hairline bg-white
@@ -333,15 +386,16 @@
   }
   .stat-label {
     @apply text-[10px] font-semibold uppercase tracking-[0.06em] text-ink-500;
+    overflow-wrap: anywhere;
   }
   .stat-value {
-    @apply whitespace-nowrap text-[22px] font-bold leading-tight tracking-tight text-ink-900 tabular;
+    @apply truncate text-[22px] font-bold leading-tight tracking-tight text-ink-900 tabular;
   }
   .stat-hint { @apply text-[11px] text-ink-500; }
 
   /* Doctor tabs inside the live-queue card. */
   .qtab {
-    @apply relative whitespace-nowrap px-1 pb-2.5 pt-1 text-[13px] font-medium
+    @apply relative shrink-0 whitespace-nowrap px-1 pb-2.5 pt-1 text-[13px] font-medium
            text-ink-500 transition hover:text-ink-900;
   }
   .qtab-active {
@@ -461,12 +515,27 @@
     @apply min-w-full;
   }
   @media (max-width: 640px) {
+    /* Selects were rendering at 13px next to 10px labels and pushing their
+       row wider than the card. Keep them legible but proportional. */
+    .qtab { @apply min-h-[38px] text-[11.5px]; }
+    /* The "All doctors" jump list was 13px in a 24px box beside 11px tabs. */
+    .qselect { @apply h-8 max-w-[7.5rem] text-[11px]; }
+    .stat-ico { @apply h-6 w-6; }
+    .stat-label { @apply text-[9px]; }
+    .stat-hint { @apply text-[10px]; }
+    .glance-row { @apply py-1.5 text-[11.5px]; }
+    .select, select.select { @apply py-2 pr-8 text-[13px]; }
+    .section-head { @apply gap-1.5; }
+    .btn { @apply px-3 py-2 text-[13px]; }
+    .btn-lg { @apply px-4 py-3 text-[14px]; }
+    .label { @apply text-[10px]; }
+    .card-pad { @apply p-3; }
     .stat-tile { @apply gap-1.5 px-2 py-2.5; }
-    .stat-ico { @apply h-7 w-7 rounded-lg; }
-    .stat-ico svg { @apply h-4 w-4; }
+    .stat-ico { @apply rounded-lg; }
+    .stat-ico svg { @apply h-3.5 w-3.5; }
     .stat-value { @apply text-[16px]; }
-    .stat-label { @apply text-[7.5px] leading-[1.2]; }
-    .stat-hint { @apply text-[9px] leading-tight; }
+    .stat-label { @apply leading-[1.25]; }
+    .stat-hint { @apply leading-tight; }
     /* Tap targets on phones: a 24px icon button is a miss most of the time. */
     .btn-sm { @apply min-h-[36px] px-3; }
     .act { @apply min-h-[44px] min-w-[44px]; }

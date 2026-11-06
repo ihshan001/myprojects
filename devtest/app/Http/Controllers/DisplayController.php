@@ -45,7 +45,7 @@ final class DisplayController
             'canRotate' => Auth::can('clinic.manage'),
             'kioskKey' => (new KioskService())->keyFor($clinicId),
             'kioskNewKey' => Session::takeFlash('kiosk_new_key'),
-        ], false);
+        ], false, false);
     }
 
     /**
@@ -99,7 +99,7 @@ final class DisplayController
             'canRotate' => false,
             'publicScreen' => true,
             'departmentName' => $departmentName,
-        ], false);
+        ], false, false);
     }
 
     /**
@@ -183,7 +183,7 @@ final class DisplayController
             'key' => $key,
             'clinicRecord' => $clinic,
             'departmentName' => $departmentName,
-        ], false);
+        ], false, false);
     }
 
     public function rotate(): void

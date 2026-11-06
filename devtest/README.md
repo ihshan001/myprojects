@@ -89,6 +89,56 @@ the same sidebar, top bar, cards, buttons, tables and mobile behaviour. The
 clinic board and the platform console are built from the same parts — greeting,
 five stat tiles, a main card and a right rail — with each role's own data.
 
+### Every page, not just the board
+
+The layout wraps **every** authenticated page in the same `.board-panel`, and
+the shared kit in `resources/css/app.css` supplies the parts:
+
+| Class | Used for |
+|---|---|
+| `.page-head` / `.page-title` / `.page-sub` | page title block (a card on a phone, bare on desktop) |
+| `.section-head` / `.section-title` / `.section-link` | card headers — white with a hairline, never the old grey strip |
+| `.stat-tile` / `.stat-label` / `.stat-value` / `.stat-hint` | every number, via `components/stat.php` |
+| `.filter-bar` | search and date-filter rows |
+| `.glance-row` | label/value rail rows |
+
+So Appointments, Patients, Doctors & rooms, Queue settings, Priority rules,
+Service workflows, Policies, Incidents, Breaks, Schedules & holidays,
+Departments, Reports, Audit log, Subscription, Notifications, Settings,
+Support, Getting started and the platform console are all built from the same
+objects as the Live board. Verified: 150 page/viewport checks across the five
+roles at 360 / 426 / 1484px, zero horizontal scroll, zero JS errors, and every
+page carrying the shared panel.
+
+Full-bleed surfaces (waiting-room TV, kiosk, patient tracking, online booking,
+error pages) deliberately opt out via `view($tpl, $data, false)`.
+
+### Small-screen details
+
+Found by measuring every page in a real browser, not by eye:
+
+- Grid/flex children get `min-width: 0`. Without it a single long input or
+  nowrap label stretches the whole page past the phone. Fixed-size controls
+  (buttons, icons, checkboxes) are excluded so they do not get squashed.
+- The "All doctors" jump list dropped from 13px/24px to 11px/32px and is capped
+  at 7.5rem; the doctor tabs next to it are 11.5px with a 38px hit area.
+- Stat tiles: 9px labels (was 7.5px), 10px hints, and a fixed width only inside
+  the board's swipe strip — in a grid they stay fluid.
+- Sub-10px type elsewhere raised to 10px; bare checkboxes given the shared
+  20px `.checkbox`; 14–22px icon buttons raised to 32px.
+- Stat rows are two-up on a phone instead of a tall stack; the rail cards go
+  single-column below 380px so the QR block fits.
+
+Two pre-existing bugs surfaced while sweeping and are fixed here:
+
+- `view()` ignored its third argument, so full-document views were nested
+  inside the console shell whenever a staff session existed (a document
+  inside a document). The parameter now exists and 21 call sites use it.
+- `QrCode::dataUri()` was never implemented, so **every patient tracking link
+  (`/t/{token}`) returned a 500**. Implemented as a colourable SVG data URI.
+  NOTE: the same two bugs exist in `queuepilot/`, which is deliberately
+  untouched here.
+
 ### The board refreshes without a second template
 
 `GET /app/panel` returns the live-queue card as rendered HTML, and the poller

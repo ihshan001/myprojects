@@ -1,14 +1,14 @@
-<div class="flex flex-wrap items-start justify-between gap-3">
+<div class="page-head">
   <div>
-    <h1 class="text-2xl font-bold tracking-tight text-slate-900">Groups</h1>
-    <p class="mt-1 text-sm text-slate-500">
+    <h1 class="page-title">Groups</h1>
+    <p class="page-sub">
       A group lets a business that runs several branches see one roll-up. Attaching a clinic
       gives its owner a summary of the other branches — not their patients.
     </p>
   </div>
 </div>
 
-<div class="mt-5 grid gap-5 lg:grid-cols-[1.5fr_.9fr]">
+<div class="mt-3 grid gap-3 sm:mt-6 sm:gap-5 lg:grid-cols-[1.5fr_.9fr]">
   <div class="space-y-3">
     <?php if ($orgs === []): ?>
       <?php $title = 'No groups yet'; $message = 'Create one on the right. A clinic can then be attached as a branch, and its owner gains a roll-up across the group.'; $icon = 'users'; ?>
@@ -19,8 +19,8 @@
       <div class="card card-pad">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 class="text-sm font-semibold text-slate-900"><?= e($org['name']) ?></h2>
-            <p class="mt-0.5 text-[11px] text-slate-500">
+            <h2 class="text-sm font-semibold text-ink-900"><?= e($org['name']) ?></h2>
+            <p class="mt-0.5 text-[11px] text-ink-500">
               <?= e((string) ($org['owner_email'] ?? 'no contact address')) ?>
               · <?= count($org['branch_list']) ?> branch<?= count($org['branch_list']) === 1 ? '' : 'es' ?>
             </p>
@@ -31,7 +31,7 @@
         </div>
 
         <?php if (!empty($org['notes'])): ?>
-          <p class="mt-2 max-w-prose text-xs leading-relaxed text-slate-500"><?= e($org['notes']) ?></p>
+          <p class="mt-2 max-w-prose text-xs leading-relaxed text-ink-500"><?= e($org['notes']) ?></p>
         <?php endif; ?>
 
         <?php if ($org['rollup'] !== null): ?>
@@ -43,8 +43,8 @@
               ['In room', $org['rollup']['in_room'] ?? 0],
             ] as [$label, $value]): ?>
               <div>
-                <p class="text-lg font-bold tabular-nums text-slate-800"><?= (int) $value ?></p>
-                <p class="text-[10px] font-medium uppercase tracking-wide text-slate-500"><?= e($label) ?></p>
+                <p class="text-lg font-bold tabular-nums text-ink-900"><?= (int) $value ?></p>
+                <p class="text-[10px] font-medium uppercase tracking-wide text-ink-500"><?= e($label) ?></p>
               </div>
             <?php endforeach; ?>
           </div>
@@ -52,14 +52,14 @@
 
         <div class="mt-3 border-t border-slate-100 pt-3">
           <?php if ($org['branch_list'] === []): ?>
-            <p class="text-xs text-slate-500">No branches yet.</p>
+            <p class="text-xs text-ink-500">No branches yet.</p>
           <?php else: ?>
             <ul class="space-y-1.5">
               <?php foreach ($org['branch_list'] as $b): ?>
                 <li class="flex items-center justify-between gap-2">
-                  <span class="text-xs text-slate-700">
+                  <span class="text-xs text-ink-700">
                     <?= e($b['name']) ?>
-                    <span class="text-slate-400">· <?= e((string) ($b['city'] ?? '')) ?></span>
+                    <span class="text-ink-400">· <?= e((string) ($b['city'] ?? '')) ?></span>
                     <?php if ((int) ($b['is_active'] ?? 1) !== 1): ?>
                       <span class="badge-slate ml-1">inactive</span>
                     <?php endif; ?>
@@ -68,7 +68,7 @@
                         onsubmit="return confirm('Detach <?= e(addslashes((string) $b['name'])) ?> from this group?')">
                     <?= csrf_field() ?>
                     <input type="hidden" name="clinic_id" value="<?= (int) $b['id'] ?>">
-                    <button class="text-[10px] font-medium text-slate-500 underline hover:text-rose-700">detach</button>
+                    <button class="text-[10px] font-medium text-ink-500 underline hover:text-rose-700">detach</button>
                   </form>
                 </li>
               <?php endforeach; ?>
@@ -87,7 +87,7 @@
               <button class="act-mute">Attach</button>
             </form>
           <?php else: ?>
-            <p class="mt-2 text-[11px] text-slate-400">Every clinic is already in a group.</p>
+            <p class="mt-2 text-[11px] text-ink-400">Every clinic is already in a group.</p>
           <?php endif; ?>
         </div>
       </div>
@@ -95,8 +95,8 @@
   </div>
 
   <div class="card">
-    <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
-      <p class="text-xs font-semibold text-slate-600">Create a group</p>
+    <div class="section-head">
+      <p class="section-title">Create a group</p>
     </div>
     <form method="post" action="/admin/organisations" class="space-y-3 p-4">
       <?= csrf_field() ?>
@@ -109,7 +109,7 @@
         <label class="label" for="owner_email">Contact address</label>
         <input class="input" id="owner_email" name="owner_email" type="email" maxlength="190"
                placeholder="owner@group.lk">
-        <p class="mt-1 text-[10px] text-slate-400">Who the platform contacts about this group.</p>
+        <p class="mt-1 text-[10px] text-ink-400">Who the platform contacts about this group.</p>
       </div>
       <div>
         <label class="label" for="notes">Notes</label>
@@ -119,8 +119,8 @@
       <button class="btn-primary w-full">Create group</button>
     </form>
 
-    <div class="border-t border-slate-200 px-4 py-3">
-      <p class="text-[11px] leading-relaxed text-slate-500">
+    <div class="border-t border-hairline px-4 py-3">
+      <p class="text-[11px] leading-relaxed text-ink-500">
         A branch admin sees the roll-up of the whole group, but only the counts — never another
         branch's patients, queues or staff.
       </p>

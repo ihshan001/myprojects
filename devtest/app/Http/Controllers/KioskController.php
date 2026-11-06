@@ -47,7 +47,7 @@ final class KioskController
         $clinic = $this->clinicFor($key);
         if ($clinic === null) {
             http_response_code(404);
-            view('kiosk/invalid', ['title' => 'Kiosk not set up'], false);
+            view('kiosk/invalid', ['title' => 'Kiosk not set up'], false, false);
             return;
         }
 
@@ -61,7 +61,7 @@ final class KioskController
             'receiptSeconds' => self::RECEIPT_SECONDS,
             'error' => Session::takeFlash('kiosk_error'),
             'old' => Session::takeFlash('kiosk_old') ?? [],
-        ], false);
+        ], false, false);
     }
 
     /** `POST /kiosk/{key}` — issue one walk-in token. */
@@ -73,7 +73,7 @@ final class KioskController
         $clinic = $this->clinicFor($key);
         if ($clinic === null) {
             http_response_code(404);
-            view('kiosk/invalid', ['title' => 'Kiosk not set up'], false);
+            view('kiosk/invalid', ['title' => 'Kiosk not set up'], false, false);
             return;
         }
 

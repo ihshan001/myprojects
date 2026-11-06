@@ -25,7 +25,7 @@ $glance = [
     ['Open alerts', count($alerts ?? [])],
 ];
 ?>
-<div class="lg:board-panel">
+<div>
 
   <div class="card p-4 lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
     <div class="flex items-start justify-between gap-3">
@@ -49,7 +49,7 @@ $glance = [
 
   <div class="mt-3 flex gap-1.5 overflow-x-auto pb-1 sm:mt-6 sm:grid sm:grid-cols-3 sm:gap-4 sm:overflow-visible sm:pb-0 lg:grid-cols-5">
     <?php foreach ($stats as [$label, $value, $hint, $icon, $tone]): ?>
-      <div class="stat-tile w-[104px] shrink-0 sm:w-auto">
+      <div class="stat-tile w-[112px] shrink-0 sm:w-auto">
         <span class="stat-ico <?= e($tone) ?>"><svg class="h-5 w-5"><use href="#i-<?= e($icon) ?>"/></svg></span>
         <div class="min-w-0 flex-1">
           <p class="stat-label"><?= e($label) ?></p>
@@ -115,10 +115,10 @@ $glance = [
       </div>
     </section>
 
-    <div class="grid min-w-0 grid-cols-2 gap-3 lg:block lg:space-y-5">
+    <div class="grid min-w-0 grid-cols-1 gap-3 min-[380px]:grid-cols-2 lg:block lg:space-y-5">
 
       <?php if (!$healthOk || ($alerts ?? []) !== []): ?>
-        <section class="card col-span-2 border-amber-200 bg-amber-50/50 p-3 sm:p-4">
+        <section class="card border-amber-200 min-[380px]:col-span-2 bg-amber-50/50 p-3 sm:p-4">
           <h2 class="text-[12.5px] font-bold tracking-tight text-amber-900 sm:text-[15px]">Needs attention</h2>
           <ul class="mt-2 space-y-1.5">
             <?php foreach (($alerts ?? []) as $alert): ?>
@@ -143,7 +143,7 @@ $glance = [
             </div>
           <?php endforeach; ?>
         </div>
-        <a href="/admin/plans" class="mt-2 flex items-center justify-center gap-1.5 py-1 text-[12px] font-semibold text-ink-700 hover:text-brand-700">
+        <a href="/admin/plans" class="mt-1 flex min-h-[36px] items-center justify-center gap-1.5 py-1 text-[12px] font-semibold text-ink-700 hover:text-brand-700">
           <svg class="h-3.5 w-3.5"><use href="#i-external"/></svg>Plans &amp; billing
         </a>
       </section>
@@ -158,7 +158,7 @@ $glance = [
         </a>
       </section>
 
-      <section class="card col-span-2 p-3 sm:p-4">
+      <section class="card p-3 min-[380px]:col-span-2 sm:p-4">
         <h2 class="text-[12.5px] font-bold tracking-tight text-ink-900 sm:text-[15px]">System status</h2>
         <div class="mt-2 flex flex-wrap items-center gap-x-6 gap-y-1.5">
           <p class="flex items-center gap-2 text-[12px] font-semibold <?= $healthOk ? 'text-brand-700' : 'text-amber-700' ?>">

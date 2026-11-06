@@ -1,7 +1,7 @@
-<div class="flex flex-wrap items-start justify-between gap-3">
+<div class="page-head">
   <div>
-    <h1 class="text-2xl font-bold tracking-tight text-slate-900">Clinics</h1>
-    <p class="mt-1 text-sm text-slate-500">Suspend or re-plan a tenant without touching its data.</p>
+    <h1 class="page-title">Clinics</h1>
+    <p class="page-sub">Suspend or re-plan a tenant without touching its data.</p>
   </div>
   <a href="/admin" class="btn-ghost"><svg class="h-4 w-4"><use href="#i-arrow-left"/></svg>Overview</a>
 </div>
@@ -9,13 +9,13 @@
 <div class="mt-5 space-y-3">
   <?php foreach ($clinics as $c): ?>
     <div class="card card-pad">
-      <div class="flex flex-wrap items-start justify-between gap-4">
+      <div class="page-head">
         <div class="flex items-center gap-3">
           <span class="flex h-11 w-11 items-center justify-center rounded-xl text-xs font-bold text-white"
                 style="background: <?= e((string) $c['brand_color']) ?>"><?= e(App\Core\Str::initials((string) $c['name'])) ?></span>
           <div>
-            <p class="text-sm font-bold text-slate-900"><?= e($c['name']) ?></p>
-            <p class="text-[11px] text-slate-500">
+            <p class="text-sm font-bold text-ink-900"><?= e($c['name']) ?></p>
+            <p class="text-[11px] text-ink-500">
               <?= e((string) ($c['email'] ?? '')) ?>
               <?= !empty($c['phone']) ? ' · ' . e((string) $c['phone']) : '' ?>
               · <?= e((string) ($c['city'] ?? '')) ?>
@@ -63,13 +63,13 @@
         </div>
       </div>
 
-      <div class="mt-3 grid gap-2 border-t border-slate-100 pt-3 text-[11px] text-slate-500 sm:grid-cols-4">
-        <p>Trial ended: <b class="text-slate-700"><?= e((string) ($c['trial_ends_on'] ?? '—')) ?></b></p>
-        <p>Renews: <b class="text-slate-700"><?= e((string) ($c['renews_on'] ?? '—')) ?></b></p>
-        <p>Timezone: <b class="text-slate-700"><?= e((string) $c['timezone']) ?></b></p>
-        <p>Slug: <b class="font-mono text-slate-700"><?= e((string) $c['slug']) ?></b></p>
+      <div class="mt-3 grid gap-2 border-t border-slate-100 pt-3 text-[11px] text-ink-500 sm:grid-cols-4">
+        <p>Trial ended: <b class="text-ink-700"><?= e((string) ($c['trial_ends_on'] ?? '—')) ?></b></p>
+        <p>Renews: <b class="text-ink-700"><?= e((string) ($c['renews_on'] ?? '—')) ?></b></p>
+        <p>Timezone: <b class="text-ink-700"><?= e((string) $c['timezone']) ?></b></p>
+        <p>Slug: <b class="font-mono text-ink-700"><?= e((string) $c['slug']) ?></b></p>
         <p class="sm:col-span-2">Owner:
-          <b class="text-slate-700"><?= e((string) ($c['owner_email'] ?? '—')) ?></b>
+          <b class="text-ink-700"><?= e((string) ($c['owner_email'] ?? '—')) ?></b>
           <?php if (($c['owner_verified_at'] ?? null) !== null): ?>
             <span class="badge-emerald ml-1">verified</span>
           <?php elseif (!empty($c['owner_email'])): ?>

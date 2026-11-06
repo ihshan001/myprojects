@@ -19,7 +19,7 @@ $json = htmlspecialchars(json_encode([
      data-entry-row data-entry='<?= $json ?>'>
   <div class="w-7 text-center sm:w-10">
     <?php if ($status === 'waiting'): ?>
-      <span class="text-xs font-bold text-slate-400 tabular"><?= (int) $position ?></span>
+      <span class="text-xs font-bold text-ink-400 tabular"><?= (int) $position ?></span>
     <?php else: ?>
       <span class="text-xs text-slate-300">—</span>
     <?php endif; ?>
@@ -33,21 +33,21 @@ $json = htmlspecialchars(json_encode([
       <?php endif; ?>
       <?php $b = ['status' => $status]; include QP_ROOT . '/resources/views/components/badge.php'; ?>
       <?php if (!empty($entry['queue_name'])): ?>
-        <span class="text-xs text-slate-400">· <?= e($entry['queue_name']) ?></span>
+        <span class="text-xs text-ink-400">· <?= e($entry['queue_name']) ?></span>
       <?php endif; ?>
     </div>
-    <p class="mt-1 truncate text-sm font-medium text-slate-800">
+    <p class="mt-1 truncate text-sm font-medium text-ink-900">
       <?= e($entry['full_name']) ?>
-      <span class="ml-1 text-xs font-normal text-slate-400"><?= e($entry['patient_code'] ?? '') ?></span>
+      <span class="ml-1 text-xs font-normal text-ink-400"><?= e($entry['patient_code'] ?? '') ?></span>
     </p>
-    <p class="text-[11px] text-slate-500 tabular">
+    <p class="text-[11px] text-ink-500 tabular">
       joined <?= e(fmt_time($entry['joined_at'], 'g:i A')) ?>
       <?php if ((int) $entry['call_count'] > 1): ?> · called <?= (int) $entry['call_count'] ?>×<?php endif; ?>
       <?php if ($status === 'in_consultation' && !empty($entry['started_at'])): ?>
         · in room <?= e((string) minutes_between($entry['started_at'])) ?> min
       <?php endif; ?>
       <?php if ($status === 'on_hold'): ?>
-        · <span class="font-semibold text-slate-600"><?= e((string) ($entry['hold_reason'] ?? 'Stepped away')) ?></span>
+        · <span class="font-semibold text-ink-700"><?= e((string) ($entry['hold_reason'] ?? 'Stepped away')) ?></span>
         <?php if (!empty($entry['hold_since'])): ?>since <?= e(fmt_time($entry['hold_since'], 'g:i A')) ?><?php endif; ?>
       <?php endif; ?>
     </p>

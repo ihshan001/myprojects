@@ -1,7 +1,7 @@
-<div class="flex flex-wrap items-start justify-between gap-3">
+<div class="page-head">
   <div>
-    <h1 class="text-2xl font-bold tracking-tight text-slate-900">Incidents</h1>
-    <p class="mt-1 max-w-2xl text-sm text-slate-500">
+    <h1 class="page-title">Incidents</h1>
+    <p class="mt-1 max-w-2xl text-sm text-ink-500">
       What broke, when somebody took it, what was done and why. The timeline is
       append-only — a correction is a new entry that says it corrects one, so a
       post-mortem cannot quietly rewrite itself.
@@ -19,29 +19,29 @@
   </div>
 <?php endif; ?>
 
-<div class="mt-5 grid gap-4 sm:grid-cols-4">
+<div class="mt-3 grid grid-cols-2 gap-2 sm:mt-6 sm:gap-4 sm:grid-cols-4">
   <div class="card p-4">
-    <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Last 90 days</p>
-    <p class="mt-1 text-2xl font-bold tabular-nums text-slate-900"><?= (int) $stats['total'] ?></p>
-    <p class="text-[11px] text-slate-500"><?= (int) $stats['open'] ?> still open</p>
+    <p class="stat-label">Last 90 days</p>
+    <p class="stat-value mt-1"><?= (int) $stats['total'] ?></p>
+    <p class="text-[11px] text-ink-500"><?= (int) $stats['open'] ?> still open</p>
   </div>
   <div class="card p-4">
-    <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Avg. to acknowledge</p>
-    <p class="mt-1 text-2xl font-bold tabular-nums text-slate-900">
-      <?= $stats['avg_ack'] === null ? '—' : (int) $stats['avg_ack'] ?><span class="text-sm font-normal text-slate-400"><?= $stats['avg_ack'] === null ? '' : ' min' ?></span>
+    <p class="stat-label">Avg. to acknowledge</p>
+    <p class="stat-value mt-1">
+      <?= $stats['avg_ack'] === null ? '—' : (int) $stats['avg_ack'] ?><span class="text-sm font-normal text-ink-400"><?= $stats['avg_ack'] === null ? '' : ' min' ?></span>
     </p>
-    <p class="text-[11px] text-slate-500"><?= $stats['avg_ack'] === null ? 'nothing acknowledged yet' : 'from detection' ?></p>
+    <p class="text-[11px] text-ink-500"><?= $stats['avg_ack'] === null ? 'nothing acknowledged yet' : 'from detection' ?></p>
   </div>
   <div class="card p-4">
-    <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Avg. to resolve</p>
-    <p class="mt-1 text-2xl font-bold tabular-nums text-slate-900">
-      <?= $stats['avg_resolve'] === null ? '—' : (int) $stats['avg_resolve'] ?><span class="text-sm font-normal text-slate-400"><?= $stats['avg_resolve'] === null ? '' : ' min' ?></span>
+    <p class="stat-label">Avg. to resolve</p>
+    <p class="stat-value mt-1">
+      <?= $stats['avg_resolve'] === null ? '—' : (int) $stats['avg_resolve'] ?><span class="text-sm font-normal text-ink-400"><?= $stats['avg_resolve'] === null ? '' : ' min' ?></span>
     </p>
-    <p class="text-[11px] text-slate-500"><?= $stats['avg_resolve'] === null ? 'nothing resolved yet' : 'computed from timestamps' ?></p>
+    <p class="text-[11px] text-ink-500"><?= $stats['avg_resolve'] === null ? 'nothing resolved yet' : 'computed from timestamps' ?></p>
   </div>
   <div class="card p-4">
-    <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">By severity</p>
-    <p class="mt-1 text-xs leading-relaxed text-slate-700">
+    <p class="stat-label">By severity</p>
+    <p class="mt-1 text-xs leading-relaxed text-ink-700">
       <?= (int) $stats['by_severity']['critical'] ?> critical ·
       <?= (int) $stats['by_severity']['major'] ?> major ·
       <?= (int) $stats['by_severity']['minor'] ?> minor
@@ -49,14 +49,14 @@
   </div>
 </div>
 
-<div class="mt-5 grid gap-5 lg:grid-cols-[1.15fr_.85fr]">
+<div class="mt-3 grid gap-3 sm:mt-6 sm:gap-5 lg:grid-cols-[1.15fr_.85fr]">
   <div class="card">
-    <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
-      <p class="text-xs font-semibold text-slate-600">Open incidents first, then the newest</p>
+    <div class="section-head">
+      <p class="section-title">Open incidents first, then the newest</p>
     </div>
 
     <?php if ($incidents === []): ?>
-      <p class="px-4 py-6 text-sm text-slate-500">
+      <p class="px-4 py-6 text-sm text-ink-500">
         No incidents recorded. That is either a good month or an unwritten one —
         the point of this page is that the second possibility is visible.
       </p>
@@ -67,7 +67,7 @@
             $sevTone = match ($incident['severity']) {
                 'critical' => 'bg-red-100 text-red-800',
                 'major'    => 'bg-amber-100 text-amber-900',
-                default    => 'bg-slate-100 text-slate-600',
+                default    => 'bg-slate-100 text-ink-700',
             };
             $stTone = match ($incident['status']) {
                 'open'      => 'bg-red-50 text-red-700',
@@ -76,17 +76,17 @@
             };
           ?>
           <a class="flex flex-wrap items-start gap-3 px-4 py-3 hover:bg-slate-50" href="/incidents/<?= (int) $incident['id'] ?>">
-            <span class="mt-0.5 font-mono text-[11px] text-slate-400"><?= e($incident['reference']) ?></span>
+            <span class="mt-0.5 font-mono text-[11px] text-ink-400"><?= e($incident['reference']) ?></span>
             <div class="min-w-0 flex-1">
               <div class="flex flex-wrap items-center gap-2">
-                <span class="font-medium text-slate-900"><?= e($incident['title']) ?></span>
+                <span class="font-medium text-ink-900"><?= e($incident['title']) ?></span>
                 <span class="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase <?= $sevTone ?>"><?= e($incident['severity']) ?></span>
                 <span class="rounded-full px-2 py-0.5 text-[10px] font-semibold <?= $stTone ?>"><?= e($incident['status']) ?></span>
                 <?php if ($incident['clinic_id'] === null): ?>
                   <span class="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">platform-wide</span>
                 <?php endif; ?>
               </div>
-              <p class="mt-1 text-[11px] text-slate-500">
+              <p class="mt-1 text-[11px] text-ink-500">
                 Detected <?= e(fmt_time($incident['detected_at'], 'j M, g:i A')) ?>
                 <?php if (!empty($incident['created_by_name'])): ?> · opened by <?= e($incident['created_by_name']) ?><?php endif; ?>
                 · <?= (int) $incident['entry_count'] ?> timeline <?= (int) $incident['entry_count'] === 1 ? 'entry' : 'entries' ?>
@@ -100,8 +100,8 @@
 
   <div class="space-y-5">
     <div class="card">
-      <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
-        <p class="text-xs font-semibold text-slate-600">Record an incident</p>
+      <div class="section-head">
+        <p class="section-title">Record an incident</p>
       </div>
       <form method="post" action="/incidents" class="space-y-3 p-4">
         <?= csrf_field() ?>
@@ -110,7 +110,7 @@
           <input class="input" id="title" name="title" required maxlength="140"
                  value="<?= e($old['title'] ?? '') ?>"
                  placeholder="Display boards stopped updating">
-          <p class="mt-1 text-[11px] text-slate-500">Write it for somebody woken at 03:00.</p>
+          <p class="mt-1 text-[11px] text-ink-500">Write it for somebody woken at 03:00.</p>
         </div>
         <div class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
           <div>
@@ -149,8 +149,8 @@
       </form>
     </div>
 
-    <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-relaxed text-slate-600">
-      <p class="font-semibold text-slate-700">How this is meant to be used</p>
+    <div class="rounded-lg border border-hairline bg-slate-50 px-4 py-3 text-xs leading-relaxed text-ink-700">
+      <p class="font-semibold text-ink-700">How this is meant to be used</p>
       <ul class="mt-1 list-disc space-y-1 pl-5">
         <li>Open it while it is happening, not afterwards. A reconstruction is not a record.</li>
         <li>Time to acknowledge starts at <span class="font-medium">detected</span>, not at "when we got round to it".</li>

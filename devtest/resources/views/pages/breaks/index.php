@@ -1,38 +1,38 @@
-<div class="flex flex-wrap items-start justify-between gap-3">
+<div class="page-head">
   <div>
-    <h1 class="text-2xl font-bold tracking-tight text-slate-900">Breaks</h1>
-    <p class="mt-1 text-sm text-slate-500">
+    <h1 class="page-title">Breaks</h1>
+    <p class="page-sub">
       A pause keeps every waiting patient and their estimate grows by its length — which is
       why it needs a reason and a category.
     </p>
   </div>
 </div>
 
-<div class="mt-4 grid gap-3 sm:grid-cols-3">
+<div class="mt-3 grid grid-cols-2 gap-2 sm:mt-4 sm:gap-3 sm:grid-cols-3">
   <div class="card card-pad">
-    <p class="text-2xl font-bold tabular-nums text-slate-800"><?= (int) $week['total_minutes'] ?></p>
-    <p class="text-[11px] font-medium uppercase tracking-wide text-slate-500">Minutes paused, last 7 days</p>
+    <p class="stat-value"><?= (int) $week['total_minutes'] ?></p>
+    <p class="stat-label mt-1">Minutes paused, last 7 days</p>
   </div>
   <div class="card card-pad">
-    <p class="text-2xl font-bold tabular-nums text-slate-800"><?= count($week['rows']) ?></p>
-    <p class="text-[11px] font-medium uppercase tracking-wide text-slate-500">Break types used</p>
+    <p class="stat-value"><?= count($week['rows']) ?></p>
+    <p class="stat-label mt-1">Break types used</p>
   </div>
   <div class="card card-pad">
     <p class="text-2xl font-bold tabular-nums <?= count(array_filter($openQueues, fn ($q) => $q['break_started_at'] !== null)) > 0 ? 'text-amber-600' : 'text-emerald-600' ?>">
       <?= count(array_filter($openQueues, fn ($q) => $q['break_started_at'] !== null)) ?>
     </p>
-    <p class="text-[11px] font-medium uppercase tracking-wide text-slate-500">Queues paused right now</p>
+    <p class="stat-label mt-1">Queues paused right now</p>
   </div>
 </div>
 
-<div class="mt-5 grid gap-5 lg:grid-cols-[1.3fr_.9fr]">
+<div class="mt-3 grid gap-3 sm:mt-6 sm:gap-5 lg:grid-cols-[1.3fr_.9fr]">
   <div class="space-y-5">
     <div class="card overflow-hidden">
-      <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
-        <p class="text-xs font-semibold text-slate-600">Today's queues</p>
+      <div class="section-head">
+        <p class="section-title">Today's queues</p>
       </div>
       <?php if ($openQueues === []): ?>
-        <p class="p-4 text-xs text-slate-500">No queues are open today.</p>
+        <p class="p-4 text-xs text-ink-500">No queues are open today.</p>
       <?php else: ?>
         <ul class="divide-y divide-slate-100">
           <?php foreach ($openQueues as $q): ?>
@@ -43,8 +43,8 @@
                 <input type="hidden" name="queue_id" value="<?= (int) $q['id'] ?>">
 
                 <div class="min-w-0 flex-1">
-                  <p class="truncate text-sm font-semibold text-slate-900"><?= e($q['name']) ?></p>
-                  <p class="mt-0.5 text-[11px] text-slate-500">
+                  <p class="truncate text-sm font-semibold text-ink-900"><?= e($q['name']) ?></p>
+                  <p class="mt-0.5 text-[11px] text-ink-500">
                     <?php if ($onBreak): ?>
                       <span class="font-medium text-amber-700">On break since <?= e(substr((string) $q['break_started_at'], 11, 5)) ?></span>
                       · <?= e($kinds[$q['break_kind'] ?? 'unspecified'] ?? 'Unspecified') ?>
@@ -57,7 +57,7 @@
                 <?php if (!$onBreak): ?>
                   <div class="w-40">
                     <label class="label !mb-0.5 text-[10px]" for="kind-<?= (int) $q['id'] ?>">Type</label>
-                    <select class="select !py-1.5 text-xs" id="kind-<?= (int) $q['id'] ?>" name="kind">
+                    <select class="select !py-2 text-xs" id="kind-<?= (int) $q['id'] ?>" name="kind">
                       <?php foreach ($kinds as $value => $label): ?>
                         <option value="<?= e($value) ?>" <?= $value === 'lunch' ? 'selected' : '' ?>><?= e($label) ?></option>
                       <?php endforeach; ?>
@@ -80,8 +80,8 @@
     </div>
 
     <div class="card overflow-hidden">
-      <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
-        <p class="text-xs font-semibold text-slate-600">Today</p>
+      <div class="section-head">
+        <p class="section-title">Today</p>
       </div>
       <?php if ($today === []): ?>
         <?php $title = 'No breaks today'; $message = 'A break appears here once one starts. Its length is measured by the clock, not typed in afterwards.'; $icon = 'clock'; ?>
@@ -93,9 +93,9 @@
             <tbody>
               <?php foreach ($today as $b): ?>
                 <tr>
-                  <td class="whitespace-nowrap text-xs text-slate-600"><?= e(substr((string) $b['started_at'], 11, 5)) ?></td>
-                  <td class="text-xs text-slate-700"><?= e($b['queue_name']) ?></td>
-                  <td class="text-xs text-slate-600"><?= e($kinds[$b['kind']] ?? $b['kind']) ?></td>
+                  <td class="whitespace-nowrap text-xs text-ink-700"><?= e(substr((string) $b['started_at'], 11, 5)) ?></td>
+                  <td class="text-xs text-ink-700"><?= e($b['queue_name']) ?></td>
+                  <td class="text-xs text-ink-700"><?= e($kinds[$b['kind']] ?? $b['kind']) ?></td>
                   <td class="whitespace-nowrap text-xs">
                     <?php if ($b['ended_at'] === null): ?>
                       <span class="badge-amber">ongoing</span>
@@ -103,7 +103,7 @@
                       <?= (int) $b['minutes'] ?> min
                     <?php endif; ?>
                   </td>
-                  <td class="hidden sm:table-cell max-w-xs truncate text-[11px] text-slate-500"><?= e((string) ($b['reason'] ?? '—')) ?></td>
+                  <td class="hidden sm:table-cell max-w-xs truncate text-[11px] text-ink-500"><?= e((string) ($b['reason'] ?? '—')) ?></td>
                 </tr>
               <?php endforeach; ?>
             </tbody>
@@ -116,8 +116,8 @@
   <div class="space-y-5">
     <?php if ($canManage): ?>
       <div class="card">
-        <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
-          <p class="text-xs font-semibold text-slate-600">Plan a weekly break</p>
+        <div class="section-head">
+          <p class="section-title">Plan a weekly break</p>
         </div>
         <form method="post" action="/breaks/schedule" class="space-y-2.5 p-4">
           <?= csrf_field() ?>
@@ -161,28 +161,28 @@
       </div>
 
       <div class="card overflow-hidden">
-        <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
-          <p class="text-xs font-semibold text-slate-600">Weekly plan</p>
+        <div class="section-head">
+          <p class="section-title">Weekly plan</p>
         </div>
         <?php if ($scheduled === []): ?>
-          <p class="p-4 text-xs text-slate-500">No planned breaks. An unplanned pause still works — it just is not planned.</p>
+          <p class="p-4 text-xs text-ink-500">No planned breaks. An unplanned pause still works — it just is not planned.</p>
         <?php else: ?>
           <ul class="divide-y divide-slate-100">
             <?php foreach ($scheduled as $s): ?>
               <li class="flex items-center justify-between gap-2 px-4 py-2.5">
                 <div class="min-w-0">
-                  <p class="text-xs font-semibold text-slate-800">
+                  <p class="text-xs font-semibold text-ink-900">
                     <?= e(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][(int) $s['weekday']]) ?>
                     <?= e(substr((string) $s['starts_at'], 0, 5)) ?>–<?= e(substr((string) $s['ends_at'], 0, 5)) ?>
                   </p>
-                  <p class="text-[10px] text-slate-500">
+                  <p class="text-[10px] text-ink-500">
                     <?= e($kinds[$s['kind']] ?? $s['kind']) ?> ·
                     <?= e($s['doctor_name'] ?? 'everyone') ?>
                   </p>
                 </div>
                 <form method="post" action="/breaks/schedule/<?= (int) $s['id'] ?>/remove">
                   <?= csrf_field() ?>
-                  <button class="text-[10px] text-slate-400 underline hover:text-rose-700">remove</button>
+                  <button class="text-[10px] text-ink-400 underline hover:text-rose-700">remove</button>
                 </form>
               </li>
             <?php endforeach; ?>
@@ -192,15 +192,15 @@
     <?php endif; ?>
 
     <div class="card card-pad">
-      <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Last 7 days by type</p>
+      <p class="stat-label">Last 7 days by type</p>
       <?php if ($week['rows'] === []): ?>
-        <p class="mt-2 text-xs text-slate-500">No completed breaks.</p>
+        <p class="mt-2 text-xs text-ink-500">No completed breaks.</p>
       <?php else: ?>
         <ul class="mt-2 space-y-1.5">
           <?php foreach ($week['rows'] as $r): ?>
             <li class="flex items-center justify-between text-xs">
-              <span class="text-slate-600"><?= e($kinds[$r['kind']] ?? $r['kind']) ?></span>
-              <span class="tabular-nums text-slate-800"><?= (int) $r['minutes'] ?> min <span class="text-slate-400">/ <?= (int) $r['breaks'] ?>×</span></span>
+              <span class="text-ink-700"><?= e($kinds[$r['kind']] ?? $r['kind']) ?></span>
+              <span class="tabular-nums text-ink-900"><?= (int) $r['minutes'] ?> min <span class="text-ink-400">/ <?= (int) $r['breaks'] ?>×</span></span>
             </li>
           <?php endforeach; ?>
         </ul>

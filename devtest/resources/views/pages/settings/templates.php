@@ -13,10 +13,10 @@
  */
 $errorTemplate = (string) ($old['template'] ?? '');
 ?>
-<div class="flex flex-wrap items-start justify-between gap-3">
+<div class="page-head">
   <div>
-    <h1 class="text-2xl font-bold tracking-tight text-slate-900">Message wording</h1>
-    <p class="mt-1 text-sm text-slate-500">
+    <h1 class="page-title">Message wording</h1>
+    <p class="page-sub">
       The texts your patients receive. Change any of them — no deploy, no support ticket.
     </p>
   </div>
@@ -29,8 +29,8 @@ $errorTemplate = (string) ($old['template'] ?? '');
   </div>
 <?php endif; ?>
 
-<div class="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3">
-  <p class="text-xs leading-relaxed text-slate-600">
+<div class="mt-4 rounded-xl border border-hairline bg-white px-4 py-3">
+  <p class="text-xs leading-relaxed text-ink-700">
     <b>Any message you have not edited keeps the default wording</b>, including improvements we ship
     later. You are overriding one message at a time, not copying the whole set. Placeholders are
     filled in when the message is sent; anything not listed on a card is refused on save, because a
@@ -42,9 +42,9 @@ $errorTemplate = (string) ($old['template'] ?? '');
   <?php foreach ($templates as $t): ?>
     <?php $isErrored = $errorTemplate === (string) $t['key']; ?>
     <div class="card overflow-hidden <?= $isErrored ? 'ring-2 ring-rose-200' : '' ?>" id="<?= e((string) $t['key']) ?>">
-      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+      <div class="section-head">
         <div class="flex items-center gap-2">
-          <p class="text-sm font-semibold text-slate-800"><?= e((string) $t['label']) ?></p>
+          <p class="text-sm font-semibold text-ink-900"><?= e((string) $t['label']) ?></p>
           <?php if ($t['customised']): ?>
             <span class="badge-teal">your wording</span>
           <?php else: ?>
@@ -62,12 +62,12 @@ $errorTemplate = (string) ($old['template'] ?? '');
       </div>
 
       <div class="p-4">
-        <p class="rounded-lg bg-slate-50 px-3 py-2 font-mono text-[11px] leading-relaxed text-slate-700">
+        <p class="rounded-lg bg-slate-50 px-3 py-2 font-mono text-[11px] leading-relaxed text-ink-700">
           <?= e((string) $t['body']) ?>
         </p>
 
         <details class="mt-3" <?= $isErrored ? 'open' : '' ?>>
-          <summary class="cursor-pointer text-xs font-semibold text-teal-700">Edit this message</summary>
+          <summary class="cursor-pointer text-xs font-semibold text-brand-700">Edit this message</summary>
 
           <form method="post" action="/settings/templates" class="mt-3 space-y-3">
             <?= csrf_field() ?>
@@ -79,10 +79,10 @@ $errorTemplate = (string) ($old['template'] ?? '');
             </div>
 
             <div class="flex flex-wrap items-center gap-1.5">
-              <span class="text-[11px] text-slate-500">Insert:</span>
+              <span class="text-[11px] text-ink-500">Insert:</span>
               <?php foreach ($t['allowed'] as $ph): ?>
-                <button type="button" class="rounded border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[10px]
-                                               text-slate-600 hover:border-teal-400 hover:text-teal-700"
+                <button type="button" class="rounded border border-hairline bg-white px-1.5 py-0.5 font-mono text-[10px]
+                                               text-ink-700 hover:border-teal-400 hover:text-brand-700"
                         onclick="(function(b){var f=b.closest('form'),t=f.querySelector('textarea');
                                  t.value += '{<?= e($ph) ?>}'; t.focus();})(this)">
                   {<?= e($ph) ?>}
@@ -97,7 +97,7 @@ $errorTemplate = (string) ($old['template'] ?? '');
               </p>
             <?php endif; ?>
 
-            <p class="text-[11px] leading-relaxed text-slate-400">
+            <p class="text-[11px] leading-relaxed text-ink-400">
               Under 160 characters is one text. Longer messages are split and the clinic pays per part.
             </p>
 
@@ -108,7 +108,7 @@ $errorTemplate = (string) ($old['template'] ?? '');
         </details>
 
         <?php if (!$t['customised']): ?>
-          <p class="mt-3 text-[10px] leading-relaxed text-slate-400">
+          <p class="mt-3 text-[10px] leading-relaxed text-ink-400">
             Default: <span class="font-mono"><?= e((string) $t['default']) ?></span>
           </p>
         <?php endif; ?>

@@ -28,7 +28,7 @@ final class PublicController
     {
         if (!preg_match('/^[A-Za-z0-9_-]{16,64}$/', $token)) {
             http_response_code(404);
-            view('track/invalid', ['title' => 'Link not valid'], false);
+            view('track/invalid', ['title' => 'Link not valid'], false, false);
             return;
         }
 
@@ -42,7 +42,7 @@ final class PublicController
                 'title' => $entry ? 'Link expired' : 'Link not valid',
                 'expired' => (bool) $entry,
                 'clinicPhone' => $entry['clinic_phone'] ?? null,
-            ], false);
+            ], false, false);
             return;
         }
 
@@ -102,7 +102,7 @@ final class PublicController
                 'phone' => $entry['clinic_phone'],
                 'brand_color' => $entry['brand_color'],
             ],
-        ], false);
+        ], false, false);
     }
 
     /**
@@ -126,7 +126,7 @@ final class PublicController
     {
         if (!preg_match('/^[A-Za-z0-9_-]{16,64}$/', $token)) {
             http_response_code(404);
-            view('track/invalid', ['title' => 'Link not valid'], false);
+            view('track/invalid', ['title' => 'Link not valid'], false, false);
             return;
         }
 
@@ -142,7 +142,7 @@ final class PublicController
                 'title' => $entry ? 'Link expired' : 'Link not valid',
                 'expired' => (bool) $entry,
                 'clinicPhone' => $entry['clinic_phone'] ?? null,
-            ], false);
+            ], false, false);
             return;
         }
 
@@ -199,7 +199,7 @@ final class PublicController
     {
         if (!preg_match('/^[A-Za-z0-9_-]{16,64}$/', $token)) {
             http_response_code(404);
-            view('track/invalid', ['title' => 'Link not valid'], false);
+            view('track/invalid', ['title' => 'Link not valid'], false, false);
             return;
         }
 
@@ -212,7 +212,7 @@ final class PublicController
                 'title' => $entry ? 'Link expired' : 'Link not valid',
                 'expired' => (bool) $entry,
                 'clinicPhone' => $entry['clinic_phone'] ?? null,
-            ], false);
+            ], false, false);
             return;
         }
 
@@ -296,7 +296,7 @@ final class PublicController
     {
         if (!preg_match('/^[A-Za-z0-9_-]{16,64}$/', $token)) {
             http_response_code(404);
-            view('track/invalid', ['title' => 'Link not valid'], false);
+            view('track/invalid', ['title' => 'Link not valid'], false, false);
             return;
         }
 
@@ -309,7 +309,7 @@ final class PublicController
                 'title' => $entry ? 'Link expired' : 'Link not valid',
                 'expired' => (bool) $entry,
                 'clinicPhone' => $entry['clinic_phone'] ?? null,
-            ], false);
+            ], false, false);
             return;
         }
 
@@ -390,7 +390,7 @@ final class PublicController
             'moved' => Session::takeFlash('manage_moved'),
             'cancelled' => Session::takeFlash('manage_cancelled'),
             'error' => Session::takeFlash('manage_error'),
-        ], false);
+        ], false, false);
     }
 
     /** `POST /a/{id}.{signature}/reschedule` */
@@ -493,7 +493,7 @@ final class PublicController
     {
         if (preg_match('/^(\d{1,12})\.([a-f0-9]{32})$/', $token, $m) !== 1) {
             http_response_code(404);
-            view('track/invalid', ['title' => 'Link not valid'], false);
+            view('track/invalid', ['title' => 'Link not valid'], false, false);
             return null;
         }
 
@@ -514,7 +514,7 @@ final class PublicController
 
         if (!$valid) {
             http_response_code(404);
-            view('track/invalid', ['title' => 'Link not valid'], false);
+            view('track/invalid', ['title' => 'Link not valid'], false, false);
             return null;
         }
 
@@ -526,7 +526,7 @@ final class PublicController
                 'title' => 'This booking has changed',
                 'clinicRecord' => $clinic,
                 'appointment' => $appointment,
-            ], false);
+            ], false, false);
             return null;
         }
 
@@ -579,7 +579,7 @@ final class PublicController
             'chosenDoctorId' => $chosen !== null ? (int) $chosen['id'] : null,
             'horizon' => $slotService->horizonDays((int) $clinic['id']),
             'error' => null,
-        ], false);
+        ], false, false);
     }
 
     public function book(string $slug): void
@@ -636,7 +636,7 @@ final class PublicController
                 'chosenDoctorId' => $chosen !== null ? (int) $chosen['id'] : null,
                 'horizon' => $slotService->horizonDays((int) $clinic['id']),
                 'error' => $message,
-            ], false);
+            ], false, false);
         };
 
         if ($doctorId <= 0 || Db::scalar('SELECT id FROM doctors WHERE id = ? AND clinic_id = ? AND is_active = 1', [$doctorId, $clinicId]) === null) {

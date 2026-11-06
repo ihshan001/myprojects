@@ -12,18 +12,18 @@
  * @var array{blocks: list<array<string,mixed>>, unused: int, expired: int} $report
  */
 ?>
-<div class="flex flex-wrap items-start justify-between gap-3">
+<div class="page-head">
   <div>
-    <h1 class="text-2xl font-bold tracking-tight text-slate-900">Offline desks</h1>
-    <p class="mt-1 text-sm text-slate-500">
+    <h1 class="page-title">Offline desks</h1>
+    <p class="page-sub">
       Keep issuing tokens when the internet goes down — without ever handing two patients the same number.
     </p>
   </div>
   <a href="/settings" class="btn-secondary text-xs">Back to settings</a>
 </div>
 
-<div class="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3">
-  <p class="text-xs leading-relaxed text-slate-600">
+<div class="mt-4 rounded-xl border border-hairline bg-white px-4 py-3">
+  <p class="text-xs leading-relaxed text-ink-700">
     <b>How this works, in one paragraph.</b> While the connection is up, set aside a block of numbers for
     a queue. Those numbers are drawn from the same counter your desk uses, so nothing online can be given
     them — they are already yours. If the line drops, issue from the block; the patient gets a real number
@@ -42,12 +42,12 @@
   </p>
 </div>
 
-<section data-offline-desk class="mt-5 rounded-xl border border-slate-300 bg-white">
-  <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50/70 px-4 py-2.5">
-    <p class="text-xs font-semibold text-slate-700">This desk</p>
+<section data-offline-desk class="mt-5 rounded-xl border border-hairline bg-white">
+  <div class="flex flex-wrap items-center justify-between gap-2 border-b border-hairline bg-slate-50/70 px-4 py-2.5">
+    <p class="text-xs font-semibold text-ink-700">This desk</p>
     <div class="flex items-center gap-2">
       <span data-offline-net class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Online</span>
-      <span data-offline-pending class="text-[11px] text-slate-500">Nothing waiting to sync</span>
+      <span data-offline-pending class="text-[11px] text-ink-500">Nothing waiting to sync</span>
       <button type="button" data-offline-sync class="btn-secondary text-[11px]">Sync now</button>
     </div>
   </div>
@@ -55,11 +55,11 @@
   <?php if ($queues !== []): ?>
     <div class="grid gap-4 px-4 py-4 lg:grid-cols-2">
       <?php foreach ($queues as $q): ?>
-        <div class="rounded-xl border border-slate-200 p-3">
+        <div class="rounded-xl border border-hairline p-3">
           <div class="flex items-center justify-between gap-2">
-            <p class="text-sm font-semibold text-slate-800"><?= e($q['name']) ?></p>
-            <p class="text-[11px] text-slate-500">
-              <b data-offline-available="<?= (int) $q['id'] ?>" class="tabular-nums text-slate-800">0</b> set aside
+            <p class="text-sm font-semibold text-ink-900"><?= e($q['name']) ?></p>
+            <p class="text-[11px] text-ink-500">
+              <b data-offline-available="<?= (int) $q['id'] ?>" class="tabular-nums text-ink-900">0</b> set aside
             </p>
           </div>
           <form method="post" action="/api/queue/offline/block" data-offline-take class="mt-2 flex items-center gap-2">
@@ -73,7 +73,7 @@
             <input class="input py-1 text-xs" name="patient_name" placeholder="Patient name" autocomplete="off">
             <input class="input py-1 text-xs" name="patient_phone" placeholder="Phone (optional)" autocomplete="off">
             <button type="submit" class="btn-primary w-full text-[11px]">Issue from the block</button>
-            <p class="text-[10px] leading-relaxed text-slate-500">
+            <p class="text-[10px] leading-relaxed text-ink-500">
               Works with no connection. The patient gets a real number; the SMS link appears once it syncs.
             </p>
           </form>
@@ -85,15 +85,15 @@
 </section>
 
 <?php if ($queues === []): ?>
-  <div class="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-6 text-center">
-    <p class="text-sm font-semibold text-slate-700">No open queues</p>
-    <p class="mt-1 text-xs text-slate-500">A block can only be taken for a queue that is open for the day.</p>
+  <div class="mt-4 rounded-xl border border-hairline bg-white px-4 py-6 text-center">
+    <p class="text-sm font-semibold text-ink-700">No open queues</p>
+    <p class="mt-1 text-xs text-ink-500">A block can only be taken for a queue that is open for the day.</p>
   </div>
 <?php else: ?>
-  <div class="mt-4 overflow-hidden rounded-xl border border-slate-200">
+  <div class="mt-4 overflow-hidden rounded-xl border border-hairline">
     <div class="table-scroll">
       <table class="w-full text-left text-xs">
-      <thead class="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+      <thead class="bg-slate-50 text-[11px] uppercase tracking-wide text-ink-500">
       <tr>
       <th class="px-4 py-2 font-semibold">Queue</th>
       <th class="px-4 py-2 font-semibold">Next number</th>
@@ -103,8 +103,8 @@
       <tbody class="divide-y divide-slate-100 bg-white">
       <?php foreach ($queues as $q): ?>
       <tr>
-      <td class="px-4 py-2 font-medium text-slate-800"><?= e($q['name']) ?></td>
-      <td class="px-4 py-2 font-mono text-[11px] text-slate-600">
+      <td class="px-4 py-2 font-medium text-ink-900"><?= e($q['name']) ?></td>
+      <td class="px-4 py-2 font-mono text-[11px] text-ink-700">
       <?php $last = (int) \App\Core\Db::scalar('SELECT last_token_no FROM queues WHERE id = ?', [(int) $q['id']]); ?>
       <?= e((string) $q['token_prefix'] . str_pad((string) ($last + 1), (int) $q['token_padding'], '0', STR_PAD_LEFT)) ?>
       </td>
@@ -126,32 +126,32 @@
 <?php endif; ?>
 
 <div class="mt-5 grid gap-3 sm:grid-cols-3">
-  <div class="rounded-xl border border-slate-200 bg-white p-4">
-    <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Blocks taken</p>
-    <p class="mt-1 text-2xl font-bold tabular-nums text-slate-900"><?= number_format(count($report['blocks'])) ?></p>
+  <div class="rounded-xl border border-hairline bg-white p-4">
+    <p class="text-[11px] font-semibold uppercase tracking-wide text-ink-500">Blocks taken</p>
+    <p class="stat-value mt-1"><?= number_format(count($report['blocks'])) ?></p>
   </div>
-  <div class="rounded-xl border border-slate-200 bg-white p-4">
-    <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Numbers still usable</p>
-    <p class="mt-1 text-2xl font-bold tabular-nums text-slate-900"><?= number_format($report['unused']) ?></p>
-    <p class="text-xs text-slate-500">in blocks that have not expired</p>
+  <div class="rounded-xl border border-hairline bg-white p-4">
+    <p class="text-[11px] font-semibold uppercase tracking-wide text-ink-500">Numbers still usable</p>
+    <p class="stat-value mt-1"><?= number_format($report['unused']) ?></p>
+    <p class="text-xs text-ink-500">in blocks that have not expired</p>
   </div>
-  <div class="rounded-xl border border-slate-200 bg-white p-4">
-    <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Expired, never used</p>
-    <p class="mt-1 text-2xl font-bold tabular-nums <?= $report['expired'] > 0 ? 'text-amber-600' : 'text-slate-900' ?>"><?= number_format($report['expired']) ?></p>
-    <p class="text-xs text-slate-500">skipped numbers, no patient affected</p>
+  <div class="rounded-xl border border-hairline bg-white p-4">
+    <p class="text-[11px] font-semibold uppercase tracking-wide text-ink-500">Expired, never used</p>
+    <p class="mt-1 text-2xl font-bold tabular-nums <?= $report['expired'] > 0 ? 'text-amber-600' : 'text-ink-900' ?>"><?= number_format($report['expired']) ?></p>
+    <p class="text-xs text-ink-500">skipped numbers, no patient affected</p>
   </div>
 </div>
 
 <?php if ($report['blocks'] === []): ?>
-  <div class="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-6 text-center">
-    <p class="text-sm font-semibold text-slate-700">Nothing has been set aside yet</p>
-    <p class="mt-1 text-xs text-slate-500">Take a block above before you need one — this is the step that has to happen while the line is up.</p>
+  <div class="mt-4 rounded-xl border border-hairline bg-white px-4 py-6 text-center">
+    <p class="text-sm font-semibold text-ink-700">Nothing has been set aside yet</p>
+    <p class="mt-1 text-xs text-ink-500">Take a block above before you need one — this is the step that has to happen while the line is up.</p>
   </div>
 <?php else: ?>
-  <div class="mt-4 overflow-hidden rounded-xl border border-slate-200">
+  <div class="mt-4 overflow-hidden rounded-xl border border-hairline">
     <div class="table-scroll">
       <table class="w-full text-left text-xs">
-      <thead class="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+      <thead class="bg-slate-50 text-[11px] uppercase tracking-wide text-ink-500">
       <tr>
       <th class="px-4 py-2 font-semibold">Taken</th>
       <th class="px-4 py-2 font-semibold">Queue</th>
@@ -170,20 +170,20 @@
       $to = $pfx . str_pad((string) $b['to_no'], $pad, '0', STR_PAD_LEFT);
       ?>
       <tr>
-      <td class="px-4 py-2 text-slate-600"><?= e((string) $b['created_at']) ?></td>
-      <td class="px-4 py-2 text-slate-800"><?= e((string) ($b['queue_name'] ?? '—')) ?></td>
-      <td class="px-4 py-2 font-mono text-[11px] text-slate-700"><?= e($from) ?> – <?= e($to) ?></td>
-      <td class="px-4 py-2 text-right tabular-nums text-slate-700"><?= (int) $b['used'] ?></td>
-      <td class="px-4 py-2 text-right tabular-nums <?= (int) $b['unused'] > 0 ? 'text-slate-700' : 'text-slate-400' ?>"><?= (int) $b['unused'] ?></td>
+      <td class="px-4 py-2 text-ink-700"><?= e((string) $b['created_at']) ?></td>
+      <td class="px-4 py-2 text-ink-900"><?= e((string) ($b['queue_name'] ?? '—')) ?></td>
+      <td class="px-4 py-2 font-mono text-[11px] text-ink-700"><?= e($from) ?> – <?= e($to) ?></td>
+      <td class="px-4 py-2 text-right tabular-nums text-ink-700"><?= (int) $b['used'] ?></td>
+      <td class="px-4 py-2 text-right tabular-nums <?= (int) $b['unused'] > 0 ? 'text-ink-700' : 'text-ink-400' ?>"><?= (int) $b['unused'] ?></td>
       <td class="px-4 py-2">
       <?php if ((int) $b['used'] === 0 && $b['is_expired']): ?>
-      <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">expired, unused</span>
+      <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-ink-700">expired, unused</span>
       <?php elseif ($b['is_expired']): ?>
       <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">synced</span>
       <?php elseif ((int) $b['unused'] === 0): ?>
       <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">fully used</span>
       <?php else: ?>
-      <span class="rounded-full bg-teal-50 px-2 py-0.5 text-[10px] font-semibold text-teal-700">holding</span>
+      <span class="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-semibold text-brand-700">holding</span>
       <?php endif; ?>
       </td>
       </tr>
@@ -194,8 +194,8 @@
   </div>
 <?php endif; ?>
 
-<div class="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3">
-  <p class="text-xs leading-relaxed text-slate-600">
+<div class="mt-4 rounded-xl border border-hairline bg-white px-4 py-3">
+  <p class="text-xs leading-relaxed text-ink-700">
     <b>Why not simply queue the token requests in the browser?</b> Because the browser does not know what
     number is free. Two desks that each decide "the next one is A031" both print A031, and the clinic
     discovers it when two patients stand at the same door. Setting the numbers aside in advance is what

@@ -1,7 +1,7 @@
-<div class="flex flex-wrap items-start justify-between gap-3">
+<div class="page-head">
   <div>
-    <h1 class="text-2xl font-bold tracking-tight text-slate-900">Priority rules</h1>
-    <p class="mt-1 max-w-2xl text-sm text-slate-500">
+    <h1 class="page-title">Priority rules</h1>
+    <p class="mt-1 max-w-2xl text-sm text-ink-500">
       Standing clinical decisions written once. A rule decides the order of a
       patient the desk has not flagged — children under five before adults,
       routine reviews behind acute cases, one doctor's list before another's.
@@ -23,18 +23,18 @@
   </div>
 <?php endif; ?>
 
-<div class="mt-5 grid gap-5 lg:grid-cols-[1.1fr_.9fr]">
+<div class="mt-3 grid gap-3 sm:mt-6 sm:gap-5 lg:grid-cols-[1.1fr_.9fr]">
   <div class="space-y-5">
     <div class="card">
-      <div class="flex items-center justify-between border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
-        <p class="text-xs font-semibold text-slate-600">Rules, strongest first</p>
-        <span class="text-[11px] text-slate-500">
+      <div class="section-head">
+        <p class="section-title">Rules, strongest first</p>
+        <span class="text-[11px] text-ink-500">
           <?= count(array_filter($rules, static fn ($r) => (int) $r['is_active'] === 1)) ?> of <?= count($rules) ?> active
         </span>
       </div>
 
       <?php if ($rules === []): ?>
-        <p class="px-4 py-6 text-sm text-slate-500">
+        <p class="px-4 py-6 text-sm text-ink-500">
           No rules yet. Every arrival is ordered by its source weight (appointments
           and walk-ins) and by when it joined. Add one on the right if this clinic
           has a standing clinical priority.
@@ -46,21 +46,21 @@
             <div class="flex flex-wrap items-start gap-3 px-4 py-3 <?= $isActive ? '' : 'bg-slate-50/70' ?>">
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-2">
-                  <span class="font-medium text-slate-900"><?= e($rule['name']) ?></span>
+                  <span class="font-medium text-ink-900"><?= e($rule['name']) ?></span>
                   <?php if ((int) $rule['effect'] > 0): ?>
                     <span class="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">+<?= (int) $rule['effect'] ?> ahead</span>
                   <?php else: ?>
                     <span class="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900"><?= (int) $rule['effect'] ?> behind</span>
                   <?php endif; ?>
                   <?php if ((int) $rule['queue_id'] > 0): ?>
-                    <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">this queue only</span>
+                    <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-ink-700">this queue only</span>
                   <?php endif; ?>
                   <?php if (!$isActive): ?>
-                    <span class="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-600">Off</span>
+                    <span class="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold text-ink-700">Off</span>
                   <?php endif; ?>
                 </div>
-                <p class="mt-1 text-xs text-slate-500">Matches: <?= e($rule['matches']) ?></p>
-                <p class="mt-1 text-xs text-slate-600">
+                <p class="mt-1 text-xs text-ink-500">Matches: <?= e($rule['matches']) ?></p>
+                <p class="mt-1 text-xs text-ink-700">
                   Reason copied onto the entry: <span class="italic">“<?= e($rule['reason']) ?>”</span>
                 </p>
               </div>
@@ -81,8 +81,8 @@
       <?php endif; ?>
     </div>
 
-    <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-relaxed text-slate-600">
-      <p class="font-semibold text-slate-700">How a rule is applied</p>
+    <div class="rounded-lg border border-hairline bg-slate-50 px-4 py-3 text-xs leading-relaxed text-ink-700">
+      <p class="font-semibold text-ink-700">How a rule is applied</p>
       <ul class="mt-1 list-disc space-y-1 pl-5">
         <li>The strongest matching boost wins. Two rules that both fit the same patient do not add together.</li>
         <li>A rule decides the <span class="font-medium">next</span> token issued. Patients already waiting are not reordered underneath them.</li>
@@ -94,8 +94,8 @@
   </div>
 
   <div class="card h-fit">
-    <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
-      <p class="text-xs font-semibold text-slate-600">New rule</p>
+    <div class="section-head">
+      <p class="section-title">New rule</p>
     </div>
 
     <form method="post" action="/queues/priority-rules" class="space-y-3 p-4">
@@ -162,7 +162,7 @@
             </option>
           <?php endforeach; ?>
         </select>
-        <p class="mt-1 text-[11px] text-slate-500">A rule for one queue is how a doctor's own preference stays theirs.</p>
+        <p class="mt-1 text-[11px] text-ink-500">A rule for one queue is how a doctor's own preference stays theirs.</p>
       </div>
 
       <div class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
@@ -190,7 +190,7 @@
                  value="<?= e((string) ($old['to_hour'] ?? '')) ?>" placeholder="any">
         </div>
       </div>
-      <p class="-mt-1 text-[11px] text-slate-500">
+      <p class="-mt-1 text-[11px] text-ink-500">
         Hours use the clinic's clock, 0–23. A window that crosses midnight is two rules.
       </p>
 
@@ -198,7 +198,7 @@
         <label class="label" for="reason">Clinical reason</label>
         <input class="input" id="reason" name="reason" required maxlength="160"
                value="<?= e($old['reason'] ?? '') ?>" placeholder="Child under five — see before adults">
-        <p class="mt-1 text-[11px] text-slate-500">
+        <p class="mt-1 text-[11px] text-ink-500">
           Copied onto every entry the rule decides. Write it for a colleague reading the day's log.
         </p>
       </div>
@@ -216,34 +216,34 @@
 $severityTone = static fn (string $s): string => match ($s) {
     'high' => 'border-rose-200 bg-rose-50 text-rose-900',
     'watch' => 'border-amber-200 bg-amber-50 text-amber-900',
-    default => 'border-slate-200 bg-slate-50 text-slate-700',
+    default => 'border-hairline bg-slate-50 text-ink-700',
 };
 ?>
-<div class="card mt-5 overflow-hidden">
-  <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+<div class="card mt-3 sm:mt-5 overflow-hidden">
+  <div class="flex flex-wrap items-center justify-between gap-3 border-b border-hairline bg-white px-4 py-2.5">
     <div>
-      <p class="text-xs font-semibold text-slate-600">Who is overriding priority</p>
-      <p class="text-[11px] text-slate-400"><?= e($from) ?> to <?= e($to) ?></p>
+      <p class="section-title">Who is overriding priority</p>
+      <p class="text-[11px] text-ink-400"><?= e($from) ?> to <?= e($to) ?></p>
     </div>
-    <form method="get" action="/queues/priority-rules" class="flex items-end gap-1.5">
-      <input class="input !py-1.5 text-xs" type="date" name="from" value="<?= e($from) ?>">
-      <input class="input !py-1.5 text-xs" type="date" name="to" value="<?= e($to) ?>">
-      <button class="btn-secondary !py-1.5 text-xs">Show</button>
+    <form method="get" action="/queues/priority-rules" class="flex w-full flex-wrap items-end gap-1.5 sm:w-auto">
+      <input class="input min-w-0 flex-1 !py-2 text-xs sm:flex-none" type="date" name="from" value="<?= e($from) ?>">
+      <input class="input min-w-0 flex-1 !py-2 text-xs sm:flex-none" type="date" name="to" value="<?= e($to) ?>">
+      <button class="btn-secondary !py-2 text-xs">Show</button>
     </form>
   </div>
 
   <div class="grid grid-cols-3 divide-x divide-slate-100 border-b border-slate-100 text-center">
     <div class="px-3 py-3">
-      <p class="text-xl font-bold text-slate-900"><?= (int) $overuse['overrides'] ?></p>
-      <p class="text-[10px] uppercase tracking-wide text-slate-500">manual overrides</p>
+      <p class="text-xl font-bold text-ink-900"><?= (int) $overuse['overrides'] ?></p>
+      <p class="text-[10px] uppercase tracking-wide text-ink-500">manual overrides</p>
     </div>
     <div class="px-3 py-3">
-      <p class="text-xl font-bold text-slate-900"><?= e((string) $overuse['rate']) ?>%</p>
-      <p class="text-[10px] uppercase tracking-wide text-slate-500">of <?= (int) $overuse['tokens'] ?> tokens</p>
+      <p class="text-xl font-bold text-ink-900"><?= e((string) $overuse['rate']) ?>%</p>
+      <p class="text-[10px] uppercase tracking-wide text-ink-500">of <?= (int) $overuse['tokens'] ?> tokens</p>
     </div>
     <div class="px-3 py-3">
-      <p class="text-xl font-bold text-slate-900"><?= (int) $overuse['rule_hits'] ?></p>
-      <p class="text-[10px] uppercase tracking-wide text-slate-500">by a rule, not a person</p>
+      <p class="text-xl font-bold text-ink-900"><?= (int) $overuse['rule_hits'] ?></p>
+      <p class="text-[10px] uppercase tracking-wide text-ink-500">by a rule, not a person</p>
     </div>
   </div>
 
@@ -259,7 +259,7 @@ $severityTone = static fn (string $s): string => match ($s) {
   <?php endif; ?>
 
   <?php if ($overuse['per_staff'] === []): ?>
-    <p class="px-4 py-4 text-xs leading-relaxed text-slate-500">
+    <p class="px-4 py-4 text-xs leading-relaxed text-ink-500">
       Nobody overrode priority in this period. That is the ordinary case — the rules are
       doing the work and no one is jumping the queue by hand.
     </p>
@@ -279,12 +279,12 @@ $severityTone = static fn (string $s): string => match ($s) {
       <tr>
       <td class="font-medium"><?= e((string) $row['name']) ?></td>
       <td class="numeric"><?= (int) $row['overrides'] ?></td>
-      <td class="numeric text-slate-500"><?= (int) $row['tokens'] ?></td>
+      <td class="numeric text-ink-500"><?= (int) $row['tokens'] ?></td>
       <td class="numeric">
       <?php if ($row['rate'] === null): ?>
-      <span class="text-[10px] text-slate-400" title="They issued no tokens in this period, so there is no denominator">—</span>
+      <span class="text-[10px] text-ink-400" title="They issued no tokens in this period, so there is no denominator">—</span>
       <?php else: ?>
-      <span class="font-semibold <?= (float) $row['rate'] >= 40 ? 'text-rose-700' : ((float) $row['rate'] >= 25 ? 'text-amber-700' : 'text-slate-700') ?>">
+      <span class="font-semibold <?= (float) $row['rate'] >= 40 ? 'text-rose-700' : ((float) $row['rate'] >= 25 ? 'text-amber-700' : 'text-ink-700') ?>">
       <?= e((string) $row['rate']) ?>%
       </span>
       <?php endif; ?>
@@ -298,21 +298,21 @@ $severityTone = static fn (string $s): string => match ($s) {
 
   <?php if ($overuse['reasons'] !== []): ?>
     <details class="border-t border-slate-100">
-      <summary class="cursor-pointer px-4 py-2.5 text-xs font-semibold text-teal-700 hover:bg-slate-50">
+      <summary class="cursor-pointer px-4 py-2.5 text-xs font-semibold text-brand-700 hover:bg-slate-50">
         The reasons given (<?= count($overuse['reasons']) ?>)
       </summary>
       <ul class="divide-y divide-slate-100">
         <?php foreach ($overuse['reasons'] as $r): ?>
           <li class="flex items-center justify-between gap-3 px-4 py-2">
-            <span class="min-w-0 text-xs text-slate-700"><?= e((string) $r['reason']) ?></span>
-            <span class="shrink-0 text-[11px] tabular text-slate-400"><?= (int) $r['count'] ?>×</span>
+            <span class="min-w-0 text-xs text-ink-700"><?= e((string) $r['reason']) ?></span>
+            <span class="shrink-0 text-[11px] tabular text-ink-400"><?= (int) $r['count'] ?>×</span>
           </li>
         <?php endforeach; ?>
       </ul>
     </details>
   <?php endif; ?>
 
-  <p class="border-t border-slate-100 px-4 py-2.5 text-[10px] leading-relaxed text-slate-400">
+  <p class="border-t border-slate-100 px-4 py-2.5 text-[10px] leading-relaxed text-ink-400">
     A high rate is not automatically wrong — an urgent-care service will legitimately override far
     more than a family OPD. Read it as a question to ask, not a verdict. Overrides are attributed to
     the signed-in account, so a shared login shows as one person; automated rule hits are counted

@@ -1,16 +1,16 @@
-<div class="flex flex-wrap items-start justify-between gap-3">
+<div class="page-head">
   <div>
-    <h1 class="text-2xl font-bold tracking-tight text-slate-900">Support</h1>
-    <p class="mt-1 text-sm text-slate-500">
+    <h1 class="page-title">Support</h1>
+    <p class="page-sub">
       Raise a problem with the platform team. Tickets are private to this clinic.
     </p>
   </div>
 </div>
 
-<div class="mt-5 grid gap-5 lg:grid-cols-[1.4fr_.8fr]">
+<div class="mt-3 grid gap-3 sm:mt-6 sm:gap-5 lg:grid-cols-[1.4fr_.8fr]">
   <div class="card overflow-hidden">
-    <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
-      <p class="text-xs font-semibold text-slate-600">Your tickets</p>
+    <div class="section-head">
+      <p class="section-title">Your tickets</p>
     </div>
     <?php if ($tickets === []): ?>
       <?php $title = 'No tickets'; $message = 'When something breaks or a patient gets the wrong message, open a ticket here rather than emailing — it carries the clinic context support needs.'; $icon = 'lifebuoy'; ?>
@@ -21,10 +21,10 @@
           <li class="px-4 py-3 hover:bg-slate-50">
             <a href="/support/<?= (int) $t['id'] ?>" class="flex items-start justify-between gap-3">
               <div class="min-w-0">
-                <p class="truncate text-sm font-semibold text-slate-900">
+                <p class="truncate text-sm font-semibold text-ink-900">
                   #<?= (int) $t['id'] ?> · <?= e($t['subject']) ?>
                 </p>
-                <p class="mt-0.5 text-[11px] text-slate-500">
+                <p class="mt-0.5 text-[11px] text-ink-500">
                   <?= e($t['opened_by'] ?? 'unknown') ?> ·
                   <?= e(ago($t['created_at'])) ?> ·
                   <?= (int) $t['reply_count'] ?> repl<?= (int) $t['reply_count'] === 1 ? 'y' : 'ies' ?>
@@ -44,8 +44,8 @@
   </div>
 
   <div class="card">
-    <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
-      <p class="text-xs font-semibold text-slate-600">Open a ticket</p>
+    <div class="section-head">
+      <p class="section-title">Open a ticket</p>
     </div>
     <form method="post" action="/support" class="space-y-3 p-4">
       <?= csrf_field() ?>
