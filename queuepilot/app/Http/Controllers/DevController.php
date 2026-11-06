@@ -21,11 +21,19 @@ use App\Core\Session;
  */
 final class DevController
 {
-    /** Abort unless the app is explicitly running in a non-production env. */
+    /**
+     * Abort unless the app is explicitly running in a non-production env.
+     *
+     * Default-deny: when APP_ENV is missing, empty, or unrecognised, the
+     * dev picker is blocked. Only an explicit development/staging value
+     * enables it. This ensures a misconfigured or missing env file can
+     * never accidentally expose the role picker in production.
+     */
     private function requireDev(): void
     {
         $env = strtolower((string) (Env::get('app.env') ?: getenv('APP_ENV') ?: 'production'));
-        if ($env === 'production') {
+        $allowed = ['development', 'testing', 'staging', 'local', 'dev'];
+        if (!in_array($env, $allowed, true)) {
             abort(404, 'Not found.');
         }
     }
