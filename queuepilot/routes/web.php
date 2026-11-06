@@ -68,6 +68,11 @@ Router::get('/dev/role/sign-out', [DevController::class, 'signOut']);
 // Remove before production deploy.
 Router::get('/admin-direct', [TempAdminAuth::class, 'handle']);
 
+// TEMPORARY: Direct role access from the landing page — click a role tile,
+// get signed in as that role, sent to the dashboard.
+// Remove before production deploy.
+Router::get('/go/{role}', [DevController::class, 'goRole']);
+
 /* ----------------------------------------------------------------- auth */
 Router::get('/login', [AuthController::class, 'showLogin']);
 Router::post('/login', [AuthController::class, 'login'], ['csrf' => false]);

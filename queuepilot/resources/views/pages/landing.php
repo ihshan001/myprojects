@@ -152,6 +152,38 @@ $liveRows = $demoQueue ? Db::all(
   </div>
 </section>
 
+<!-- ───────────────────────────────────────────── try any role (dev) -->
+<section class="border-b border-slate-200 bg-slate-50">
+  <div class="mx-auto max-w-6xl px-5 py-16">
+    <div class="max-w-2xl">
+      <p class="text-xs font-bold uppercase tracking-widest text-teal-700">Instant access</p>
+      <h2 class="mt-3 text-2xl font-bold tracking-tight text-slate-900">No login. No password. Click a role.</h2>
+      <p class="mt-3 text-slate-600 text-sm">Each button signs you straight into that dashboard — clinic owner, receptionist, doctor, or platform admin.</p>
+    </div>
+
+    <div class="mt-10 grid gap-4 md:grid-cols-4">
+      <?php foreach ([
+      ['Platform Admin', 'super_admin', 'Full platform — clinics, plans, billing, support', 'shield', 'bg-indigo-500/10 text-indigo-600 border-indigo-500/20'],
+      ['Clinic Owner', 'clinic_admin', 'Clinic dashboard — queues, staff, appointments, reports', 'building', 'bg-teal-500/10 text-teal-600 border-teal-500/20'],
+          ['Receptionist', 'receptionist', 'Desk board — issue tokens, call patients, manage the waiting room', 'users', 'bg-sky-500/10 text-sky-600 border-sky-500/20'],
+          ['Doctor', 'doctor', 'Clinical board — my list only, call and complete consultations', 'stethoscope', 'bg-rose-500/10 text-rose-600 border-rose-500/20'],
+      ] as [$label, $role, $desc, $icon, $tone]): ?>
+        <a href="/go/<?= $role ?>" class="group flex flex-col items-center justify-center rounded-xl border p-6 text-center transition hover:bg-white/50 hover:scale-[1.02]">
+          <span class="flex h-12 w-12 items-center justify-center rounded-xl mb-3 <?= $tone ?> group-hover:scale-110 transition-transform">
+            <svg class="h-6 w-6"><use href="#i-<?= $icon ?>"/></svg>
+          </span>
+          <h3 class="font-bold text-slate-900 group-hover:text-teal-700"><?= e($label) ?></h3>
+          <p class="mt-1.5 text-[12px] leading-relaxed text-slate-500 max-w-xs"><?= e($desc) ?></p>
+        </a>
+      <?php endforeach; ?>
+    </div>
+
+    <p class="mt-8 text-xs text-slate-400 text-center">
+      ⚠️ Development convenience only — bypasses all authentication. Remove before production.
+    </p>
+  </div>
+</section>
+
 <!-- ───────────────────────────────────────────── the problem -->
 <section class="border-b border-slate-200 bg-slate-50/60">
   <div class="mx-auto max-w-6xl px-5 py-16">

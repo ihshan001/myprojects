@@ -42,6 +42,26 @@ final class DevController
             abort(404, 'That user does not exist.');
         }
 
+        $this->establishSession($user);
+    }
+
+    /** Sign straight in as the first active user with the given role, no password. */
+    public function goRole(string $role): void
+    {
+        $user = Db::one(
+            'SELECT * FROM users WHERE role = ? AND is_active = 1 ORDER BY id LIMIT 1',
+            [$role]
+        );
+        if (!$user) {
+            abort(404, "No active user with role '$role'.");
+        }
+
+        $this->establishSession($user);
+    }
+
+    /** Shared session setup + redirect by role. */
+    private function establishSession(array $user): void
+    {
         Session::regenerate();
         Session::put('user_id', (int) $user['id']);
         Session::put('clinic_id', $user['clinic_id'] !== null ? (int) $user['clinic_id'] : null);
