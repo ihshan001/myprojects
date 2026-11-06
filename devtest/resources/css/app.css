@@ -1,0 +1,312 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =====================================================================
+   QueuePilot design system
+   - calm clinical palette (teal + slate), high contrast for weak daylight
+   - no external fonts, no icon fonts: system stack + inline SVG sprites
+   - sizes tuned for a receptionist working at speed on a 1366px desk
+   ===================================================================== */
+
+@layer base {
+  :root {
+    --brand: #0f766e;
+    --brand-ink: #0b4f4a;
+    --brand-soft: #ccfbf1;
+    --ink: #0f172a;
+    --muted: #64748b;
+    --line: #e2e8f0;
+    --surface: #ffffff;
+    --canvas: #f6f8fb;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-[var(--canvas)] text-slate-800 antialiased;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+      "Noto Sans Sinhala", "Noto Sans Tamil", sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Numbers in a queue must never jitter between polls. */
+  .tabular,
+  .font-mono,
+  td.numeric,
+  th.numeric {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  ::selection {
+    background: #99f6e4;
+    color: #052e2b;
+  }
+
+  /* Sinhala/Tamil need more line height to stay legible */
+  html[lang="si"] body,
+  html[lang="ta"] body {
+    line-height: 1.75;
+  }
+}
+
+@layer components {
+  /* ---------------------------------------------------------- surfaces */
+  .card {
+    @apply rounded-xl border border-slate-200 bg-white shadow-sm;
+  }
+  .card-pad {
+    @apply p-5;
+  }
+  .card-hover {
+    @apply transition hover:border-slate-300 hover:shadow-md;
+  }
+  .panel {
+    @apply rounded-xl border border-slate-200 bg-white;
+  }
+  .divider {
+    @apply border-t border-slate-200;
+  }
+
+  /* ----------------------------------------------------------- buttons */
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-lg px-4 py-2.5
+           text-sm font-semibold transition active:scale-[0.99] disabled:pointer-events-none
+           disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-teal-700 text-white shadow-sm hover:bg-teal-800;
+  }
+  .btn-secondary {
+    @apply btn border border-slate-300 bg-white text-slate-700 hover:bg-slate-50;
+  }
+  /* Destructive or irreversible actions (close the day, cancel a visit).
+     Distinct from btn-secondary so it cannot be clicked by muscle memory. */
+  .btn-stop {
+    @apply btn bg-rose-600 text-white hover:bg-rose-700 focus-visible:ring-rose-500;
+  }
+  .btn-ghost {
+    @apply btn text-slate-600 hover:bg-slate-100;
+  }
+  .btn-danger {
+    @apply btn bg-rose-600 text-white hover:bg-rose-700;
+  }
+  .btn-warn {
+    @apply btn bg-amber-500 text-white hover:bg-amber-600;
+  }
+  .btn-sm {
+    @apply px-2.5 py-1.5 text-xs;
+  }
+  .btn-lg {
+    @apply px-6 py-3.5 text-base;
+  }
+  .btn-dark {
+    @apply btn bg-slate-900 text-white hover:bg-slate-800;
+  }
+
+  /* Queue action buttons: big enough to hit fast, colour-coded by intent */
+  .act {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2
+           text-xs font-semibold transition active:scale-[0.98] disabled:opacity-40;
+  }
+  .act-call {
+    @apply act border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100;
+  }
+  .act-start {
+    @apply act border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100;
+  }
+  .act-done {
+    @apply act border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100;
+  }
+  .act-skip {
+    @apply act border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100;
+  }
+  .act-stop {
+    @apply act border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100;
+  }
+  .act-mute {
+    @apply act border-slate-200 bg-white text-slate-600 hover:bg-slate-50;
+  }
+
+  /* ------------------------------------------------------------ inputs */
+  .label {
+    @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+  .input {
+    @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900
+           placeholder:text-slate-400 focus:border-teal-600 focus:ring-2 focus:ring-teal-600/15;
+  }
+  .input-lg {
+    @apply input px-4 py-3 text-base;
+  }
+  .select {
+    @apply input appearance-none bg-[length:16px] bg-[right_0.6rem_center] bg-no-repeat pr-9;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%2364748b'%3E%3Cpath d='M5.2 7.5 10 12.3l4.8-4.8' stroke='%2364748b' stroke-width='1.7' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  }
+  .textarea {
+    @apply input min-h-[80px] resize-y;
+  }
+  .checkbox {
+    @apply h-4 w-4 rounded border-slate-300 text-teal-700 focus:ring-teal-600;
+  }
+  .help {
+    @apply mt-1 text-xs text-slate-500;
+  }
+  .error-text {
+    @apply mt-1 text-xs font-medium text-rose-600;
+  }
+  .input-error {
+    @apply border-rose-400 focus:border-rose-500 focus:ring-rose-500/15;
+  }
+
+  /* ------------------------------------------------------------- chips */
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold;
+  }
+  .badge-slate { @apply badge bg-slate-100 text-slate-600; }
+  .badge-teal { @apply badge bg-teal-50 text-teal-700 ring-1 ring-teal-200; }
+  .badge-amber { @apply badge bg-amber-50 text-amber-700 ring-1 ring-amber-200; }
+  .badge-sky { @apply badge bg-sky-50 text-sky-700 ring-1 ring-sky-200; }
+  .badge-emerald { @apply badge bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200; }
+  .badge-rose { @apply badge bg-rose-50 text-rose-700 ring-1 ring-rose-200; }
+  .badge-violet { @apply badge bg-violet-50 text-violet-700 ring-1 ring-violet-200; }
+  .badge-orange { @apply badge bg-orange-50 text-orange-700 ring-1 ring-orange-200; }
+  .badge-priority {
+    @apply badge bg-red-600 text-white shadow-sm;
+  }
+
+  /* ------------------------------------------------------------ tables */
+  .table {
+    @apply w-full border-collapse text-sm;
+  }
+  .table thead th {
+    @apply border-b border-slate-200 px-3 py-2.5 text-left text-[11px] font-semibold
+           uppercase tracking-wide text-slate-500;
+  }
+  .table tbody td {
+    @apply border-b border-slate-100 px-3 py-2.5 align-middle text-slate-700;
+  }
+  .table tbody tr:hover {
+    @apply bg-slate-50/70;
+  }
+
+  /* --------------------------------------------------------------- nav */
+  .nav-item {
+    @apply flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-slate-300
+           transition hover:bg-white/10 hover:text-white;
+  }
+  .nav-item-active {
+    @apply bg-white/[0.12] text-white shadow-inner;
+  }
+  .nav-badge {
+    @apply ml-auto rounded-md bg-teal-400/20 px-1.5 py-0.5 text-[11px] font-bold text-teal-100;
+  }
+
+  /* ---------------------------------------------------------- tokens */
+  .token-chip {
+    @apply inline-flex min-w-[3.25rem] items-center justify-center rounded-lg border border-slate-200
+           bg-slate-50 px-2 py-1 font-mono text-sm font-bold text-slate-800;
+  }
+  .token-hero {
+    @apply font-mono text-6xl font-black leading-none tracking-tight;
+  }
+
+  /* -------------------------------------------------- live indicators */
+  .pulse-dot {
+    @apply relative inline-flex h-2 w-2;
+  }
+  .pulse-dot::after {
+    content: "";
+    @apply absolute inset-0 animate-ping rounded-full bg-emerald-400 opacity-75;
+  }
+  .live-pill {
+    @apply inline-flex items-center gap-2 rounded-full bg-emerald-50 px-2.5 py-1
+           text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200;
+  }
+  .stale-pill {
+    @apply inline-flex items-center gap-2 rounded-full bg-amber-100 px-2.5 py-1
+           text-[11px] font-semibold text-amber-800 ring-1 ring-amber-300;
+  }
+
+  /* ----------------------------------------------------------- layout */
+  .shell {
+    @apply flex min-h-screen;
+  }
+  .sidebar {
+    @apply fixed inset-y-0 left-0 z-30 hidden w-64 flex-col bg-slate-900 lg:flex;
+  }
+  .main-col {
+    @apply flex min-h-screen w-full flex-col lg:pl-64;
+  }
+  .page {
+    @apply mx-auto w-full max-w-[1400px] flex-1 px-4 py-6 sm:px-6 lg:px-8;
+  }
+  .page-narrow {
+    @apply mx-auto w-full max-w-3xl px-4 py-8 sm:px-6;
+  }
+
+  /* ------------------------------------------------- patient surface */
+  .patient-card {
+    @apply rounded-2xl border border-slate-200 bg-white p-6 shadow-sm;
+  }
+  .patient-token {
+    @apply rounded-2xl bg-gradient-to-br from-teal-700 to-teal-900 p-6 text-white shadow-lg;
+  }
+
+  /* ------------------------------------------------------ display mode */
+  .tv {
+    @apply bg-slate-950 text-white;
+  }
+  .tv-token {
+    font-variant-numeric: tabular-nums;
+    @apply font-mono font-black tracking-tight;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { @apply rounded-full bg-slate-300; }
+  .scrollbar-thin::-webkit-scrollbar-track { @apply bg-transparent; }
+  .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .text-balance { text-wrap: balance; }
+}
+
+/* ---------------------------------------------------------- animations */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes qp-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.rise { animation: qp-rise 0.22s ease-out both; }
+
+@keyframes qp-call-flash {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(14, 165, 233, 0); }
+  50% { box-shadow: 0 0 0 6px rgba(14, 165, 233, 0.18); }
+}
+.call-flash { animation: qp-call-flash 1.8s ease-in-out infinite; }
+
+/* Print: reports should print clean, without chrome */
+@media print {
+  .sidebar, .no-print, .btn, .act { display: none !important; }
+  .main-col { padding-left: 0 !important; }
+  .card { box-shadow: none !important; border-color: #cbd5e1 !important; }
+  body { background: #fff; }
+}
