@@ -5,17 +5,35 @@ namespace App\Http\Controllers;
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Core\Env;
+use App\Core\Response;
 use App\Core\Session;
 
 /**
- * Temporary dev-only access: pick a role and enter that dashboard directly,
- * no password. Intended for testing every role's screens before login is
- * re-added. Not for production — there is no password check here at all.
+ * Temporary dev-only role picker: enter any dashboard directly, no password.
+ *
+ * SECURITY: This controller is GATED behind APP_ENV !== 'production'. It
+ * returns 404 in any production environment so it can never become a
+ * production access bypass, even if the routes are accidentally deployed.
+ *
+ * Intended for testing every role's screens before real login is re-added.
+ * Never for production.
  */
 final class DevController
 {
+    /** Abort unless the app is explicitly running in a non-production env. */
+    private function requireDev(): void
+    {
+        $env = strtolower((string) (Env::get('app.env') ?: getenv('APP_ENV') ?: 'production'));
+        if ($env === 'production') {
+            abort(404, 'Not found.');
+        }
+    }
+
     public function chooseRole(): void
     {
+        $this->requireDev();
+
         $users = Db::all(
             'SELECT id, name, email, role, clinic_id FROM users WHERE is_active = 1 ORDER BY role, name'
         );
@@ -26,9 +44,11 @@ final class DevController
         ]);
     }
 
-    /** Sign straight in as the given user id, no password. */
+    /** Sign straight in as the given user id, no password. Dev only. */
     public function signInAs(string $id): void
     {
+        $this->requireDev();
+
         $user = Db::one('SELECT * FROM users WHERE id = ? AND is_active = 1', [(int) $id]);
         if (!$user) {
             abort(404, 'That user does not exist.');
@@ -45,10 +65,12 @@ final class DevController
         redirect($target);
     }
 
-    /** Leave the dev session and return to the role picker. */
+    /** Leave the dev session and return to the role picker. Dev only. */
     public function signOut(): void
     {
+        $this->requireDev();
+
         Session::destroy();
-        Response::redirect('/dev/role');
+        redirect('/dev/role');
     }
 }
