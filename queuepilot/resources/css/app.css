@@ -310,3 +310,81 @@
   .card { box-shadow: none !important; border-color: #cbd5e1 !important; }
   body { background: #fff; }
 }
+
+/* ===================================================================
+   Landing page (.lp) — scoped so the console keeps its own type scale.
+   Inter is loaded only here; every other queuepilot page is unchanged.
+   =================================================================== */
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 400; font-display: swap; src: url('/assets/fonts/inter-400.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 500; font-display: swap; src: url('/assets/fonts/inter-500.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 600; font-display: swap; src: url('/assets/fonts/inter-600.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 700; font-display: swap; src: url('/assets/fonts/inter-700.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 800; font-display: swap; src: url('/assets/fonts/inter-800.woff2') format('woff2'); }
+
+@layer components {
+  .lp {
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'Noto Sans Sinhala', 'Noto Sans Tamil', sans-serif;
+    @apply bg-white text-slate-600 antialiased;
+  }
+  .lp-wrap { @apply mx-auto w-full max-w-[1180px] px-5 sm:px-7; }
+
+  /* Section shell: a white rounded panel floating on a very pale wash. */
+  .lp-panel { @apply rounded-[28px] border border-slate-200/70 bg-white shadow-soft; }
+  .lp-wash { background-image: linear-gradient(180deg, #F4F9F9 0%, #FBFDFD 42%, #FFFFFF 100%); }
+
+  .lp-h1 { @apply text-[2rem] font-extrabold leading-[1.08] tracking-[-0.03em] text-slate-900 sm:text-[2.8rem] lg:text-[3.15rem]; }
+  .lp-h2 { @apply text-[1.6rem] font-extrabold leading-tight tracking-[-0.025em] text-slate-900 sm:text-[2rem]; }
+  .lp-h3 { @apply text-[1.05rem] font-bold leading-snug tracking-[-0.015em] text-slate-900 sm:text-[1.2rem]; }
+  .lp-lead { @apply text-[14.5px] leading-relaxed text-slate-500 sm:text-[15.5px]; }
+  .lp-teal { @apply text-brand-700; }
+
+  .lp-badge {
+    @apply inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white
+           px-3 py-1.5 text-[11.5px] font-semibold text-brand-700;
+  }
+  .lp-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-[13.5px]
+           font-bold text-white transition;
+    background-image: linear-gradient(100deg, #0F766E, #0B5F59);
+    box-shadow: 0 8px 20px -10px rgba(15, 118, 110, .65);
+  }
+  .lp-btn:hover { background-image: linear-gradient(100deg, #115E59, #0A544F); }
+  .lp-btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200
+           bg-white px-5 py-3 text-[13.5px] font-bold text-slate-800 transition hover:bg-slate-50;
+  }
+  .lp-ico { @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700; }
+  .lp-check { @apply flex items-start gap-2.5 text-[13px] text-slate-600; }
+  .lp-stat { @apply rounded-2xl border border-slate-200/80 bg-white px-4 py-3.5; }
+  .lp-num { @apply font-extrabold tracking-[-0.02em] text-slate-900 tabular; }
+
+  /* Hero: photo bleeds in from the right and dissolves into the page. */
+  .lp-hero-photo {
+    @apply pointer-events-none absolute inset-y-0 right-0 hidden w-[62%] bg-cover bg-right bg-no-repeat lg:block;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0%, rgba(0,0,0,.35) 26%, #000 62%);
+    mask-image: linear-gradient(90deg, transparent 0%, rgba(0,0,0,.35) 26%, #000 62%);
+  }
+  .lp-float { @apply rounded-2xl border border-slate-200/70 bg-white/95 shadow-soft backdrop-blur; }
+
+  .lp-step-num {
+    @apply absolute -top-3 left-4 flex h-8 w-8 items-center justify-center rounded-full
+           text-[11px] font-bold text-white;
+    background-image: linear-gradient(140deg, #14807A, #0B5F59);
+  }
+  .lp-plan { @apply relative flex flex-col rounded-2xl border border-slate-200/80 bg-white p-5; }
+  .lp-plan-featured { @apply border-brand-600 ring-1 ring-brand-600; }
+  .lp-quote {
+    @apply relative overflow-hidden rounded-[22px] p-6 text-white;
+    background-image: linear-gradient(155deg, #0F766E, #0A4E49);
+  }
+  .lp-nav-link { @apply text-[13px] font-semibold text-slate-600 transition hover:text-slate-900; }
+
+  /* Phone frame, drawn rather than photographed so the token stays crisp. */
+  .lp-phone {
+    @apply relative mx-auto w-[168px] rounded-[26px] border-[6px] border-slate-900 bg-white;
+    box-shadow: 0 18px 40px -18px rgba(15, 23, 42, .45);
+  }
+  .lp-phone::before {
+    content: ""; @apply absolute left-1/2 top-1.5 h-1.5 w-14 -translate-x-1/2 rounded-full bg-slate-900;
+  }
+}

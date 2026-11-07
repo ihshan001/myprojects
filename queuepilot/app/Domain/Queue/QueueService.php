@@ -735,6 +735,46 @@ final class QueueService
         );
     }
 
+    /**
+     * Public-safe snapshot of the next waiting visit in a clinic's session.
+     *
+     * The marketing page shows a real token, room and wait range, so it needs a
+     * real row. It must never handle the capability token that could cancel or
+     * reschedule that visit, so the lookup lives here and the caller receives
+     * only the five fields below. Keeping it out of the view is what lets the
+     * privacy test assert the homepage cannot reach a token at all.
+     */
+    public function nextWaitingPublic(int $clinicId, string $sessionDate): ?array
+    {
+        $entry = Db::one(
+            "SELECT e.*, q.name AS queue_name, q.doctor_id, d.name AS doctor_name,
+                    d.avg_consult_minutes, s.name AS specialty, r.name AS room_name,
+                    c.name AS clinic_name, c.phone AS clinic_phone
+               FROM queue_entries e
+               JOIN queues q ON q.id = e.queue_id
+               JOIN clinics c ON c.id = e.clinic_id
+               LEFT JOIN doctors d ON d.id = q.doctor_id
+               LEFT JOIN specialties s ON s.id = d.specialty_id
+               LEFT JOIN rooms r ON r.id = d.room_id
+              WHERE q.clinic_id = ? AND q.session_date = ? AND e.status = 'waiting'
+              ORDER BY e.priority DESC, e.token_no ASC
+              LIMIT 1",
+            [$clinicId, $sessionDate]
+        );
+        if (!$entry) {
+            return null;
+        }
+        $snap = $this->publicSnapshot($entry);
+
+        return [
+            'token'    => $snap['token'],
+            'doctor'   => $snap['doctor'],
+            'room'     => $snap['room'],
+            'position' => (int) $snap['position'],
+            'estimate' => $snap['estimate']['label'] ?? '',
+        ];
+    }
+
     /** Public-safe snapshot: no phone, no surname, no notes. */
     public function publicSnapshot(array $entry): array
     {

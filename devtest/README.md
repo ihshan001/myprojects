@@ -52,16 +52,30 @@ registration by design, so the homepage only exists in the reference app. `tools
   `X-Content-Type-Options: nosniff` the browser refuses to guess and prints the
   page as escaped source. devtest's `serve-role.mjs` already carried this fix.
 
-The shim modifies no file under `queuepilot/`. The reference app does carry two
-bug fixes made on request, both unrelated to design:
+The shim itself modifies no file under `queuepilot/`. The reference app's
+homepage has been changed three times, each on explicit request:
 
-- its homepage demo panel selected `p.full_name` and printed real patient names on
-  an unauthenticated marketing page, while the page's own FAQ promised "tokens and
-  room numbers only". The patients join is now gone entirely, so the name is not
-  reachable rather than merely unprinted; rows show the token, status and room. A
-  test asserts the join stays out.
-- the hero read "works on a ₹ phone" — a stray rupee sign where a number had been
-  lost. Now "works on a basic smartphone".
+- **Privacy fix.** Its demo panel selected `p.full_name` and printed real patient
+  names on an unauthenticated marketing page, while the page's own FAQ promised
+  "tokens and room numbers only". The patients join is gone entirely, so the name
+  is not reachable rather than merely unprinted. A test asserts the join stays out.
+- **Currency typo.** The hero read "works on a ₹ phone" — a stray rupee sign where
+  a number had been lost. That line no longer exists: the hero was rewritten below.
+- **Homepage redesign.** `pages/landing.php` was rebuilt to the supplied mockup:
+  sticky header, split hero with a photo and floating product cards, capability
+  strip, three-column OPD challenge with an isometric render, five-step flow,
+  four pricing cards, a principles carousel beside a live dashboard panel, and a
+  patient row with a QR code. Inter and the `.lp-*` component layer are scoped to
+  this page, so the console's typography is untouched.
+
+  The mockup's placeholder credibility was **not** copied. There are no hospital
+  logos, no named medical director, no "500+ clinics", no "47%"/"92%" figures and
+  no USD toggle, because none of it is true of this product. Every number on the
+  page is queried from the database or the `plans` table; tiles with no data show
+  a dash. Five test groups in `queuepilot/tests/run.php` fail if a fabricated
+  brand, statistic, hardcoded price or wrong trial length is ever pasted back in.
+  The patient mock-up is filled by `QueueService::nextWaitingPublic()`, which
+  returns five whitelisted fields so no capability token reaches the view.
 
 ```bash
 PORT=8085 node tools/serve-landing.mjs     # from devtest/

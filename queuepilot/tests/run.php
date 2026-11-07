@@ -4775,6 +4775,74 @@ Assert::test('the public landing page cannot reach a patient name', function ():
     Assert::true(strpos($code, 'room_name') !== false, 'and the room, matching the waiting-room screen');
 });
 
+/* ---- the public homepage must not overclaim ------------------------- */
+
+/**
+ * The landing design was supplied as a mockup full of placeholder credibility:
+ * five hospital logos, a named medical director, "500+ clinics", "47% shorter
+ * waits". None of it is ours. These tests keep it from creeping back in when
+ * somebody tidies the copy later.
+ */
+$landingCopy = static function (): string {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/landing.php');
+    // Comments explain why a claim is ABSENT, so they must be stripped before
+    // searching for the claim itself — otherwise the explanation fails the test.
+    $code = (string) preg_replace('~/\*.*?\*/~s', '', $view);
+    $code = (string) preg_replace('~^\s*//.*$~m', '', $code);
+
+    return (string) preg_replace('~<!--.*?-->~s', '', $code);
+};
+
+Assert::test('the homepage borrows no credibility it has not earned', function () use ($landingCopy): void {
+    $code = $landingCopy();
+    foreach (['Nawaloka', 'Lanka Hospitals', 'Asiri', 'Durdans', 'Unity Healthcare'] as $brand) {
+        Assert::true(strpos($code, $brand) === false, 'no hospital named as a customer: ' . $brand);
+    }
+    foreach (['500+', '47%', '92%', '2.5 hrs', '30%'] as $stat) {
+        Assert::true(strpos($code, $stat) === false, 'no statistic we cannot measure: ' . $stat);
+    }
+    Assert::true(strpos($code, 'Medical Director') === false, 'no invented testimonial author');
+});
+
+Assert::test('homepage prices and limits are read from the plan row', function () use ($landingCopy): void {
+    $code = $landingCopy();
+    // A hardcoded price drifts the moment a plan is repriced, and the homepage
+    // would then be advertising a number billing does not honour.
+    foreach (['3500', '3,500', '7900', '7,900', '14900', '14,900'] as $literal) {
+        Assert::true(strpos($code, $literal) === false, 'no hardcoded price: ' . $literal);
+    }
+    Assert::true(strpos($code, 'price_monthly') !== false, 'the price comes from the column');
+    Assert::true(strpos($code, 'number_format') !== false, 'and is formatted, not typed');
+    foreach (['max_doctors', 'max_staff', 'max_queues'] as $col) {
+        Assert::true(strpos($code, $col) !== false, 'limits come from ' . $col);
+    }
+});
+
+Assert::test('the homepage advertises the trial signup actually grants', function () use ($landingCopy): void {
+    $svc = (string) file_get_contents(QP_ROOT . '/app/Services/ClinicService.php');
+    Assert::true(preg_match("~strtotime\('\+(\d+) days'\)~", $svc, $m) === 1, 'the trial length is readable from the signup code');
+    $days = (int) ($m[1] ?? 0);
+    Assert::true($days > 0, 'a real trial length was found');
+    $code = $landingCopy();
+    Assert::true(strpos($code, $days . '-day free trial') !== false, 'the CTA matches the granted trial');
+    Assert::true(strpos($code, $days . ' days, full access') !== false, 'so does the reassurance line');
+});
+
+Assert::test('the homepage quotes one currency and no exchange rate', function () use ($landingCopy): void {
+    $code = $landingCopy();
+    Assert::true(strpos($code, 'LKR') !== false, 'prices are labelled LKR');
+    Assert::true(strpos($code, 'USD') === false, 'no second currency we have no rate for');
+});
+
+Assert::test('the homepage keeps its script external for the CSP', function (): void {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/landing.php');
+    Assert::true(
+        preg_match('~<script(?![^>]*\bsrc=)[^>]*>~i', $view) === 0,
+        'no inline script: script-src is self, so inline would silently not run'
+    );
+    Assert::true(strpos($view, "js/landing.js") !== false, 'the carousel ships as its own file');
+});
+
 /* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
