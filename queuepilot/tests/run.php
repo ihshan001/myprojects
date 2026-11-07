@@ -4843,6 +4843,37 @@ Assert::test('the homepage keeps its script external for the CSP', function (): 
     Assert::true(strpos($view, "js/landing.js") !== false, 'the carousel ships as its own file');
 });
 
+/* ---- a rebuild must actually reach a returning browser -------------- */
+
+Assert::test('a rebuilt asset is a new url, so the immutable cache is safe', function (): void {
+    // serve.mjs sends `max-age=31536000, immutable` for /assets/build/. That is
+    // only correct for a content-addressed url. asset() used to return a fixed
+    // path, so a browser that had visited once kept the OLD stylesheet for a
+    // year and rendered the redesigned homepage unstyled — new markup, old CSS.
+    $css = asset('build/app.css');
+    Assert::true(strpos($css, '?v=') !== false, 'the stylesheet url carries a fingerprint');
+
+    $file = QP_ROOT . '/public/assets/build/app.css';
+    Assert::true(is_file($file), 'the built stylesheet exists');
+    Assert::true(strpos($css, substr((string) md5_file($file), 0, 10)) !== false, 'the fingerprint is the file digest');
+
+    // The header that makes this mandatory, asserted so the pairing is explicit.
+    $serve = (string) file_get_contents(QP_ROOT . '/tools/serve.mjs');
+    Assert::true(strpos($serve, 'immutable') !== false, 'build assets really are served immutable');
+
+    // A missing file must not produce a bogus "?v=" that caches a 404 forever.
+    Assert::true(strpos(asset('build/definitely-not-built.css'), '?v=') === false, 'no fingerprint invented for a missing file');
+});
+
+Assert::test('the service worker cannot pin an old stylesheet', function (): void {
+    $sw = (string) file_get_contents(QP_ROOT . '/public/sw.js');
+    Assert::true(strpos($sw, 'hit || fetch(req)') === false, 'the shell is no longer cache-first');
+    Assert::true(strpos($sw, 'SHELL_ASSETS.includes(url.pathname)') !== false, 'the shell branch still exists');
+    Assert::true(strpos($sw, 'qp-v2') === false, 'the old cache version is gone, so activate() drops it');
+    // Data must still bypass the cache entirely: a stale "you are next" is a lie.
+    Assert::true(strpos($sw, "url.pathname.startsWith('/api/')") !== false, 'the api bypass survives');
+});
+
 /* ------------------------------------------------------------------ */
 
 $code = Assert::summary();

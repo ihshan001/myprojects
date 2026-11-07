@@ -77,6 +77,19 @@ homepage has been changed three times, each on explicit request:
   The patient mock-up is filled by `QueueService::nextWaitingPublic()`, which
   returns five whitelisted fields so no capability token reaches the view.
 
+A fourth change was app-wide rather than cosmetic. The redesigned homepage
+rendered **unstyled in a browser that had visited before**: `tools/serve.mjs`
+sends `Cache-Control: public, max-age=31536000, immutable` for `/assets/build/`,
+which is only correct for a content-addressed URL — but queuepilot's `asset()`
+returned a fixed path, and `sw.js` served the shell cache-first under a `VERSION`
+nobody bumped. New markup arrived with year-old CSS, so the container had no
+width, the type fell back to default sizes and the chart SVG had no height and
+blew up to full width. Both are now fixed in queuepilot the way devtest fixed them
+in `6e69d22`: `asset()` appends a content digest, and the worker is network-first
+at `qp-v3` with an offline fallback. Two test groups assert the pairing, and a
+browser test reproduces the failure — reverting `asset()` makes a warm-cache
+reload miss the rebuild; restoring it makes the rebuild win.
+
 ```bash
 PORT=8085 node tools/serve-landing.mjs     # from devtest/
 ```
