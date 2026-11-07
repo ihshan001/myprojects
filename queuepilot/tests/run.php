@@ -4903,12 +4903,31 @@ Assert::test('scroll reveal is an enhancement, never a gate on content', functio
     $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
     $js  = (string) file_get_contents(QP_ROOT . '/public/assets/js/landing.js');
     // Hidden ONLY once the script has armed it, so a no-JS visitor sees everything.
-    Assert::true(strpos($css, '.lp-reveal-ready [data-reveal] { opacity: 0') !== false, 'hiding is scoped to the armed class');
+    Assert::true(
+        preg_match('~\.lp-reveal-ready\s+\[data-reveal\]\s*\{\s*opacity:\s*0~', $css) === 1,
+        'hiding is scoped to the armed class'
+    );
     Assert::true(strpos($js, "classList.add('lp-reveal-ready')") !== false, 'the script arms it');
     $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/landing.php');
     Assert::true(strpos($view, 'lp-reveal-ready') === false, 'the markup never ships pre-hidden');
     Assert::true(strpos($css, 'prefers-reduced-motion') !== false, 'reduced motion is honoured');
     Assert::true(strpos($js, 'prefers-reduced-motion') !== false, 'in both the styles and the script');
+});
+
+Assert::test('the reveal repeats in both directions', function (): void {
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/landing.js');
+    $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+    // Requested: not a one-time animation. The observer must keep watching and
+    // toggle both ways, so scrolling back up replays the entrance.
+    Assert::true(strpos($js, "classList.toggle('is-in', entry.isIntersecting)") !== false, 'the class is toggled, not just added');
+    $revealBlock = substr($js, (int) strpos($js, 'var io = new IntersectionObserver'));
+    $revealBlock = substr($revealBlock, 0, (int) strpos($revealBlock, 'Array.prototype.forEach'));
+    Assert::true(strpos($revealBlock, 'unobserve') === false, 'the reveal observer never stops watching');
+    // The exit needs its own transition, or it would snap instead of fading.
+    Assert::true(
+        preg_match('~\.lp-reveal-ready\s+\[data-reveal\]\s*\{[^}]*transition:~s', $css) === 1,
+        'the hidden state carries a transition too'
+    );
 });
 
 Assert::test('the brand type is self-hosted and licensed', function (): void {

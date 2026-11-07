@@ -19,11 +19,12 @@
   var targets = document.querySelectorAll('[data-reveal], [data-reveal-group]');
   if (!reduce && 'IntersectionObserver' in window && targets.length) {
     document.documentElement.classList.add('lp-reveal-ready');
+    // Reveals repeat: scrolling away fades a section back out, scrolling back
+    // fades it in again. The observer is never disconnected, so the page keeps
+    // breathing in both directions instead of animating only on first visit.
     var io = new IntersectionObserver(function (entries) {
       entries.forEach(function (entry) {
-        if (!entry.isIntersecting) return;
-        entry.target.classList.add('is-in');
-        io.unobserve(entry.target); // reveal once; never yank content away
+        entry.target.classList.toggle('is-in', entry.isIntersecting);
       });
     }, { rootMargin: '0px 0px -8% 0px', threshold: 0.01 });
     Array.prototype.forEach.call(targets, function (el) { io.observe(el); });

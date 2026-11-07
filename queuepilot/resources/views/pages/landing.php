@@ -104,7 +104,7 @@ $phone = $cid ? (new App\Domain\Queue\QueueService())->nextWaitingPublic($cid, $
 /** Map a series of counts to an SVG polyline inside a 260x70 box. */
 $sparkline = static function (array $values, int $w = 260, int $h = 70): array {
     $n = count($values);
-    if ($n < 2) { return ['line' => '', 'dots' => [], 'max' => 0]; }
+    if ($n < 2) { return ['line' => '', 'area' => '', 'dots' => [], 'max' => 0]; }
     $max = max(1, max($values));
     $pts = [];
     $dots = [];
@@ -114,7 +114,7 @@ $sparkline = static function (array $values, int $w = 260, int $h = 70): array {
         $pts[] = $x . ',' . $y;
         $dots[] = ['x' => $x, 'y' => $y];
     }
-    return ['line' => implode(' ', $pts), 'dots' => $dots, 'max' => $max];
+    return ['line' => implode(' ', $pts), 'area' => implode(' ', $pts) . ' ' . $w . ',' . $h . ' 0,' . $h, 'dots' => $dots, 'max' => $max];
 };
 $series = array_values($daily);
 $chart = $sparkline($series);
@@ -238,7 +238,7 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
 
       <!-- Floating product cards. Real values, or a dash. -->
       <div class="relative lg:h-[23.875rem]">
-        <div data-reveal style="--reveal-delay:120ms" class="lp-float relative z-10 w-full max-w-[18.75rem] p-4 lg:absolute lg:left-0 lg:top-0 lg:w-[53%] lg:max-w-none">
+        <div data-reveal style="--reveal-delay:120ms" class="lp-float relative z-10 w-full p-4 lg:absolute lg:left-0 lg:top-0 lg:w-[53%] lg:max-w-none">
           <div class="flex items-center gap-2">
             <span class="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 text-[0.65625rem] font-bold text-brand-700">
               <span class="h-1.5 w-1.5 rounded-full bg-brand-600"></span>Live demo
@@ -274,7 +274,7 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
           </div>
         </div>
 
-        <div data-reveal style="--reveal-delay:220ms" class="lp-float relative z-20 mt-4 w-full max-w-[18.125rem] p-4 lg:absolute lg:right-0 lg:top-[3.375rem] lg:mt-0 lg:w-[48%] lg:max-w-none">
+        <div data-reveal style="--reveal-delay:220ms" class="lp-float relative z-20 mt-4 w-full p-4 lg:absolute lg:right-0 lg:top-[3.375rem] lg:mt-0 lg:w-[48%] lg:max-w-none">
           <p class="text-[0.75rem] font-bold text-slate-800">Visits · last 14 days</p>
           <div class="mt-1 flex items-baseline justify-between">
             <p class="text-[0.6875rem] font-medium text-slate-500">Patients</p>
@@ -282,6 +282,13 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
           </div>
           <?php if ($chart['line'] !== ''): ?>
             <svg viewBox="0 0 260 70" class="mt-2 h-[4.375rem] w-full" role="img" aria-label="Daily patient visits over the last 14 days">
+              <defs>
+                <linearGradient id="lpChart1" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#0F766E" stop-opacity=".22"/>
+                  <stop offset="1" stop-color="#0F766E" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <polygon points="<?= e($chart['area']) ?>" fill="url(#lpChart1)"/>
               <polyline points="<?= e($chart['line']) ?>" fill="none" stroke="#0F766E" stroke-width="2"
                         stroke-linecap="round" stroke-linejoin="round"/>
               <?php foreach ($chart['dots'] as $d): ?>
@@ -314,17 +321,16 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
   </div>
 </section>
 
-<div class="lp-wash">
-<div class="lp-wrap space-y-5 pb-14">
 
   <!-- ============================================ what it is built for -->
   <?php /* Not a customer logo wall: there are no customers to name yet, so this
        row states capabilities the software actually has. */ ?>
-  <section data-reveal class="lp-panel px-5 py-6 sm:px-8">
+  <section data-reveal class="lp-band lp-band--paper !py-9">
+  <div class="lp-wrap">
     <p class="text-center text-[0.75rem] font-bold text-slate-700">Built for the way Sri Lankan OPDs actually run</p>
-    <ul data-reveal-group class="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+    <ul data-reveal-group class="mt-6 grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-3 lg:grid-cols-5">
       <?php foreach ($capabilities as [$icon, $label]): ?>
-        <li class="flex items-center justify-center gap-2.5">
+        <li class="flex items-center gap-2.5 last:col-span-2 last:justify-center sm:last:col-span-1 lg:justify-center">
           <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-700">
             <svg class="h-3.5 w-3.5" aria-hidden="true"><use href="#i-<?= e($icon) ?>"/></svg>
           </span>
@@ -332,10 +338,12 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
         </li>
       <?php endforeach; ?>
     </ul>
+  </div>
   </section>
 
   <!-- ================================================== the challenge -->
-  <section id="product" data-reveal class="lp-panel scroll-mt-20 px-5 py-8 sm:px-8 sm:py-10">
+  <section id="product" data-reveal class="lp-band lp-band--paper scroll-mt-20 !pt-2">
+  <div class="lp-wrap">
     <div class="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)_minmax(0,0.95fr)]">
       <div>
         <span class="lp-eyebrow">01 &mdash; The problem</span>
@@ -372,38 +380,39 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
         </div>
       </div>
     </div>
+  </div>
   </section>
 
   <!-- ==================================================== how it works -->
-  <section id="how" data-reveal class="lp-panel scroll-mt-20 px-5 py-8 sm:px-8 sm:py-10">
-    <div class="text-center">
-      <span class="lp-eyebrow">03 &mdash; How it works</span>
-      <h2 class="lp-h2 mt-3">One queue. Every step. No shouting.</h2>
-      <p class="lp-lead mx-auto mt-2 max-w-2xl">
-        From the first token to the end-of-day report &mdash; the same record follows the patient.
-      </p>
-    </div>
-    <ol data-reveal-group class="mt-9 grid gap-5 sm:grid-cols-2 lg:grid-cols-5 lg:gap-3">
-      <?php foreach ($steps as $i => [$n, $icon, $title, $body]): ?>
-        <li class="relative rounded-2xl border border-slate-200/70 px-4 pb-4 pt-6">
-          <span class="lp-step-num"><?= e($n) ?></span>
-          <div class="flex items-start gap-2.5">
-            <span class="lp-ico !h-8 !w-8"><svg class="h-4 w-4" aria-hidden="true"><use href="#i-<?= e($icon) ?>"/></svg></span>
-            <div class="min-w-0">
-              <p class="pt-1 text-[0.78125rem] font-bold text-slate-800"><?= e($title) ?></p>
-              <p class="mt-2 text-[0.71875rem] leading-relaxed text-slate-500"><?= e($body) ?></p>
+  <section id="how" data-reveal class="lp-band lp-band--mist scroll-mt-20">
+    <div class="lp-wrap">
+     <div class="md:grid md:grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)] md:gap-12 lg:block">
+      <div class="max-w-2xl md:sticky md:top-24 lg:static">
+        <span class="lp-eyebrow">03 &mdash; How it works</span>
+        <h2 class="lp-h2 mt-3">One queue. Every step. No shouting.</h2>
+        <p class="lp-lead mt-3">
+          From the first token to the end-of-day report &mdash; the same record follows the patient.
+        </p>
+      </div>
+      <ol data-reveal-group class="lp-flow mt-10 md:mt-0 lg:mt-10">
+        <?php foreach ($steps as [$n, $icon, $title, $body]): ?>
+          <li class="lp-flow-item">
+            <span class="lp-flow-node"><?= e($n) ?></span>
+            <div class="flex h-8 items-center gap-2.5">
+              <span class="lp-ico !h-8 !w-8"><svg class="h-4 w-4" aria-hidden="true"><use href="#i-<?= e($icon) ?>"/></svg></span>
+              <p class="text-[0.875rem] font-bold" style="color:var(--lp-ink)"><?= e($title) ?></p>
             </div>
-          </div>
-          <?php if ($i < count($steps) - 1): ?>
-            <svg class="absolute -right-2.5 top-1/2 hidden h-4 w-4 -translate-y-1/2 text-brand-600 lg:block" aria-hidden="true"><use href="#i-arrow-right"/></svg>
-          <?php endif; ?>
-        </li>
-      <?php endforeach; ?>
-    </ol>
+            <p class="mt-2.5 text-[0.78125rem] leading-relaxed"><?= e($body) ?></p>
+          </li>
+        <?php endforeach; ?>
+      </ol>
+     </div>
+    </div>
   </section>
 
   <!-- ========================================================= pricing -->
-  <section id="pricing" data-reveal class="scroll-mt-20 pt-4">
+  <section id="pricing" data-reveal class="lp-band lp-band--paper scroll-mt-20">
+  <div class="lp-wrap">
     <div class="text-center">
       <span class="lp-badge">Simple, transparent pricing</span>
       <h2 class="lp-h2 mt-4">Plans that grow with your clinic.</h2>
@@ -470,49 +479,57 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
         </div>
       <?php endforeach; ?>
     </div>
+  </div>
   </section>
 
   <!-- ============================================ principles + product -->
-  <section data-reveal class="grid gap-4 pt-4 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,0.7fr)_minmax(0,1.5fr)]">
-    <?php /* A carousel of product principles. No invented customer, no invented
-         percentage, no hospital brand borrowed for credibility. */ ?>
-    <div class="lp-quote flex flex-col" data-lp-carousel>
-      <?php foreach ($principles as $i => [$quote, $label, $body]): ?>
-        <div data-lp-slide="<?= $i ?>" <?= $i === 0 ? '' : 'hidden' ?>>
-          <p class="text-[1.1875rem] font-bold leading-snug tracking-[-0.02em]"><?= e($quote) ?></p>
-          <p class="mt-5 text-[0.78125rem] font-bold text-white"><?= e($label) ?></p>
-          <p class="mt-1 text-[0.71875rem] leading-relaxed text-white/70"><?= e($body) ?></p>
-        </div>
-      <?php endforeach; ?>
-      <div class="mt-auto flex items-center gap-3 pt-6">
-        <button type="button" data-lp-prev aria-label="Previous"
-                class="flex h-9 w-9 items-center justify-center rounded-full bg-white/15 text-white transition hover:bg-white/25">
-          <svg class="h-4 w-4" aria-hidden="true"><use href="#i-arrow-left"/></svg>
-        </button>
-        <button type="button" data-lp-next aria-label="Next"
-                class="flex h-9 w-9 items-center justify-center rounded-full bg-white/15 text-white transition hover:bg-white/25">
-          <svg class="h-4 w-4" aria-hidden="true"><use href="#i-arrow-right"/></svg>
-        </button>
-      </div>
-    </div>
-
-    <div class="lp-panel flex flex-col justify-center gap-6 px-5 py-7">
-      <?php foreach ([
-          ['monitor', 'Live dashboard', 'See your day as it happens.'],
-          ['megaphone', 'SMS, WhatsApp, email', 'Channel access follows your plan.'],
-          ['chart', 'Reports and exports', 'Waits, consults and no-shows, per doctor.'],
-      ] as [$icon, $title, $body]): ?>
-        <div class="flex items-start gap-3">
-          <span class="lp-ico"><svg class="h-4 w-4" aria-hidden="true"><use href="#i-<?= e($icon) ?>"/></svg></span>
-          <div class="min-w-0">
-            <p class="text-[0.78125rem] font-bold text-brand-700"><?= e($title) ?></p>
-            <p class="mt-0.5 text-[0.71875rem] leading-snug text-slate-500"><?= e($body) ?></p>
+  <section data-reveal class="lp-band lp-band--dark">
+    <div class="lp-wrap">
+      <div class="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] lg:gap-14">
+        <div>
+          <span class="lp-eyebrow">04 &mdash; Why it holds up</span>
+          <?php /* Principles, not a customer quote: there is no customer to quote
+               yet, so this says what the software actually does. */ ?>
+          <div class="mt-6" data-lp-carousel>
+            <?php foreach ($principles as $i => [$quote, $label, $body]): ?>
+              <div data-lp-slide="<?= $i ?>" <?= $i === 0 ? '' : 'hidden' ?>>
+                <p class="lp-display text-[1.6rem] font-semibold leading-[1.2] text-white sm:text-[1.95rem]"><?= e($quote) ?></p>
+                <p class="mt-5 text-[0.8125rem] font-bold" style="color:#7FD8C7"><?= e($label) ?></p>
+                <p class="mt-1.5 max-w-md text-[0.8125rem] leading-relaxed" style="color:#A9C6BF"><?= e($body) ?></p>
+              </div>
+            <?php endforeach; ?>
+            <div class="mt-7 flex items-center gap-3">
+              <button type="button" data-lp-prev aria-label="Previous principle"
+                      class="lp-tap-btn rounded-full bg-white/10 text-white transition hover:bg-white/20">
+                <svg class="h-4 w-4" aria-hidden="true"><use href="#i-arrow-left"/></svg>
+              </button>
+              <button type="button" data-lp-next aria-label="Next principle"
+                      class="lp-tap-btn rounded-full bg-white/10 text-white transition hover:bg-white/20">
+                <svg class="h-4 w-4" aria-hidden="true"><use href="#i-arrow-right"/></svg>
+              </button>
+            </div>
           </div>
-        </div>
-      <?php endforeach; ?>
-    </div>
 
-    <div class="lp-panel px-5 py-6">
+          <ul class="lp-divide-dark mt-9">
+            <?php foreach ([
+                ['monitor', 'Live dashboard', 'See your day as it happens.'],
+                ['megaphone', 'SMS, WhatsApp, email', 'Channel access follows your plan.'],
+                ['chart', 'Reports and exports', 'Waits, consults and no-shows, per doctor.'],
+            ] as [$icon, $title, $body]): ?>
+              <li class="flex items-start gap-3.5 py-4">
+                <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/10" style="color:#7FD8C7">
+                  <svg class="h-4 w-4" aria-hidden="true"><use href="#i-<?= e($icon) ?>"/></svg>
+                </span>
+                <div class="min-w-0">
+                  <p class="text-[0.84375rem] font-bold text-white"><?= e($title) ?></p>
+                  <p class="mt-0.5 text-[0.78125rem]" style="color:#A9C6BF"><?= e($body) ?></p>
+                </div>
+              </li>
+            <?php endforeach; ?>
+          </ul>
+        </div>
+
+    <div class="lp-panel self-start px-5 py-6">
       <div class="flex items-center gap-2">
         <span class="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 text-[0.65625rem] font-bold text-brand-700">
           <span class="h-1.5 w-1.5 rounded-full bg-brand-600"></span>Live demo
@@ -532,6 +549,13 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
           <p class="text-[0.71875rem] font-bold text-slate-700">Visits · last 14 days</p>
           <?php if ($chart['line'] !== ''): ?>
             <svg viewBox="0 0 260 70" class="mt-2 h-[4.625rem] w-full" role="img" aria-label="Daily visits over the last 14 days">
+              <defs>
+                <linearGradient id="lpChart2" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#0F766E" stop-opacity=".22"/>
+                  <stop offset="1" stop-color="#0F766E" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <polygon points="<?= e($chart['area']) ?>" fill="url(#lpChart2)"/>
               <polyline points="<?= e($chart['line']) ?>" fill="none" stroke="#0F766E" stroke-width="2"
                         stroke-linecap="round" stroke-linejoin="round"/>
               <?php foreach ($chart['dots'] as $d): ?>
@@ -563,58 +587,66 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
         </div>
       </div>
     </div>
+      </div>
+    </div>
   </section>
 
   <!-- =================================================== patient view -->
-  <section id="patient" data-reveal class="lp-panel scroll-mt-20 grid gap-8 px-5 py-8 sm:px-8 lg:grid-cols-2">
-    <div class="flex items-center gap-6">
-      <div class="lp-phone shrink-0 px-3 pb-4 pt-6">
-        <p class="text-center text-[0.5625rem] font-semibold text-slate-500">Your token</p>
-        <p class="mt-1 text-center font-mono text-[1.625rem] font-extrabold leading-none text-brand-700"><?= e($phone['token'] ?? '—') ?></p>
-        <p class="mt-2.5 truncate text-center text-[0.59375rem] font-bold text-slate-800"><?= e($phone['doctor'] ?? '—') ?></p>
-        <p class="truncate text-center text-[0.53125rem] text-slate-500"><?= e($phone['room'] ?? '') ?></p>
-        <p class="mt-2 text-center text-[0.53125rem] font-medium text-slate-500"><?= e($phone['estimate'] ?? '') ?></p>
-        <p class="mt-3 rounded-full bg-brand-700 py-1.5 text-center text-[0.53125rem] font-bold text-white">No app needed</p>
-      </div>
-      <div class="min-w-0">
-        <h3 class="lp-h3 lp-teal">Keep patients in the loop<br>without lifting the phone.</h3>
-        <ul class="mt-4 space-y-2.5">
-          <?php foreach (['Real-time token status', 'A wait range, not a fake exact time', 'SMS and WhatsApp updates'] as $t): ?>
-            <li class="lp-check">
-              <svg class="mt-0.5 h-4 w-4 shrink-0 text-brand-600" aria-hidden="true"><use href="#i-check-circle"/></svg>
-              <span><?= e($t) ?></span>
-            </li>
-          <?php endforeach; ?>
-        </ul>
-      </div>
-    </div>
+  <section id="patient" data-reveal class="lp-band lp-band--paper scroll-mt-20">
+    <div class="lp-wrap">
+      <div class="grid items-center gap-12 lg:grid-cols-2 lg:gap-16">
 
-    <div class="flex flex-col justify-center gap-5 rounded-2xl bg-slate-50/70 p-5 sm:flex-row sm:items-center">
-      <div class="shrink-0">
-        <div class="h-[5.75rem] w-[5.75rem] overflow-hidden rounded-xl bg-white p-1.5 [&>svg]:h-full [&>svg]:w-full">
-          <?= App\Support\QrCode::svg('/demo/board', 3, 2) ?>
+        <div class="flex flex-col items-center gap-7 sm:flex-row sm:items-center sm:gap-9">
+          <div class="lp-phone shrink-0 px-3 pb-4 pt-6">
+            <p class="text-center text-[0.5625rem] font-semibold text-slate-500">Your token</p>
+            <p class="lp-mono mt-1 text-center text-[1.625rem] font-bold leading-none text-brand-700"><?= e($phone['token'] ?? '—') ?></p>
+            <p class="mt-2.5 truncate text-center text-[0.59375rem] font-bold text-slate-800"><?= e($phone['doctor'] ?? '—') ?></p>
+            <p class="truncate text-center text-[0.53125rem] text-slate-500"><?= e($phone['room'] ?? '') ?></p>
+            <p class="mt-2 text-center text-[0.53125rem] font-medium text-slate-500"><?= e($phone['estimate'] ?? '') ?></p>
+            <p class="mt-3 rounded-full bg-brand-700 py-1.5 text-center text-[0.53125rem] font-bold text-white">No app needed</p>
+          </div>
+          <div class="w-full min-w-0">
+            <span class="lp-eyebrow">05 &mdash; For the patient</span>
+            <h2 class="lp-h2 mt-3 !text-[1.5rem] sm:!text-[1.75rem]">Keep patients in the loop without lifting the phone.</h2>
+            <ul class="mt-5 space-y-3">
+              <?php foreach (['Real-time token status', 'A wait range, not a fake exact time', 'SMS and WhatsApp updates'] as $txt): ?>
+                <li class="lp-check">
+                  <svg class="mt-0.5 h-4 w-4 shrink-0 text-brand-600" aria-hidden="true"><use href="#i-check-circle"/></svg>
+                  <span><?= e($txt) ?></span>
+                </li>
+              <?php endforeach; ?>
+            </ul>
+          </div>
         </div>
-      </div>
-      <div class="min-w-0 flex-1">
-        <p class="text-[0.78125rem] font-bold text-slate-800">Try the patient view</p>
-        <p class="mt-0.5 text-[0.71875rem] text-slate-500">Scan to open the demo patient link.</p>
-        <div class="mt-3 grid grid-cols-3 gap-2.5">
-          <?php foreach ([
-              [$avgWait !== null ? $avgWait . ' min' : '—', 'Avg wait'],
-              [$phone ? (string) max(0, $phone['position'] - 1) : '—', 'People ahead'],
-              ['0', 'Apps to install'],
-          ] as [$v, $k]): ?>
-            <div class="rounded-xl border border-slate-200/70 bg-white px-2 py-2.5 text-center">
-              <p class="lp-num text-[1rem]"><?= e($v) ?></p>
-              <p class="mt-0.5 text-[0.59375rem] font-medium text-slate-500"><?= e($k) ?></p>
+
+        <div class="lp-panel p-5 sm:p-6">
+          <div class="flex items-center gap-4 sm:gap-5">
+            <div class="h-[5.25rem] w-[5.25rem] shrink-0 overflow-hidden rounded-xl border border-slate-200/70 bg-white p-1.5 [&>svg]:h-full [&>svg]:w-full">
+              <?= App\Support\QrCode::svg('/demo/board', 3, 2) ?>
             </div>
-          <?php endforeach; ?>
+            <div class="min-w-0">
+              <p class="text-[0.9375rem] font-bold" style="color:var(--lp-ink)">Try the patient view</p>
+              <p class="mt-1 text-[0.78125rem] leading-snug">Scan to open the demo patient link.</p>
+              <a href="/demo/board" class="lp-tap mt-1 text-[0.78125rem] font-bold lp-teal">Or open it here &rarr;</a>
+            </div>
+          </div>
+          <div class="mt-5 grid grid-cols-3 gap-2.5">
+            <?php foreach ([
+                [$avgWait !== null ? $avgWait . ' min' : '—', 'Avg wait'],
+                [$phone ? (string) max(0, $phone['position'] - 1) : '—', 'People ahead'],
+                ['0', 'Apps to install'],
+            ] as [$v, $k]): ?>
+              <div class="rounded-xl px-2 py-3 text-center" style="background:var(--lp-mist)">
+                <p class="lp-num text-[1.0625rem]"><?= e($v) ?></p>
+                <p class="mt-1 text-[0.625rem] font-medium leading-tight"><?= e($k) ?></p>
+              </div>
+            <?php endforeach; ?>
+          </div>
         </div>
+
       </div>
     </div>
   </section>
-</div>
-</div>
 
 <!-- ============================================================ footer -->
 <footer class="lp-footer">
@@ -630,9 +662,9 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
           on every public screen &mdash; never a patient name.
         </p>
       </div>
-      <nav class="flex flex-wrap gap-x-10 gap-y-3">
+      <nav class="grid w-full grid-cols-2 gap-x-6 sm:flex sm:w-auto sm:flex-wrap sm:gap-x-8 sm:gap-y-1">
         <?php foreach ([['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pricing'], ['#patient', 'Patient view'], ['/demo/board', 'Live demo'], ['/login', 'Sign in'], ['/register', 'Start trial']] as [$href, $label]): ?>
-          <a href="<?= e($href) ?>" class="lp-footer-link"><?= e($label) ?></a>
+          <a href="<?= e($href) ?>" class="lp-footer-link lp-tap"><?= e($label) ?></a>
         <?php endforeach; ?>
       </nav>
       <div class="flex items-center gap-1.5">

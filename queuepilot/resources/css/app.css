@@ -496,6 +496,51 @@
     background-size: 100% .09em;
     background-position: 0 96%;
   }
+  /* --- section rhythm -------------------------------------------------
+     Six identical white cards gave every section the same volume. These are
+     the shared primitives that let a section be a band, an open editorial
+     column, or a card — so the page has loud and quiet moments. */
+  .lp-band { @apply w-full py-14 sm:py-20; }
+  .lp-band--paper { background-color: var(--lp-paper); }
+  .lp-band--mist  { background-color: var(--lp-mist); }
+  .lp-band--dark  { background-color: var(--lp-deeper); color: #C6DBD5; }
+  .lp-band--dark .lp-h2, .lp-band--dark .lp-h3 { color: #fff; }
+  .lp-band--dark .lp-eyebrow { color: #7FD8C7; }
+  .lp-band--dark .lp-lead { color: #A9C6BF; }
+
+  .lp-hair { border-top: 1px solid var(--lp-line); }
+  .lp-divide > * + * { border-top: 1px solid var(--lp-line); }
+  .lp-divide-dark > * + * { border-top: 1px solid rgba(255,255,255,.12); }
+
+  /* The queue rail as a layout: a connected flow, vertical on small screens
+     and horizontal from lg. No boxes — the line does the structuring. */
+  .lp-flow { @apply relative; }
+  .lp-flow-item { @apply relative pb-8 pl-12; }
+  .lp-flow-item:last-child { @apply pb-0; }
+  .lp-flow-item::before {
+    content: ""; @apply absolute w-px; left: .9375rem; top: 2.25rem; bottom: .25rem;
+    background-image: repeating-linear-gradient(180deg, var(--lp-line) 0 .25rem, transparent .25rem .5rem);
+  }
+  .lp-flow-item:last-child::before { display: none; }
+  .lp-flow-node {
+    @apply lp-mono absolute left-0 top-0 flex h-8 w-8 items-center justify-center rounded-full text-[0.6875rem] font-bold text-white;
+    background-image: linear-gradient(140deg, #0F766E, #06322E);
+  }
+  @screen lg {
+    .lp-flow { @apply grid grid-cols-5 gap-5; }
+    .lp-flow-item { @apply pb-0 pl-0 pt-12; }
+    .lp-flow-item::before {
+    left: 2.5rem; right: -.75rem; top: .9375rem; bottom: auto; width: auto; height: 1px;
+      background-image: repeating-linear-gradient(90deg, var(--lp-line) 0 .25rem, transparent .25rem .5rem);
+    }
+  }
+
+  /* Tap targets: 44px is the floor on a touch screen, not a suggestion. */
+  /* 44 physical px at the 90% root: 44 / 0.9 / 16 = 3.0556rem. A plain
+     2.75rem would render 39.6px and quietly miss the touch-target floor. */
+  .lp-tap { @apply inline-flex items-center; min-height: 3.0556rem; }
+  .lp-tap-btn { @apply flex items-center justify-center; height: 3.0556rem; width: 3.0556rem; }
+
   .lp-footer { background-color: var(--lp-deeper); color: #CFE0DB; }
   .lp-footer-link { @apply text-[0.75rem] font-medium; color: #9FBDB6; transition: color .18s ease; }
   .lp-footer-link:hover { color: #fff; }
@@ -504,7 +549,10 @@
 /* ---- scroll reveal -------------------------------------------------
    Armed by JS only. With scripting off, or before the observer runs, every
    section is fully visible — the animation is an enhancement, never a gate. */
-.lp-reveal-ready [data-reveal] { opacity: 0; transform: translateY(1.5rem); }
+.lp-reveal-ready [data-reveal] {
+  opacity: 0; transform: translateY(1.5rem);
+  transition: opacity .55s cubic-bezier(.22,1,.36,1), transform .55s cubic-bezier(.22,1,.36,1);
+}
 .lp-reveal-ready [data-reveal].is-in {
   opacity: 1; transform: none;
   transition: opacity .75s cubic-bezier(.22,1,.36,1), transform .75s cubic-bezier(.22,1,.36,1);
@@ -518,7 +566,10 @@
 }
 
 /* Staggered children: one observer entry animates a whole row in sequence. */
-.lp-reveal-ready [data-reveal-group] > * { opacity: 0; transform: translateY(1rem); }
+.lp-reveal-ready [data-reveal-group] > * {
+  opacity: 0; transform: translateY(1rem);
+  transition: opacity .45s cubic-bezier(.22,1,.36,1), transform .45s cubic-bezier(.22,1,.36,1);
+}
 .lp-reveal-ready [data-reveal-group].is-in > * {
   opacity: 1; transform: none;
   transition: opacity .6s cubic-bezier(.22,1,.36,1), transform .6s cubic-bezier(.22,1,.36,1);

@@ -124,6 +124,35 @@ sees the whole page. `prefers-reduced-motion` skips the arming entirely. Count-u
 read their target from the server-rendered DOM and land on exactly that value —
 they animate a true number, never invent one.
 
+**Section rhythm.** The first brand pass put every section in the same white
+rounded card, so six identical boxes read at one volume. Sections now use shared
+band primitives — `.lp-band` with `--paper`, `--mist` and `--dark` variants —
+and the page alternates: hero wash, open capability strip, open editorial
+challenge, tinted flow band, pricing cards, one full-bleed dark band, open
+patient section, dark footer. `.lp-panel` is reserved for things that really are
+cards (pricing, the dashboard, the hero floats). No `<section>` carries it.
+
+**The flow is the product motif.** The five steps are no longer five boxes; they
+are `.lp-flow`, a dotted queue rail with numbered nodes — vertical on phones,
+a sticky heading beside it on tablet, horizontal across desktop.
+
+**Reveals repeat.** The observer toggles `is-in` in both directions and is never
+disconnected, so a section fades out when it leaves and back in when it returns.
+Both states carry a transition, so the exit fades rather than snaps. No-JS and
+reduced-motion still show everything; a test asserts the observer never calls
+`unobserve`.
+
+**Small screens.** Hero cards span the full gutter instead of being pinned to a
+desktop width; the fifth capability spans and centres rather than orphaning;
+the phone mock-up stacks above full-width copy instead of squeezing it into a
+150px column; the QR sits beside its caption; footer links form a two-column
+grid. Tap targets are `3.0556rem`, which is **44 physical px at the 90% root** —
+a naive `2.75rem` renders 39.6px and silently misses the floor. Verified at 375,
+426 and 768: no horizontal overflow, 44px minimum target.
+
+Captures: `docs/design/landing-page.png` (desktop), `docs/design/landing-mobile.png`
+(426px). Both are shot with reduced motion so every section is visible at once.
+
 ```bash
 PORT=8085 node tools/serve-landing.mjs     # from devtest/
 ```
