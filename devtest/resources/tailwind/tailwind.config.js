@@ -18,8 +18,13 @@ module.exports = {
         mint: {
           50: '#f0fbf7', 100: '#dff4ee', 200: '#bfe9dd',
         },
+        // Full ramp. The earlier slate->ink sweep referenced 300/600/800 in
+        // many views, but only four shades existed, so this class silently
+        // generated nothing and the text fell back to its inherited colour.
         ink: {
-          900: '#0f172a', 700: '#334155', 500: '#64748b', 400: '#94a3b8',
+          50: '#f8fafc', 100: '#f1f5f9', 200: '#e2e8f0', 300: '#cbd5e1',
+          400: '#94a3b8', 500: '#64748b', 600: '#475569', 700: '#334155',
+          800: '#1e293b', 900: '#0f172a',
         },
         canvas: '#f7f8fa',
         hairline: '#e8ecf1',

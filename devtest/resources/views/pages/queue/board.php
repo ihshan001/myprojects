@@ -1,6 +1,8 @@
 <?php use App\Domain\Queue\QueueStateMachine; ?>
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-queue"/></svg></span>
+    <div class="min-w-0">
     <div class="flex items-center gap-2">
       <a href="/app" class="text-ink-400 hover:text-ink-700"><svg class="h-4 w-4"><use href="#i-arrow-left"/></svg></a>
       <h1 class="text-xl font-bold tracking-tight text-ink-900"><?= e($queue['name']) ?></h1>
@@ -12,6 +14,7 @@
       <?php if (!empty($queue['room_name'])): ?> · <?= e($queue['room_name']) ?><?php endif; ?>
       · <?= e((string) $queue['session_date']) ?>
     </p>
+  </div>
   </div>
   <div class="flex flex-wrap gap-2">
     <?php if (count($queues) > 1): ?>

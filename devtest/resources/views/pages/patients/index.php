@@ -1,7 +1,10 @@
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-users"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Patients</h1>
     <p class="page-sub"><?= number_format($total) ?> records in this clinic · private to you</p>
+  </div>
   </div>
   <a href="/queue/new" class="btn-primary"><svg class="h-4 w-4"><use href="#i-plus"/></svg>New patient</a>
 </div>

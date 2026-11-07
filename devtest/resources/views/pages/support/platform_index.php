@@ -1,10 +1,13 @@
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-list"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Support queue</h1>
     <p class="page-sub">
       Every clinic's tickets. A ticket lands in <span class="font-medium">unanswered</span> until
       somebody on the platform replies to it.
     </p>
+  </div>
   </div>
 </div>
 

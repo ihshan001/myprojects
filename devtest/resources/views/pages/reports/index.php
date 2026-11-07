@@ -8,9 +8,12 @@ $peak = 0;
 foreach ($byHour as $h) { $peak = max($peak, (int) $h['total']); }
 ?>
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-chart"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Reports</h1>
     <p class="page-sub">Recorded, not estimated — every figure comes from real token timestamps.</p>
+  </div>
   </div>
   <div class="flex flex-wrap gap-2 no-print">
     <a href="/reports/export?from=<?= e($date) ?>&to=<?= e($date) ?>" class="btn-secondary">

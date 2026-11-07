@@ -1,11 +1,14 @@
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-alert"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Incidents</h1>
     <p class="mt-1 max-w-2xl text-sm text-ink-500">
       What broke, when somebody took it, what was done and why. The timeline is
       append-only — a correction is a new entry that says it corrects one, so a
       post-mortem cannot quietly rewrite itself.
     </p>
+  </div>
   </div>
   <a class="btn-secondary btn-sm" href="/admin/monitor">Platform health</a>
 </div>

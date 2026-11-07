@@ -1,5 +1,7 @@
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-switch"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Service workflows</h1>
     <p class="mt-1 max-w-2xl text-sm text-ink-500">
       The steps a visit must pass before it counts as finished. A doctor's visit
@@ -7,6 +9,7 @@
       report. Name them here and the desk cannot complete the visit until each
       one is ticked.
     </p>
+  </div>
   </div>
   <div class="flex gap-2">
     <a class="btn-secondary btn-sm" href="/queues/priority-rules">Priority rules</a>

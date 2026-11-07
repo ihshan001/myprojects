@@ -1,7 +1,10 @@
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-stethoscope"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Doctors & rooms</h1>
     <p class="page-sub">Average consultation time drives the wait ranges patients see.</p>
+  </div>
   </div>
   <?php if (!$planLimit): ?>
     <span class="badge-amber">Plan limit reached — upgrade to add doctors</span>

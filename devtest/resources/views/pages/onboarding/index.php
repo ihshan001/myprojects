@@ -1,11 +1,14 @@
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-sparkles"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Getting started</h1>
     <p class="mt-1 max-w-2xl text-sm text-ink-500">
       Everything below is read from your clinic's own data — a step is done when
       the clinic is actually set up for it, not when a box was ticked. Nothing
       here nags about work that is finished.
     </p>
+  </div>
   </div>
   <div class="flex items-center gap-3">
     <div class="text-right">

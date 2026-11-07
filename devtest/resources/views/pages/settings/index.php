@@ -1,8 +1,11 @@
 <?php $c = $clinicRecord; ?>
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-settings"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Settings</h1>
     <p class="page-sub">Clinic identity, staff accounts and queue policy.</p>
+  </div>
   </div>
   <a href="/billing" class="btn-secondary"><svg class="h-4 w-4"><use href="#i-card"/></svg><?= e($plan['name'] ?? 'No plan') ?></a>
 </div>

@@ -22,11 +22,14 @@ foreach ($grants as $g) {
 }
 ?>
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-building"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Branches</h1>
     <p class="page-sub">
       Staff work in their own branch. Grant another one here and it appears in their switcher.
     </p>
+  </div>
   </div>
   <a href="/settings" class="btn-secondary text-xs">Back to settings</a>
 </div>

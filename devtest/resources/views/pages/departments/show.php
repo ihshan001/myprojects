@@ -1,5 +1,7 @@
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-grid"/></svg></span>
+    <div class="min-w-0">
     <div class="flex items-center gap-2 text-xs text-ink-500">
       <a href="/departments" class="hover:underline">Departments</a>
       <span>/</span>
@@ -10,6 +12,7 @@
       <?= e(date('l, j F Y')) ?>
       <?php if (!empty($department['floor'])): ?> · <?= e($department['floor']) ?><?php endif; ?>
     </p>
+  </div>
   </div>
   <a class="btn-secondary btn-sm" href="/app">Full board</a>
 </div>

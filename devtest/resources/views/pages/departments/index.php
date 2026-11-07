@@ -1,10 +1,13 @@
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-grid"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Departments</h1>
     <p class="page-sub">
       A department is the part of the building a patient walks to. Queues, doctors and displays
       can belong to one, which is what makes a per-department board possible.
     </p>
+  </div>
   </div>
 </div>
 

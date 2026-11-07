@@ -59,7 +59,10 @@ $glance = [
         <p class="text-[11px] text-ink-400 sm:hidden">Auto-updates every 5s</p>
       </div>
       <?php if ($clinic): ?>
-        <a href="/display" target="_blank"
+        <?php /* Same tab, not target="_blank": inside an embedded preview a
+                  popup is silently blocked, so the button appeared to do
+                  nothing. The screen has its own "Exit display" link back. */ ?>
+        <a href="/display"
            class="flex shrink-0 items-center gap-2 rounded-xl border border-hairline bg-white px-3 py-2.5 text-[12px] font-semibold text-ink-700 shadow-card transition hover:bg-slate-50 sm:px-4">
           <svg class="h-[18px] w-[18px] shrink-0 text-ink-500"><use href="#i-monitor"/></svg>
           <span class="max-w-[72px] text-left text-[11px] leading-tight sm:max-w-none sm:text-[12px]">Waiting room screen</span>

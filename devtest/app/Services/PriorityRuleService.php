@@ -54,7 +54,7 @@ final class PriorityRuleService
         if ($activeOnly) {
             $sql .= ' AND r.is_active = 1';
         }
-        $sql .= ' ORDER BY r.effect DESC, r.id ASC';
+        $sql .= ' ORDER BY r.sort_order ASC, r.id ASC';
 
         return Db::all($sql, [$clinicId]);
     }
@@ -148,11 +148,27 @@ final class PriorityRuleService
             throw new \InvalidArgumentException('That queue does not belong to this clinic.');
         }
 
-        return Db::insert(
+        // Slot a new rule among its peers by effect, so saving a +3 does not
+        // silently lose to an existing +1 that happens to sit above it. The
+        // manager can then drag it wherever they actually want it.
+        $effect = (int) $in['effect'];
+        $above = (int) Db::scalar(
+            'SELECT COUNT(*) FROM priority_rules WHERE clinic_id = ? AND effect >= ?',
+            [$clinicId, $effect]
+        );
+        $order = $above + 1;
+
+        return Db::transaction(function () use ($clinicId, $queueId, $in, $doctorId, $effect, $actorId, $order): int {
+            Db::run(
+                'UPDATE priority_rules SET sort_order = sort_order + 1
+                  WHERE clinic_id = ? AND sort_order >= ?',
+                [$clinicId, $order]
+            );
+            return Db::insert(
             'INSERT INTO priority_rules
                (clinic_id, queue_id, name, source, kind, doctor_id, min_age, max_age,
-                from_hour, to_hour, effect, reason, is_active, created_by, created_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)',
+                from_hour, to_hour, effect, reason, is_active, created_by, created_at, sort_order)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?)',
             [
                 $clinicId, $queueId, trim((string) $in['name']),
                 ($in['source'] ?? '') !== '' ? (string) $in['source'] : null,
@@ -162,11 +178,52 @@ final class PriorityRuleService
                 $this->nullableInt($in['max_age'] ?? null),
                 $this->nullableHour($in['from_hour'] ?? null),
                 $this->nullableHour($in['to_hour'] ?? null),
-                (int) $in['effect'],
+                $effect,
                 trim((string) $in['reason']),
-                $actorId, Db::now(),
+                $actorId, Db::now(), $order,
             ]
-        );
+            );
+        });
+    }
+
+    /**
+     * Persist a new evaluation order.
+     *
+     * The whole list arrives at once and is written in one transaction: a
+     * half-applied drag would leave two rules claiming the same position and
+     * the engine's "first match" would become a coin toss.
+     *
+     * Every id must belong to this clinic and every rule must be present, so
+     * a stale browser tab cannot quietly drop a rule it has never seen.
+     *
+     * @param list<int> $orderedIds
+     */
+    public function reorder(int $clinicId, array $orderedIds): bool
+    {
+        $ids = array_values(array_unique(array_map('intval', $orderedIds)));
+        $owned = array_map('intval', array_column(
+            Db::all('SELECT id FROM priority_rules WHERE clinic_id = ?', [$clinicId]),
+            'id'
+        ));
+        if ($ids === [] || count($ids) !== count($owned)) {
+            throw new \InvalidArgumentException('Send every rule in this clinic, in the order you want.');
+        }
+        foreach ($ids as $id) {
+            if (!in_array($id, $owned, true)) {
+                throw new \InvalidArgumentException('That rule does not belong to this clinic.');
+            }
+        }
+
+        Db::transaction(function () use ($clinicId, $ids): void {
+            $pos = 1;
+            foreach ($ids as $id) {
+                Db::run(
+                    'UPDATE priority_rules SET sort_order = ? WHERE id = ? AND clinic_id = ?',
+                    [$pos++, $id, $clinicId]
+                );
+            }
+        });
+        return true;
     }
 
     /** Turn a rule off without deleting the history that refers to it. */
@@ -211,9 +268,10 @@ final class PriorityRuleService
         $doctorId = isset($ctx['doctor_id']) ? (int) $ctx['doctor_id'] : null;
         $queueId = isset($ctx['queue_id']) ? (int) $ctx['queue_id'] : null;
 
-        // Ordered by effect desc, so the first match is the strongest boost.
-        // A penalty only applies when nothing else matches, which falls out of
-        // the same ordering: boosts are positive and sort first.
+        // First matching rule in the manager's order decides the arrival.
+        // `sort_order` was backfilled to the previous effect-desc ranking, so
+        // this returns what strongest-match returned before the change; the
+        // difference is that the order is now something a manager can set.
         $best = null;
         foreach ($this->rules($clinicId) as $rule) {
             if ($rule['queue_id'] !== null && (int) $rule['queue_id'] !== $queueId) {
@@ -245,9 +303,8 @@ final class PriorityRuleService
                 }
             }
 
-            if ($best === null || (int) $rule['effect'] > (int) $best['effect']) {
-                $best = $rule;
-            }
+            $best = $rule;
+            break;
         }
 
         if ($best === null) {
@@ -260,6 +317,92 @@ final class PriorityRuleService
             'rule_id'   => (int) $best['id'],
             'rule_name' => (string) $best['name'],
         ];
+    }
+
+    /**
+     * The four numbers at the top of the screen.
+     *
+     * The wait figure is a COMPARISON, not a measurement of cause: patients a
+     * rule flags are clinically different from those it does not, so the gap
+     * says "these two groups waited differently", never "the rule saved this
+     * many minutes". It is null when either group is too small to compare,
+     * because a percentage built on three visits is noise presented as insight.
+     *
+     * @return array{active:int,total:int,overrides_today:int,wait_flagged:?float,wait_plain:?float,wait_gap:?int,updated_at:?string}
+     */
+    public function stats(int $clinicId, string $from, string $to): array
+    {
+        $rows = $this->rules($clinicId, false);
+        $active = count(array_filter($rows, static fn (array $r): bool => (int) $r['is_active'] === 1));
+
+        $overridesToday = (int) Db::scalar(
+            "SELECT COUNT(*) FROM audit_logs
+              WHERE clinic_id = ? AND action = 'queue.priority' AND substr(created_at,1,10) = ?",
+            [$clinicId, Db::today()]
+        );
+
+        $avg = static function (int $clinicId, string $from, string $to, bool $flagged): ?float {
+            $v = Db::scalar(
+                "SELECT AVG(e.wait_minutes) FROM queue_entries e
+                  JOIN queues q ON q.id = e.queue_id
+                 WHERE e.clinic_id = ? AND e.status = 'completed'
+                   AND e.wait_minutes IS NOT NULL
+                   AND q.session_date BETWEEN ? AND ?
+                   AND e.priority_rule_id IS " . ($flagged ? 'NOT NULL' : 'NULL'),
+                [$clinicId, $from, $to]
+            );
+            return $v === null ? null : round((float) $v, 1);
+        };
+        $flagged = $avg($clinicId, $from, $to, true);
+        $plain = $avg($clinicId, $from, $to, false);
+
+        $nFlagged = (int) Db::scalar(
+            "SELECT COUNT(*) FROM queue_entries e JOIN queues q ON q.id = e.queue_id
+              WHERE e.clinic_id = ? AND e.status = 'completed' AND e.wait_minutes IS NOT NULL
+                AND q.session_date BETWEEN ? AND ? AND e.priority_rule_id IS NOT NULL",
+            [$clinicId, $from, $to]
+        );
+        $gap = ($flagged !== null && $plain !== null && $plain > 0.0 && $nFlagged >= 5)
+            ? (int) round(($plain - $flagged) / $plain * 100)
+            : null;
+
+        // "Last updated" must include reordering and toggling, not just creation.
+        $lastRule = Db::scalar('SELECT MAX(created_at) FROM priority_rules WHERE clinic_id = ?', [$clinicId]);
+        $lastAudit = Db::scalar(
+            "SELECT MAX(created_at) FROM audit_logs
+              WHERE clinic_id = ? AND action LIKE 'priority_rule.%'",
+            [$clinicId]
+        );
+        $updated = max((string) $lastRule, (string) $lastAudit) ?: null;
+
+        return [
+            'active' => $active,
+            'total' => count($rows),
+            'overrides_today' => $overridesToday,
+            'wait_flagged' => $flagged,
+            'wait_plain' => $plain,
+            'wait_gap' => $gap,
+            'updated_at' => $updated,
+        ];
+    }
+
+    /**
+     * What has been changed, from the audit log rather than a second table.
+     * The log is already the record of who did what; a parallel history would
+     * be one more thing to keep in step.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function history(int $clinicId, int $limit = 40): array
+    {
+        return Db::all(
+            "SELECT a.id, a.action, a.meta_json, a.created_at, u.name AS actor_name
+               FROM audit_logs a
+               LEFT JOIN users u ON u.id = a.actor_id
+              WHERE a.clinic_id = ? AND a.action LIKE 'priority_rule.%'
+              ORDER BY a.id DESC LIMIT " . (int) $limit,
+            [$clinicId]
+        );
     }
 
     /** Age in whole years from a stored birth year; null when unrecorded. */

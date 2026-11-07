@@ -201,33 +201,6 @@ $brand = $clinicRecord['brand_color'] ?: '#0D7459';
 </div>
 
 <script src="<?= e(asset('js/app.js')) ?>" defer></script>
-<script>
-  // Voice toggle and full screen are local to this browser, so they are safe
-  // on a public board: they change nothing about the clinic's data.
-  (function () {
-    var btn = document.getElementById('tv-speech');
-    var on = localStorage.getItem('qp_speech') !== 'off';
-    function render() { btn.textContent = 'Voice announcements: ' + (on ? 'on' : 'off'); }
-    btn.addEventListener('click', function () {
-      on = !on;
-      localStorage.setItem('qp_speech', on ? 'on' : 'off');
-      render();
-    });
-    render();
 
-    var full = document.getElementById('tv-full');
-    if (!document.documentElement.requestFullscreen) {
-      full.remove();
-    } else {
-      full.addEventListener('click', function () {
-        if (document.fullscreenElement) { document.exitFullscreen(); }
-        else { document.documentElement.requestFullscreen().catch(function () {}); }
-      });
-      document.addEventListener('fullscreenchange', function () {
-        full.textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen';
-      });
-    }
-  })();
-</script>
 </body>
 </html>

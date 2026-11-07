@@ -1,7 +1,10 @@
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-building"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Clinics</h1>
     <p class="page-sub">Suspend or re-plan a tenant without touching its data.</p>
+  </div>
   </div>
   <a href="/admin" class="btn-ghost"><svg class="h-4 w-4"><use href="#i-arrow-left"/></svg>Overview</a>
 </div>

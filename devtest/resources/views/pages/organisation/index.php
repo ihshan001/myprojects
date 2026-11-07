@@ -1,9 +1,12 @@
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-building"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title"><?= e((string) ($org['name'] ?? 'Group')) ?></h1>
     <p class="page-sub">
       Branch performance side by side. Counts only — no patient names cross a branch boundary.
     </p>
+  </div>
   </div>
   <a href="/settings" class="btn-secondary"><svg class="h-4 w-4"><use href="#i-settings"/></svg>Settings</a>
 </div>

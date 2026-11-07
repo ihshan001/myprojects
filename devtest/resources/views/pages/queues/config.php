@@ -1,10 +1,13 @@
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-settings"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Queue settings</h1>
     <p class="page-sub">
       How tomorrow's queues are created. A queue already open today keeps its labels —
       a patient is holding one.
     </p>
+  </div>
   </div>
   <a class="btn-secondary btn-sm" href="/app">Today's board</a>
 </div>

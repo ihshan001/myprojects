@@ -1,11 +1,14 @@
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-shield"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Appointment policies</h1>
     <p class="mt-1 max-w-2xl text-sm text-ink-500">
       How late a patient may arrive, how far ahead this service may be booked,
       and whether it takes walk-ins. Every row here overrides the clinic
       default for one service; blank fields inherit it.
     </p>
+  </div>
   </div>
   <div class="flex gap-2">
     <a class="btn-secondary btn-sm" href="/queues/workflows">Service workflows</a>

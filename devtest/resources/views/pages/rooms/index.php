@@ -1,11 +1,14 @@
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-building"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Rooms</h1>
     <p class="page-sub">
       What the waiting-room screen calls each consultation space. A patient is told
       &ldquo;please proceed to <span class="font-medium text-ink-700"><?= e($rooms[0]['name'] ?? 'Room 1') ?></span>&rdquo;,
       so the name needs to be something they will recognise.
     </p>
+  </div>
   </div>
   <?php if ($canManage): ?>
     <a class="btn-secondary btn-sm" href="/doctors">Assign to a doctor</a>

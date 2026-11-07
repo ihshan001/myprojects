@@ -89,6 +89,62 @@ the same sidebar, top bar, cards, buttons, tables and mobile behaviour. The
 clinic board and the platform console are built from the same parts — greeting,
 five stat tiles, a main card and a right rail — with each role's own data.
 
+## Priority rules
+
+The order on the screen **is** the order the engine evaluates.
+
+### Why the engine changed
+
+Previously there was no stored order: rules were sorted `effect DESC` and the
+strongest match won. A manager could not express "under-fives first, and only
+then the morning lab list", and two rules with the same effect were ordered by
+insertion id — a tie-break decided by when somebody clicked Save.
+
+Migration `0018` adds `sort_order`, and `evaluate()` now takes the **first
+matching active rule**. The backfill ranks existing rules by exactly the old
+ordering, so first-match returns what strongest-match returned before: no
+clinic changes its queue order by upgrading. New rules slot in by effect so
+saving a +3 does not silently lose to an existing +1, and dragging overrides
+that default.
+
+`reorder()` writes the whole list in one transaction and rejects a partial or
+foreign list, so a stale tab cannot drop a rule it never saw.
+
+### The screen
+
+- Four counts: rules in action, manual overrides today, the wait comparison,
+  and last change (including reorders and toggles, not just creation).
+- Tabs for **Active rules** and **Rule history**, the history read from the
+  audit log rather than a second table that could drift.
+- Search, strength/status filters, and a numbered table with a drag handle.
+  **Arrow keys work on the handle** — a drag-only control locks out keyboards.
+- Saves debounce and queue: two quick moves used to lose the second one,
+  because the in-flight guard returned early and the screen showed an order
+  the server never received.
+- Below `sm` the table becomes stacked cards (`.dtable-stack`) so priority and
+  status are never hidden off the right edge.
+- The create form is a collapsible rail card, open automatically when a save
+  fails so the error and the field are on screen together.
+
+### Two deliberate deviations from the mockup
+
+- **"Avg. wait improvement 18%"** is shown as **"Wait difference"**, labelled
+  *shorter for flagged*, with the underlying averages spelled out underneath.
+  Patients a rule flags are clinically different from those it does not, so
+  the gap is a comparison of two groups, never proof the rule caused it. It
+  reads `—` until there are at least five flagged visits.
+- **No "High fever" rule** in the seed. Temperature is not recorded anywhere,
+  so such a rule would look authoritative and never match a patient. The five
+  seeded rules use only conditions the engine can actually evaluate.
+
+### Shared, not bespoke
+
+Everything new lives in `resources/css/app.css` as generic primitives:
+`.page-icon`, `.toolbar`, `.utab`, `.search-mini`, `.explainer`, `.dtable`,
+`.dtable-stack`, `.rule-grip`, `.prio-*`, `.metric-strip`, `.disclosure-btn`.
+The icon-led page head was applied to **33 page heads** across the console and
+the platform admin, so the upgrade reads the same everywhere.
+
 ## The two patient-facing screens
 
 These are deliberately **not** the console shell. They render as standalone

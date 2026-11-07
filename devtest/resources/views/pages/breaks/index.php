@@ -1,10 +1,13 @@
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-pause"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Breaks</h1>
     <p class="page-sub">
       A pause keeps every waiting patient and their estimate grows by its length — which is
       why it needs a reason and a category.
     </p>
+  </div>
   </div>
 </div>
 

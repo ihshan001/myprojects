@@ -24,11 +24,14 @@ if ($lastExport !== null) {
 }
 ?>
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-download"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Export clinic data</h1>
     <p class="page-sub">
       Everything <?= e((string) ($clinic['name'] ?? 'this clinic')) ?> has recorded, in one archive you keep.
     </p>
+  </div>
   </div>
   <a href="/settings" class="btn-secondary text-xs">Back to settings</a>
 </div>

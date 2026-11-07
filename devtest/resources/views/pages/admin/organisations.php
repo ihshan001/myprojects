@@ -1,10 +1,13 @@
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-building"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Groups</h1>
     <p class="page-sub">
       A group lets a business that runs several branches see one roll-up. Attaching a clinic
       gives its owner a summary of the other branches — not their patients.
     </p>
+  </div>
   </div>
 </div>
 

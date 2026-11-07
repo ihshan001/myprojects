@@ -4,9 +4,12 @@ $selectedQueue = (int) App\Core\Request::int('queue');
 $selectedPatient = (int) ($preselect ?? 0);
 ?>
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-user-plus"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">New patient</h1>
     <p class="page-sub">Search by phone or name, or register a walk-in. Four keystrokes to a token.</p>
+  </div>
   </div>
   <a href="/app" class="btn-ghost">
     <svg class="h-4 w-4"><use href="#i-arrow-left"/></svg>

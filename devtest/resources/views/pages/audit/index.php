@@ -1,7 +1,10 @@
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-list"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Audit log</h1>
     <p class="page-sub">Append-only. Clinic owners cannot edit or delete these entries.</p>
+  </div>
   </div>
   <form method="get" action="/audit" class="flex gap-2">
     <input class="input !py-2 text-xs" name="action" value="<?= e($filter ?? '') ?>" placeholder="Filter by action e.g. queue.call">

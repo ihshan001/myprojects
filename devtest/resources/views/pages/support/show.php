@@ -1,5 +1,7 @@
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-lifebuoy"/></svg></span>
+    <div class="min-w-0">
     <div class="flex items-center gap-2 text-xs text-ink-500">
       <a href="/support" class="hover:underline">Support</a>
       <span>/</span>
@@ -10,6 +12,7 @@
       Opened by <?= e($ticket['opened_by'] ?? 'unknown') ?> <?= e(ago($ticket['created_at'])) ?>
       · <?= e($ticket['category']) ?> · <?= e($ticket['priority']) ?>
     </p>
+  </div>
   </div>
   <span class="<?= match ((string) $ticket['status']) {
       'open' => 'badge-amber', 'waiting' => 'badge-teal',

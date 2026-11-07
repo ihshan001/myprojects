@@ -1,9 +1,12 @@
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-lifebuoy"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Support</h1>
     <p class="page-sub">
       Raise a problem with the platform team. Tickets are private to this clinic.
     </p>
+  </div>
   </div>
 </div>
 

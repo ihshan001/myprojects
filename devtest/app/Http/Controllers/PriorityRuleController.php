@@ -36,14 +36,30 @@ final class PriorityRuleController
     public function index(): void
     {
         $clinicId = $this->clinicId();
-        $rules = $this->rules->rules($clinicId, false);
+        view('queues/priority-rules', $this->viewData($clinicId, [], []));
+    }
 
+    /**
+     * Everything the screen reads, in one place.
+     *
+     * index() and the failed-save path used to build this separately, and the
+     * error path silently omitted the report — so a rejected rule wiped the
+     * right-hand column.
+     */
+    private function viewData(int $clinicId, array $old, array $errors): array
+    {
+        $from = Request::string('from', date('Y-m-d', strtotime('-30 days')));
+        $to = Request::string('to', Db::today());
+
+        $rules = $this->rules->rules($clinicId, false);
+        $position = 0;
         foreach ($rules as &$rule) {
             $rule['matches'] = $this->rules->describeMatch($rule);
+            $rule['position'] = ++$position;
         }
         unset($rule);
 
-        view('queues/priority-rules', [
+        return [
             'title'    => 'Priority rules',
             'rules'    => $rules,
             'doctors'  => Db::all('SELECT id, name FROM doctors WHERE clinic_id = ? ORDER BY name', [$clinicId]),
@@ -54,19 +70,41 @@ final class PriorityRuleController
             ),
             'sources'  => PriorityRuleService::SOURCES,
             'kinds'    => PriorityRuleService::KINDS,
-            'old'      => [],
-            'errors'   => [],
-            // The rules decide who gets seen first; the overuse report is what
-            // shows whether they are still being used as intended. Both on one
-            // screen so a rule and its consequences are read together.
-            'overuse'  => (new \App\Services\PriorityAuditService())->report(
-                $clinicId,
-                Request::string('from', date('Y-m-d', strtotime('-30 days'))),
-                Request::string('to', Db::today())
-            ),
-            'from'     => Request::string('from', date('Y-m-d', strtotime('-30 days'))),
-            'to'       => Request::string('to', Db::today()),
+            'old'      => $old,
+            'errors'   => $errors,
+            'stats'    => $this->rules->stats($clinicId, $from, $to),
+            'history'  => $this->rules->history($clinicId),
+            'overuse'  => (new \App\Services\PriorityAuditService())->report($clinicId, $from, $to),
+            'from'     => $from,
+            'to'       => $to,
+        ];
+    }
+
+    /** Drag-to-reorder. Returns JSON so the list does not need a full reload. */
+    public function reorder(): void
+    {
+        $clinicId = $this->clinicId();
+        $in = Request::payload();
+        $ids = $in['order'] ?? [];
+        if (is_string($ids)) {
+            $ids = json_decode($ids, true);
+        }
+        if (!is_array($ids)) {
+            json(['ok' => false, 'error' => 'Send an ordered list of rule ids.'], 422);
+            return;
+        }
+
+        try {
+            $this->rules->reorder($clinicId, $ids);
+        } catch (\InvalidArgumentException $e) {
+            json(['ok' => false, 'error' => $e->getMessage()], 422);
+            return;
+        }
+
+        $this->audit->log($clinicId, 'priority_rule.reordered', 'priority_rule', 0, [
+            'order' => array_map('intval', $ids),
         ]);
+        json(['ok' => true]);
     }
 
     public function save(): void
@@ -77,26 +115,7 @@ final class PriorityRuleController
         try {
             $ruleId = $this->rules->create($clinicId, $in, Auth::id());
         } catch (\InvalidArgumentException $e) {
-            $rules = $this->rules->rules($clinicId, false);
-            foreach ($rules as &$rule) {
-                $rule['matches'] = $this->rules->describeMatch($rule);
-            }
-            unset($rule);
-
-            view('queues/priority-rules', [
-                'title'   => 'Priority rules',
-                'rules'   => $rules,
-                'doctors' => Db::all('SELECT id, name FROM doctors WHERE clinic_id = ? ORDER BY name', [$clinicId]),
-                'queues'  => Db::all(
-                    "SELECT id, name FROM queues WHERE clinic_id = ? AND session_date >= date('now', '-7 day')
-                      ORDER BY session_date DESC, id DESC",
-                    [$clinicId]
-                ),
-                'sources' => PriorityRuleService::SOURCES,
-                'kinds'   => PriorityRuleService::KINDS,
-                'old'     => $in,
-                'errors'  => [$e->getMessage()],
-            ]);
+            view('queues/priority-rules', $this->viewData($clinicId, $in, [$e->getMessage()]));
             return;
         }
 

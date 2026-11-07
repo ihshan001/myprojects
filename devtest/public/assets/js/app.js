@@ -625,6 +625,237 @@
     }).start();
   }
 
+  /* ------------------------------------------------ shared disclosures */
+  /* Generic show/hide used by filters, the create form and any future rail
+     card. Keeps aria-expanded honest so a screen reader knows the state. */
+  document.addEventListener('click', (ev) => {
+    const t = ev.target.closest('[data-toggle]');
+    if (!t) return;
+    const panel = $(t.getAttribute('data-toggle'));
+    if (!panel) return;
+    const open = panel.classList.toggle('hidden') === false;
+    t.setAttribute('aria-expanded', String(open));
+    if (open && panel.classList.contains('flex-wrap')) panel.classList.add('flex');
+    else panel.classList.remove('flex');
+  });
+  document.addEventListener('click', (ev) => {
+    const t = ev.target.closest('[data-scroll-to]');
+    if (!t) return;
+    const el = $(t.getAttribute('data-scroll-to'));
+    if (!el) return;
+    if (el.tagName === 'DETAILS') el.open = true;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+
+  /* ---------------------------------------------------- priority rules */
+  const ruleBody = $('[data-rule-body]');
+  if (ruleBody) {
+    const rows = () => [...ruleBody.querySelectorAll('[data-rule-row]')];
+    const state = $('[data-order-state]');
+    const spin = $('[data-order-spin]');
+    const empty = $('[data-rule-empty]');
+
+    /* tabs */
+    $$('[data-rule-tab]').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const want = tab.getAttribute('data-rule-tab');
+        $$('[data-rule-tab]').forEach((t) => {
+          const on = t === tab;
+          t.classList.toggle('utab-active', on);
+          t.setAttribute('aria-selected', String(on));
+        });
+        $$('[data-rule-pane]').forEach((p) => {
+          p.classList.toggle('hidden', p.getAttribute('data-rule-pane') !== want);
+        });
+      });
+    });
+
+    /* search + filters */
+    const search = $('[data-rule-search]');
+    const filters = $$('[data-rule-filter]');
+    function applyFilters() {
+      const q = (search?.value || '').trim().toLowerCase();
+      const strength = filters.find((f) => f.dataset.ruleFilter === 'priority')?.value || '';
+      const status = filters.find((f) => f.dataset.ruleFilter === 'status')?.value || '';
+      let shown = 0;
+      rows().forEach((r) => {
+        const ok = (!q || (r.dataset.name || '').includes(q))
+          && (!strength || r.dataset.strength === strength)
+          && (!status || r.dataset.status === status);
+        r.classList.toggle('hidden', !ok);
+        if (ok) shown++;
+      });
+      if (empty) empty.classList.toggle('hidden', shown !== 0);
+    }
+    search?.addEventListener('input', applyFilters);
+    filters.forEach((f) => f.addEventListener('change', applyFilters));
+    $('[data-rule-filter-reset]')?.addEventListener('click', () => {
+      if (search) search.value = '';
+      filters.forEach((f) => { f.value = ''; });
+      applyFilters();
+    });
+
+    /* create form */
+    const form = $('#rule-form');
+    const formToggle = $('#rule-form-card [data-toggle]');
+    const setForm = (open) => {
+      form?.classList.toggle('hidden', !open);
+      formToggle?.setAttribute('aria-expanded', String(open));
+      if (open) {
+        $('#rule-form-card')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        $('#name')?.focus();
+      }
+    };
+    $$('[data-open-form]').forEach((b) => b.addEventListener('click', () => setForm(true)));
+    $('[data-close-form]')?.addEventListener('click', () => setForm(false));
+
+    /* ------------------------------------------------------- reordering */
+    const renumber = () => rows().forEach((r, i) => {
+      const n = r.querySelector('[data-rule-num]');
+      if (n) n.textContent = String(i + 1);
+    });
+
+    /* Two arrow presses in a row used to lose the second one: the guard
+       returned early while the first save was in flight, so the screen showed
+       an order the server never received. Now moves coalesce into a short
+       debounce, and any change made during a save is re-sent afterwards. The
+       order actually on screen is always the order that gets stored. */
+    let saveTimer = null;
+    let inFlight = false;
+    let again = false;
+
+    async function flush() {
+      if (inFlight) { again = true; return; }
+      inFlight = true;
+      const order = rows().map((r) => Number(r.dataset.id));
+      spin?.classList.add('animate-spin');
+      if (state) state.textContent = 'Saving order…';
+      try {
+        await window.qpApi('/queues/priority-rules/reorder', { method: 'POST', body: { order } });
+        if (state) {
+          state.textContent = 'Order saved · ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+        }
+      } catch (err) {
+        window.qpToast?.(err.message || 'Could not save the order', 'error');
+        if (state) state.textContent = 'Not saved — reload to see the stored order';
+      } finally {
+        inFlight = false;
+        if (again) { again = false; flush(); }
+        else spin?.classList.remove('animate-spin');
+      }
+    }
+
+    function persist() {
+      if (state) state.textContent = 'Saving order…';
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(flush, 350);
+    }
+
+    /* Do not let a navigate-away swallow a pending save. sendBeacon cannot set
+       headers, so this goes form-encoded: the router reads $_POST['_token']
+       and Request::payload() merges $_POST, which a JSON body would not do. */
+    window.addEventListener('pagehide', () => {
+      if (!saveTimer && !inFlight && !again) return;
+      clearTimeout(saveTimer);
+      const body = new URLSearchParams();
+      body.set('_token', csrf);
+      body.set('order', JSON.stringify(rows().map((r) => Number(r.dataset.id))));
+      navigator.sendBeacon?.('/queues/priority-rules/reorder', body);
+    });
+
+    function move(row, delta) {
+      const list = rows();
+      const i = list.indexOf(row);
+      const j = i + delta;
+      if (j < 0 || j >= list.length) return;
+      if (delta < 0) ruleBody.insertBefore(row, list[j]);
+      else ruleBody.insertBefore(list[j], row);
+      renumber();
+      persist();
+      row.querySelector('[data-rule-grip]')?.focus();
+    }
+
+    let dragged = null;
+    const clearMarks = () => rows().forEach((r) => r.classList.remove('row-drop-before', 'row-drop-after'));
+
+    rows().forEach((row) => {
+      const grip = row.querySelector('[data-rule-grip]');
+      if (!grip) return;
+
+      // Keyboard first: a drag-only control locks out anyone not using a mouse.
+      grip.addEventListener('keydown', (ev) => {
+        if (ev.key === 'ArrowUp') { ev.preventDefault(); move(row, -1); }
+        if (ev.key === 'ArrowDown') { ev.preventDefault(); move(row, 1); }
+      });
+
+      grip.addEventListener('dragstart', (ev) => {
+        dragged = row;
+        row.classList.add('row-dragging');
+        ev.dataTransfer.effectAllowed = 'move';
+        // Firefox needs data set or the drag never starts.
+        ev.dataTransfer.setData('text/plain', row.dataset.id);
+      });
+      grip.addEventListener('dragend', () => {
+        row.classList.remove('row-dragging');
+        clearMarks();
+        dragged = null;
+      });
+    });
+
+    ruleBody.addEventListener('dragover', (ev) => {
+      if (!dragged) return;
+      ev.preventDefault();
+      const over = ev.target.closest('[data-rule-row]');
+      if (!over || over === dragged) return;
+      const box = over.getBoundingClientRect();
+      const after = ev.clientY > box.top + box.height / 2;
+      clearMarks();
+      over.classList.add(after ? 'row-drop-after' : 'row-drop-before');
+    });
+
+    ruleBody.addEventListener('drop', (ev) => {
+      if (!dragged) return;
+      ev.preventDefault();
+      const over = ev.target.closest('[data-rule-row]');
+      if (!over || over === dragged) { clearMarks(); return; }
+      const box = over.getBoundingClientRect();
+      const after = ev.clientY > box.top + box.height / 2;
+      ruleBody.insertBefore(dragged, after ? over.nextSibling : over);
+      clearMarks();
+      renumber();
+      persist();
+    });
+  }
+
+  /* Waiting-room controls. Lives here rather than inline in the view because
+     the CSP is script-src 'self' — an inline block is blocked, which left the
+     voice and full-screen buttons doing nothing. */
+  const tvSpeech = $('#tv-speech');
+  if (tvSpeech) {
+    let on = localStorage.getItem('qp_speech') !== 'off';
+    const paint = () => { tvSpeech.textContent = 'Voice announcements: ' + (on ? 'on' : 'off'); };
+    tvSpeech.addEventListener('click', () => {
+      on = !on;
+      localStorage.setItem('qp_speech', on ? 'on' : 'off');
+      paint();
+    });
+    paint();
+  }
+  const tvFull = $('#tv-full');
+  if (tvFull) {
+    if (!document.documentElement.requestFullscreen) {
+      tvFull.remove();
+    } else {
+      tvFull.addEventListener('click', () => {
+        if (document.fullscreenElement) document.exitFullscreen();
+        else document.documentElement.requestFullscreen().catch(() => {});
+      });
+      document.addEventListener('fullscreenchange', () => {
+        tvFull.textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen';
+      });
+    }
+  }
+
   /* ------------------------------------------ display board (TV mode) */
   const tvBoard = $('[data-display-board]');
   if (tvBoard) {

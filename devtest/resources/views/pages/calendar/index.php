@@ -1,12 +1,15 @@
 <?php $dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']; ?>
 
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-calendar"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Schedules &amp; holidays</h1>
     <p class="page-sub">
       Who works when, and which days the clinic is shut. The public booking page builds its times
       from this — nothing here is cosmetic.
     </p>
+  </div>
   </div>
 </div>
 

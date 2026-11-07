@@ -1,10 +1,13 @@
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-bell"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Notifications</h1>
     <p class="page-sub">
       What the system told staff, and what it sent to patients. Two lists because they are two
       different questions: "did anyone see this" and "did the SMS actually leave".
     </p>
+  </div>
   </div>
   <?php if ($tab === 'staff' && $unread > 0): ?>
     <form method="post" action="/notifications/read-all">

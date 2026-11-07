@@ -4456,6 +4456,102 @@ Assert::test('revenue is billed at each doctor\'s fee, and says so', function ()
 });
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* priority rule ordering                                              */
+/* ------------------------------------------------------------------ */
+
+Assert::test('rule order is explicit and the first match wins', function (): void {
+    $clinicId = 1;
+    $svc = new \App\Services\PriorityRuleService();
+
+    // Two rules that both match the same arrival, with the WEAKER one first.
+    // Under the old strongest-effect engine the +3 would have won regardless
+    // of position; the point of sort_order is that position now decides.
+    $weak = $svc->create($clinicId, [
+        'name' => 'Weak but first', 'effect' => 1, 'reason' => 'Deliberately first',
+    ]);
+    $strong = $svc->create($clinicId, [
+        'name' => 'Strong but second', 'effect' => 3, 'reason' => 'Deliberately second',
+    ]);
+    // create() slots by effect, so force the order we want to test.
+    $svc->reorder($clinicId, [$weak, $strong]);
+
+    $hit = $svc->evaluate($clinicId, ['source' => 'walkin', 'kind' => 'consultation', 'age' => 40, 'hour' => 10]);
+    Assert::same($weak, $hit['rule_id'], 'the first matching rule decides, not the strongest');
+    Assert::same(1, $hit['priority'], 'and its effect is what lands on the entry');
+
+    // Dragging the strong one to the top must change the outcome.
+    $svc->reorder($clinicId, [$strong, $weak]);
+    $hit2 = $svc->evaluate($clinicId, ['source' => 'walkin', 'kind' => 'consultation', 'age' => 40, 'hour' => 10]);
+    Assert::same($strong, $hit2['rule_id'], 'reordering changes which rule wins');
+    Assert::same(3, $hit2['priority'], 'so the order on screen is the order in force');
+
+    $svc->delete($clinicId, $weak);
+    $svc->delete($clinicId, $strong);
+});
+
+Assert::test('a turned-off rule is skipped, not counted', function (): void {
+    $clinicId = 1;
+    $svc = new \App\Services\PriorityRuleService();
+    $off = $svc->create($clinicId, ['name' => 'Switched off', 'effect' => 3, 'reason' => 'Not in force']);
+    $on = $svc->create($clinicId, ['name' => 'Switched on', 'effect' => 1, 'reason' => 'In force']);
+    $svc->reorder($clinicId, [$off, $on]);
+    $svc->setActive($clinicId, $off, false);
+
+    $hit = $svc->evaluate($clinicId, ['source' => 'walkin', 'kind' => 'consultation', 'age' => 40, 'hour' => 10]);
+    Assert::same($on, $hit['rule_id'], 'evaluation skips inactive rules even when they sit first');
+    $svc->delete($clinicId, $off);
+    $svc->delete($clinicId, $on);
+});
+
+Assert::test('reorder refuses a partial list', function (): void {
+    $clinicId = 1;
+    $svc = new \App\Services\PriorityRuleService();
+    $a = $svc->create($clinicId, ['name' => 'A', 'effect' => 1, 'reason' => 'first']);
+    $b = $svc->create($clinicId, ['name' => 'B', 'effect' => 2, 'reason' => 'second']);
+
+    $threw = false;
+    try { $svc->reorder($clinicId, [$a]); } catch (\InvalidArgumentException) { $threw = true; }
+    Assert::same(true, $threw, 'a stale tab cannot silently drop a rule it never saw');
+
+    $threw2 = false;
+    try { $svc->reorder($clinicId, [$a, $b, 999999]); } catch (\InvalidArgumentException) { $threw2 = true; }
+    Assert::same(true, $threw2, 'and an id from outside the clinic is rejected');
+
+    $svc->delete($clinicId, $a);
+    $svc->delete($clinicId, $b);
+});
+
+Assert::test('reorder is scoped to the clinic', function (): void {
+    $clinicId = 1;
+    $svc = new \App\Services\PriorityRuleService();
+    $other = (int) Db::scalar('SELECT id FROM clinics WHERE id <> ? ORDER BY id LIMIT 1', [$clinicId]);
+    if ($other === 0) { return; }
+    $mine = $svc->create($clinicId, ['name' => 'Mine', 'effect' => 1, 'reason' => 'owned']);
+    $theirs = $svc->create($other, ['name' => 'Theirs', 'effect' => 1, 'reason' => 'not owned']);
+
+    $threw = false;
+    try { $svc->reorder($clinicId, [$mine, $theirs]); } catch (\InvalidArgumentException) { $threw = true; }
+    Assert::same(true, $threw, 'a clinic cannot reorder another clinic\'s rules');
+    Assert::same([], array_values(array_filter(
+        $svc->rules($clinicId, false),
+        static fn (array $r): bool => (int) $r['id'] === $theirs
+    )), 'and never sees them in its own list');
+
+    $svc->delete($clinicId, $mine);
+    $svc->delete($other, $theirs);
+});
+
+Assert::test('rule stats report a comparison, not an invented saving', function (): void {
+    $clinicId = 1;
+    $svc = new \App\Services\PriorityRuleService();
+    $stats = $svc->stats($clinicId, '2020-01-01', '2020-01-02');
+    Assert::same(null, $stats['wait_gap'], 'an empty range claims no improvement');
+    Assert::same(null, $stats['wait_flagged'], 'and reports no average rather than zero');
+    Assert::true(isset($stats['active'], $stats['total'], $stats['overrides_today']), 'the counts are always present');
+});
+/* ------------------------------------------------------------------ */
+
 $code = Assert::summary();
 Database::cleanup($dbPath);
 echo "\n";

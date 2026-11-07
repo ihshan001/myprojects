@@ -10,9 +10,12 @@
 <?php endif; ?>
 
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-card"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Subscription</h1>
     <p class="page-sub">Plan, usage and invoices. SMS/WhatsApp usage is metered separately.</p>
+  </div>
   </div>
   <span class="<?= $c['billing_status'] === 'active' ? 'badge-emerald' : ($c['billing_status'] === 'trial' ? 'badge-amber' : 'badge-rose') ?>">
     <?= e(ucfirst(str_replace('_', ' ', (string) $c['billing_status']))) ?>

@@ -14,11 +14,14 @@
 $errorTemplate = (string) ($old['template'] ?? '');
 ?>
 <div class="page-head">
-  <div>
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-file"/></svg></span>
+    <div class="min-w-0">
     <h1 class="page-title">Message wording</h1>
     <p class="page-sub">
       The texts your patients receive. Change any of them — no deploy, no support ticket.
     </p>
+  </div>
   </div>
   <a href="/settings" class="btn-secondary text-xs">Back to settings</a>
 </div>
