@@ -34,9 +34,15 @@
      `zoom` is the property that reproduces browser zoom faithfully:
      it scales type, px utilities, images, borders and shadows
      together — a root `font-size: 90%` only reaches rem sizes and
-     cannot produce the same picture. The homepage's own `.lp-root`
-     scale knob is untouched and composes with this exactly as the
-     browser at 90% did.
+     cannot produce the same picture.
+
+     THIS IS THE ONLY SCALE MECHANISM. The homepage used to carry its
+     own `.lp-root { font-size: 90% }`; leaving that in place alongside
+     this rule applied 0.9 twice (0.81), shrinking the container from
+     1062px to 955.8px and every 44px tap target to 39.6px. Because all
+     homepage sizes are rem, zoom alone reproduces its geometry exactly:
+     73.75rem at a 16px root is 1180px, x0.9 = 1062px, and 3.0556rem is
+     48.89px, x0.9 = 44px. Do not reintroduce a root font-size.
 
      Media queries do NOT see the zoom (real browser zoom divides the
      viewport by 0.9), so `screens` in resources/tailwind/
@@ -350,10 +356,12 @@
    Type: Fraunces (display, with its SOFT/WONK axes on) over Inter (UI), with
    JetBrains Mono for anything that is a number. All self-hosted.
 
-   SCALE KNOB: .lp-root sets the root to 90%, and every size below is in rem,
-   so the whole page renders at the proportions of a browser at 90% zoom while
-   the browser itself stays at 100%. Change one number to retune the page.
-   Breakpoints stay in px, so responsive behaviour is unaffected.
+   SCALE: the single knob is `html { zoom: 0.9 }` at the top of this file,
+   shared with the console. Every size below is in rem, so the page renders at
+   the proportions of a browser at 90% zoom while the browser stays at 100%.
+   Breakpoints are NOT unaffected: resources/tailwind/tailwind.config.js carries
+   every screen x0.9 to match, because CSS zoom does not resize the viewport
+   media queries see. Change the zoom, change those with it.
    =================================================================== */
 @font-face { font-family: 'Inter'; font-style: normal; font-weight: 400; font-display: swap; src: url('/assets/fonts/inter-400.woff2') format('woff2'); }
 @font-face { font-family: 'Inter'; font-style: normal; font-weight: 500; font-display: swap; src: url('/assets/fonts/inter-500.woff2') format('woff2'); }
@@ -369,7 +377,9 @@
   src: url('/assets/fonts/jetbrains-mono-var.woff2') format('woff2-variations');
 }
 
-.lp-root { font-size: 90%; }
+/* .lp-root stays on <html> as the landing document's marker, but deliberately
+   carries no font-size: `html { zoom: 0.9 }` above is the one scale mechanism.
+   Adding a root font-size here would compound with it — see the note there. */
 
 @layer components {
   .lp {
@@ -681,8 +691,10 @@
   }
 
   /* Tap targets: 44px is the floor on a touch screen, not a suggestion. */
-  /* 44 physical px at the 90% root: 44 / 0.9 / 16 = 3.0556rem. A plain
-     2.75rem would render 39.6px and quietly miss the touch-target floor. */
+  /* 44 physical px under zoom: 44 / 0.9 / 16 = 3.0556rem, i.e. 48.89
+     computed px x 0.9 = 44 on screen. A plain 2.75rem renders 39.6px and
+     quietly misses the floor. Assert this with getBoundingClientRect, not
+     getComputedStyle — computed values are pre-zoom and will read 48.89. */
   .lp-tap { @apply inline-flex items-center; min-height: 3.0556rem; }
   .lp-tap-btn { @apply flex items-center justify-center; height: 3.0556rem; width: 3.0556rem; }
 

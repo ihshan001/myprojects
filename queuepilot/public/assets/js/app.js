@@ -751,9 +751,16 @@
     if (!btn) return;
     var form = btn.closest('form');
     var email = (form && form.querySelector('[name="email"]')) || document.getElementById('email');
-    var password = (form && form.querySelector('[name="password"]')) || document.getElementById('password');
-    if (email) email.value = btn.getAttribute('data-demo-email') || '';
-    if (password) password.value = btn.getAttribute('data-demo-pass') || '';
-    if (email) email.focus();
+    if (email) {
+      email.value = btn.getAttribute('data-demo-email') || '';
+      email.focus();
+    }
+    // Only fill a password if one was actually supplied. No page ships one any
+    // more, and defaulting to '' would silently wipe what the user just typed.
+    var pass = btn.getAttribute('data-demo-pass');
+    if (pass !== null) {
+      var password = (form && form.querySelector('[name="password"]')) || document.getElementById('password');
+      if (password) password.value = pass;
+    }
   });
 })();

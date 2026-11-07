@@ -268,15 +268,41 @@ five stat tiles, a main card and a right rail — with each role's own data.
 **Scale: 90% everywhere.** Every page — console and homepage — renders at the
 proportions of a browser zoomed to 90%, so nobody has to press Ctrl/Cmd −.
 `html { zoom: 0.9 }` in `resources/css/app.css` is the rule (it scales px
-utilities and images too, which a `font-size` root knob cannot). Element zoom
-does not resize the viewport media queries see, so three companions are
-retuned ×0.9 and must move with it: `screens` in
-`resources/tailwind/tailwind.config.js`, the two `max-width` rules in the same
-stylesheet, and the `matchMedia` lg query in `public/assets/js/app.js`.
-Print is exempt (`zoom: 1` inside `@media print`) — a browser at 90% still
-prints at 100%, so slips and QR codes keep their true size. Verified against a
-headless Chromium rendering the real 90%-zoom state (viewport ÷ 0.9, raster
-0.9): identical density, identical layout, no gap, fixed bars intact.
+utilities and images too, which a `font-size` root knob cannot). Print is
+exempt (`zoom: 1` inside `@media print`) — a browser at 90% still prints at
+100%, so slips and QR codes keep their true size.
+
+Zoom is the **only** scale mechanism. Four things must move with that number:
+
+| Companion | Where | Why |
+| --- | --- | --- |
+| `screens` ×0.9 | `resources/tailwind/tailwind.config.js` | CSS zoom does not resize the viewport media queries evaluate against. Verified: at a 950px window `innerWidth` stays 950 while `documentElement.clientWidth` becomes 1056. |
+| two `max-width` rules ×0.9 | `resources/css/app.css` | Same reason, hand-written instead of utilities. |
+| `matchMedia` lg → 921.6px | `public/assets/js/app.js` | The drawer close-on-rotate must agree with the CSS breakpoint. |
+| `height.screen` / `minHeight.screen` → `calc(100vh / 0.9)` | `resources/tailwind/tailwind.config.js` | `vh` resolves against the *unzoomed* viewport and is then scaled, so `min-h-screen` rendered 10% short — a 900px window showed an 810px shell with a white strip beneath it. Percentage heights (`h-full`) already resolve against the zoomed layout box and need no correction. No `vw` utility is used. |
+
+**Two regressions this port introduced, and how they were caught.** Both came
+from `devtest` having no landing page, so neither was visible here:
+
+- **The homepage scaled twice.** It already carried `.lp-root { font-size: 90% }`
+  on the same `<html>` that now had `zoom: 0.9`, giving 0.81. Measured on the real
+  page: container 1062px → 955.8px, and all 11 tap targets 44px → 39.59px.
+  `getComputedStyle` still reported `14.4px`, so only `getBoundingClientRect`
+  catches it. Fixed by deleting the root font-size — because every homepage size
+  is rem, zoom alone reproduces the geometry exactly (`73.75rem` at a 16px root
+  is 1180px, ×0.9 = 1062px; `3.0556rem` is 48.89px, ×0.9 = 44px). Re-measured:
+  1062px and 44px, 0 of 11 below the floor.
+- **The sign-in page printed the seeded platform-admin password.** It is
+  unauthenticated, so `data-demo-pass="QueuePilot#2026"` was public in
+  view-source and would hand over every tenant on an install that had not
+  rotated the seed. Passwords are gone from the markup entirely, the platform
+  admin is no longer listed, and the remaining email-only chips render only when
+  `app.env` is not `production`. Verified in both modes. For credential-free
+  access to every role, use the ports below — that is what this build is for.
+
+Three guards now fail if any of this returns: a single-scale-mechanism check, a
+zoom/breakpoint/vh parity check across both apps, and a scan of all 73 views for
+seeded passwords or `data-demo-pass`. Each was mutation-verified.
 
 ## The two patient-facing screens
 

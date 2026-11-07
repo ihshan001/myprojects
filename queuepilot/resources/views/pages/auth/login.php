@@ -101,23 +101,29 @@ $val = static fn (string $k, string $d = ''): string => (string) ($old[$k] ?? $d
         <button class="lp-btn w-full" type="submit">Sign in</button>
       </form>
 
+      <?php /* Demo shortcuts are a LOCAL convenience, never a production surface.
+               This page is unauthenticated, so anything printed here is public.
+               Passwords are deliberately absent: publishing the seeded platform
+               admin password would hand over every tenant on any install that
+               had not rotated it. Only the email is filled. For credential-free
+               access to every role, devtest/ signs you in by port. */ ?>
+      <?php if (\App\Core\Env::get('app.env', 'production') !== 'production'): ?>
       <div class="auth-demo">
         <p class="auth-demo-head">
           <svg class="h-3.5 w-3.5"><use href="#i-sparkles"/></svg>
-          Demo accounts
+          Local demo accounts
         </p>
         <p class="auth-demo-note">
-          Click to fill &mdash; the password is included so you can explore every role.
+          Click to fill the email, then type the password from your local seed.
+          Passwords are never printed here.
         </p>
         <div class="mt-3 flex flex-col gap-1.5">
           <?php foreach ([
-              ['Receptionist', 'reception@serenity.lk', 'Reception#2026'],
-              ['Doctor', 'amara@serenity.lk', 'Doctor#2026'],
-              ['Clinic owner', 'admin@serenity.lk', 'Serenity#2026'],
-              ['Platform admin', 'owner@queuepilot.app', 'QueuePilot#2026'],
-          ] as [$role, $mail, $pass]): ?>
-            <button type="button" class="auth-demo-btn"
-                    data-demo-email="<?= e($mail) ?>" data-demo-pass="<?= e($pass) ?>">
+              ['Receptionist', 'reception@serenity.lk'],
+              ['Doctor', 'amara@serenity.lk'],
+              ['Clinic owner', 'admin@serenity.lk'],
+          ] as [$role, $mail]): ?>
+            <button type="button" class="auth-demo-btn" data-demo-email="<?= e($mail) ?>">
               <span class="min-w-0">
                 <span class="auth-demo-name"><?= e($role) ?></span>
                 <span class="auth-demo-mail"><?= e($mail) ?></span>
@@ -127,6 +133,7 @@ $val = static fn (string $k, string $d = ''): string => (string) ($old[$k] ?? $d
           <?php endforeach; ?>
         </div>
       </div>
+      <?php endif; ?>
     </div>
   </main>
 </div>

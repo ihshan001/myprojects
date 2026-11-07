@@ -4891,12 +4891,89 @@ Assert::test('a full-document view is not wrapped in the console layout', functi
 });
 
 Assert::test('the homepage scale is a single knob that reaches every size', function (): void {
-    $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
-    Assert::true(strpos($css, '.lp-root { font-size: 90%; }') !== false, 'the page renders at the 90% proportions');
+    // Strip comments FIRST: the explanation quotes both `.lp-root { font-size }`
+    // and `html { zoom }`, so a raw substring match passes or fails on prose.
+    $css = (string) preg_replace('~/\*.*?\*/~s', '', (string) file_get_contents(QP_ROOT . '/resources/css/app.css'));
     $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/landing.php');
-    Assert::true(strpos($view, 'class="lp-root') !== false, 'and the document opts into it');
-    // A stray px size would silently ignore the knob and break the proportion.
+    Assert::true(strpos($view, 'class="lp-root') !== false, 'the document is marked as the landing page');
+    // Exactly ONE scale mechanism. `html { zoom: .9 }` and a root font-size on
+    // the same element multiply: 0.9 x 0.9 = 0.81, which took the container from
+    // 1062px to 955.8px and every 44px tap target to 39.6px. Computed style still
+    // reads 14.4px in that state, so only geometry catches it — hence this guard.
+    Assert::true(preg_match('~html\s*\{[^}]*zoom:\s*0?\.9~s', $css) === 1, 'zoom is the scale mechanism');
+    Assert::true(
+        preg_match('~\.lp-root\s*\{[^}]*font-size~s', $css) === 0,
+        'and no root font-size compounds with it'
+    );
+    // A stray px size would silently ignore the rem proportions.
     Assert::true(preg_match('~\[[0-9.]+px\]~', $view) === 0, 'every arbitrary size in the view is in rem');
+});
+
+Assert::test('breakpoints stay in step with the zoom, in both apps', function (): void {
+    // CSS zoom does not resize the viewport media queries evaluate against, so
+    // every screen must be the stock Tailwind value x 0.9 or layouts flip at the
+    // wrong physical window width. Change the zoom, change these.
+    $expected = ['sm' => '576px', 'md' => '691.2px', 'lg' => '921.6px', 'xl' => '1152px', '2xl' => '1382.4px'];
+    foreach (['queuepilot', 'devtest'] as $app) {
+        $root = $app === 'queuepilot' ? QP_ROOT : dirname(QP_ROOT) . '/devtest';
+        if (!is_dir($root)) {
+            continue; // the sibling app is not always checked out
+        }
+        $cfg = (string) file_get_contents($root . '/resources/tailwind/tailwind.config.js');
+        foreach ($expected as $name => $px) {
+            $q = preg_quote($name, '~');
+            Assert::true(
+                preg_match("~['\"]?{$q}['\"]?\s*:\s*['\"]" . preg_quote($px, '~') . "['\"]~", $cfg) === 1,
+                $app . ' ' . $name . ' is ' . $px
+            );
+        }
+        // vh resolves against the unzoomed viewport and is THEN scaled, so
+        // min-h-screen renders 10% short unless the utility divides it back out.
+        // This is what left a white strip under the auth pages and console shell.
+        foreach (['height', 'minHeight'] as $key) {
+            Assert::true(
+                preg_match("~{$key}\s*:\s*\{\s*screen\s*:\s*['\"]calc\(100vh\s*/\s*0?\.9\)['\"]~", $cfg) === 1,
+                $app . ' ' . $key . '.screen compensates for the zoom'
+            );
+        }
+        $css = (string) preg_replace('~/\*.*?\*/~s', '', (string) file_get_contents($root . '/resources/css/app.css'));
+        Assert::true(preg_match('~html\s*\{[^}]*zoom:\s*0?\.9~s', $css) === 1, $app . ' carries the matching zoom');
+        // Printing is never screen-scaled.
+        Assert::true(preg_match('~@media\s+print\s*\{[^}]*zoom:\s*1~s', $css) === 1, $app . ' prints at true size');
+    }
+});
+
+Assert::test('no credential is ever printed on an unauthenticated page', function (): void {
+    // The sign-in page is public and screenshot-able. A demo chip carrying the
+    // seeded platform-admin password hands over every tenant on any install
+    // that has not rotated it, so passwords must not reach the markup at all.
+    $views = [];
+    $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($it as $f) {
+        if ($f->isFile() && $f->getExtension() === 'php') {
+            $views[$f->getPathname()] = (string) file_get_contents($f->getPathname());
+        }
+    }
+    // Prove the walk reached the file this test is about, rather than asserting
+    // a file count that drifts whenever a view is added or removed.
+    Assert::true(isset($views[QP_ROOT . '/resources/views/pages/auth/login.php']), 'the scan reached the sign-in view');
+    Assert::true(count($views) >= 50, 'and walked the whole tree, not one directory');
+    foreach ($views as $path => $src) {
+        $rel = str_replace(QP_ROOT . '/', '', $path);
+        // Strip PHP comments so the explanation above is not a false positive.
+        $code = preg_replace('~/\*.*?\*/~s', '', $src);
+        Assert::true(
+            preg_match('~(QueuePilot|Serenity|Reception|Doctor|Lakeview|Coastal)#20[0-9]{2}~', $code) === 0,
+            $rel . ' prints no seeded password'
+        );
+        Assert::true(strpos($code, 'data-demo-pass') === false, $rel . ' ships no password attribute');
+    }
+    $login = $views[QP_ROOT . '/resources/views/pages/auth/login.php'];
+    Assert::true(
+        strpos($login, "Env::get('app.env', 'production') !== 'production'") !== false,
+        'the local demo block is gated off in production'
+    );
+    Assert::true(strpos($login, 'owner@queuepilot.app') === false, 'and never lists the platform admin');
 });
 
 Assert::test('scroll reveal is an enhancement, never a gate on content', function (): void {

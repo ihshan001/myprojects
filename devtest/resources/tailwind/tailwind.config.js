@@ -54,6 +54,15 @@ module.exports = {
       // breakpoints in the views stay un-retuned on purpose — they are
       // device thresholds, and desktop zoom does not run on devices.
       // Keep these in step with the zoom rule; change one, change both.
+      // VIEWPORT HEIGHTS AT 90% — `vh` is resolved against the unzoomed
+      // viewport and THEN scaled by `html { zoom: 0.9 }`, so `min-h-screen`
+      // renders 10% short: a 900px window shows an 810px shell with a white
+      // strip under it. Dividing by the zoom cancels it. Percentage heights
+      // (`h-full`) already resolve against the zoomed layout box and need no
+      // correction. No `vw` utility is used, so width needs nothing.
+      // Same 0.9 as the zoom rule and the screens below — change all three.
+      height: { screen: 'calc(100vh / 0.9)' },
+      minHeight: { screen: 'calc(100vh / 0.9)' },
       screens: {
         sm: '576px',       // 640 × 0.9
         md: '691.2px',     // 768 × 0.9
