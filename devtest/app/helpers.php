@@ -64,7 +64,7 @@ if (!function_exists('abort')) {
             'title'   => $status === 403 ? 'Access denied' : 'Something went wrong',
             'status'  => $status,
             'message' => $message,
-        ], false);
+        ]);
         exit;
     }
 }
@@ -74,16 +74,9 @@ if (!function_exists('t')) {
 }
 
 if (!function_exists('view')) {
-    /**
-     * $asLayout=false renders the page on its own. Several callers already
-     * passed it, but the parameter did not exist and PHP silently dropped
-     * the argument — so full-document views (the waiting-room TV, the kiosk,
-     * public tracking) were nested inside the console shell whenever a staff
-     * session existed, producing a document inside a document.
-     */
-    function view(string $template, array $data = [], bool $asLayout = true): void
+    function view(string $template, array $data = []): void
     {
-        echo View::render($template, $data, $asLayout);
+        echo View::render($template, $data);
     }
 }
 

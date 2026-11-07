@@ -3,62 +3,22 @@
 @tailwind utilities;
 
 /* =====================================================================
-   ClinicQueue design system  (shared by every role and every page)
-   ---------------------------------------------------------------------
-   Values are sampled from the approved reference boards, not guessed:
-     primary action   #0D7459      active nav pill   #DFF4EE
-     canvas           #F7F8FA      hairline border   #E8ECF1
-   Type is Inter, self-hosted (public/assets/fonts) so the board renders
-   identically offline and in the waiting-room kiosk.
+   QueuePilot design system
+   - calm clinical palette (teal + slate), high contrast for weak daylight
+   - no external fonts, no icon fonts: system stack + inline SVG sprites
+   - sizes tuned for a receptionist working at speed on a 1366px desk
    ===================================================================== */
-
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/assets/fonts/inter-400.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/assets/fonts/inter-500.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/assets/fonts/inter-600.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/assets/fonts/inter-700.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 800;
-  font-display: swap;
-  src: url('/assets/fonts/inter-800.woff2') format('woff2');
-}
 
 @layer base {
   :root {
-    --brand: #0d7459;
-    --brand-ink: #065f46;
-    --brand-soft: #dff4ee;
+    --brand: #0f766e;
+    --brand-ink: #0b4f4a;
+    --brand-soft: #ccfbf1;
     --ink: #0f172a;
     --muted: #64748b;
-    --line: #e8ecf1;
+    --line: #e2e8f0;
     --surface: #ffffff;
-    --canvas: #f7f8fa;
-    --sidebar-w: 246px;
+    --canvas: #f6f8fb;
   }
 
   html {
@@ -81,19 +41,6 @@
     }
   }
 
-  /* Grid and flex children default to min-width:auto, which lets one long
-     input or nowrap label stretch the whole page past a phone's width.
-     Content columns in this app never want min-content sizing. */
-  main .grid > *,
-  main .flex > * {
-    min-width: 0;
-  }
-  /* Only controls with an intrinsic size keep it. Text inputs and selects
-     must still shrink, or a search field plus its button overflow the card. */
-  main :is(button, svg, input[type=checkbox], input[type=radio]) {
-    flex-shrink: 0;
-  }
-
   /* Body scroll is locked while the drawer is open, so the page behind it
      does not slide around under the user's thumb. */
   body.qp-nav-open {
@@ -102,15 +49,9 @@
 
   body {
     @apply bg-[var(--canvas)] text-slate-800 antialiased;
-    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
       "Noto Sans Sinhala", "Noto Sans Tamil", sans-serif;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
-    letter-spacing: -0.011em;
-  }
-
-  .emoji {
-    font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
-    font-style: normal;
   }
 
   /* Numbers in a queue must never jitter between polls. */
@@ -129,8 +70,8 @@
   }
 
   ::selection {
-    background: #a7f3d0;
-    color: #064e3b;
+    background: #99f6e4;
+    color: #052e2b;
   }
 
   /* Sinhala/Tamil need more line height to stay legible */
@@ -143,7 +84,7 @@
 @layer components {
   /* ---------------------------------------------------------- surfaces */
   .card {
-    @apply rounded-xl border border-hairline bg-white shadow-card;
+    @apply rounded-xl border border-slate-200 bg-white shadow-sm;
   }
   .card-pad {
     @apply p-4 sm:p-5;
@@ -152,7 +93,7 @@
     @apply transition hover:border-slate-300 hover:shadow-md;
   }
   .panel {
-    @apply rounded-xl border border-hairline bg-white;
+    @apply rounded-xl border border-slate-200 bg-white;
   }
   .divider {
     @apply border-t border-slate-200;
@@ -165,20 +106,10 @@
            disabled:opacity-50;
   }
   .btn-primary {
-    @apply btn text-white shadow-sm;
-    background-image: linear-gradient(100deg, #128055, #0F6E48);
-  }
-  .btn-primary:hover { background-image: linear-gradient(100deg, #0F6E48, #0B5A3B); }
-  /* Pale brand fill with brand text: "Today's board" in the reference. */
-  .btn-tint {
-    @apply btn border border-brand-100 bg-brand-50 text-brand-700 hover:bg-brand-100;
-  }
-  /* White with brand text: "View report". */
-  .btn-outline-brand {
-    @apply btn border border-hairline bg-white text-brand-700 shadow-card hover:bg-brand-50;
+    @apply btn bg-teal-700 text-white shadow-sm hover:bg-teal-800;
   }
   .btn-secondary {
-    @apply btn border border-hairline bg-white text-ink-700 shadow-card hover:bg-slate-50;
+    @apply btn border border-slate-300 bg-white text-slate-700 hover:bg-slate-50;
   }
   /* Destructive or irreversible actions (close the day, cancel a visit).
      Distinct from btn-secondary so it cannot be clicked by muscle memory. */
@@ -186,7 +117,7 @@
     @apply btn bg-rose-600 text-white hover:bg-rose-700 focus-visible:ring-rose-500;
   }
   .btn-ghost {
-    @apply btn text-ink-500 hover:bg-slate-100;
+    @apply btn text-slate-600 hover:bg-slate-100;
   }
   .btn-danger {
     @apply btn bg-rose-600 text-white hover:bg-rose-700;
@@ -206,38 +137,35 @@
 
   /* Queue action buttons: big enough to hit fast, colour-coded by intent */
   .act {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-md border px-2.5 py-1
-           text-[11px] font-semibold leading-5 transition active:scale-[0.98] disabled:opacity-40;
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2
+           text-xs font-semibold transition active:scale-[0.98] disabled:opacity-40;
   }
   .act-call {
-    @apply act border-brand-200 bg-white text-brand-700 hover:bg-brand-50;
+    @apply act border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100;
   }
   .act-start {
-    @apply act border-brand-200 bg-white text-brand-700 hover:bg-brand-50;
+    @apply act border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100;
   }
   .act-done {
-    @apply act border-brand-200 bg-white text-brand-700 hover:bg-brand-50;
+    @apply act border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100;
   }
   .act-skip {
-    @apply act border-hairline bg-white text-ink-700 hover:bg-slate-50;
+    @apply act border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100;
   }
   .act-stop {
-    @apply act border-hairline bg-white text-rose-600 hover:bg-rose-50;
+    @apply act border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100;
   }
   .act-mute {
-    @apply act border-hairline bg-white text-ink-700 hover:bg-slate-50;
+    @apply act border-slate-200 bg-white text-slate-600 hover:bg-slate-50;
   }
 
   /* ------------------------------------------------------------ inputs */
   .label {
     @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500;
   }
-  .label-soft {
-    @apply mb-1.5 block text-[11.5px] font-semibold text-ink-600;
-  }
   .input {
-    @apply w-full rounded-lg border border-hairline bg-white px-3 py-2.5 text-sm text-ink-900
-           placeholder:text-slate-400 focus:border-brand-600 focus:ring-2 focus:ring-brand-600/15;
+    @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900
+           placeholder:text-slate-400 focus:border-teal-600 focus:ring-2 focus:ring-teal-600/15;
   }
   .input-lg {
     @apply input px-4 py-3 text-base;
@@ -250,7 +178,7 @@
     @apply input min-h-[80px] resize-y;
   }
   .checkbox {
-    @apply h-4 w-4 shrink-0 rounded border-slate-300 text-brand-700 focus:ring-brand-600;
+    @apply h-4 w-4 rounded border-slate-300 text-teal-700 focus:ring-teal-600;
   }
   .help {
     @apply mt-1 text-xs text-slate-500;
@@ -283,8 +211,8 @@
     @apply w-full border-collapse text-sm;
   }
   .table thead th {
-    @apply border-b border-hairline px-3 py-2.5 text-left text-[11px] font-semibold
-           uppercase tracking-wide text-ink-500;
+    @apply border-b border-slate-200 px-3 py-2.5 text-left text-[11px] font-semibold
+           uppercase tracking-wide text-slate-500;
   }
   .table tbody td {
     @apply border-b border-slate-100 px-3 py-2.5 align-middle text-slate-700;
@@ -295,20 +223,20 @@
 
   /* --------------------------------------------------------------- nav */
   .nav-item {
-    @apply flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium text-ink-700
-           transition hover:bg-slate-50 hover:text-ink-900;
+    @apply flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-slate-300
+           transition hover:bg-white/10 hover:text-white;
   }
   .nav-item-active {
-    @apply bg-mint-100 font-semibold text-brand-700 hover:bg-mint-100 hover:text-brand-700;
+    @apply bg-white/[0.12] text-white shadow-inner;
   }
   .nav-badge {
-    @apply ml-auto rounded-md bg-brand-50 px-1.5 py-0.5 text-[11px] font-bold text-brand-700;
+    @apply ml-auto rounded-md bg-teal-400/20 px-1.5 py-0.5 text-[11px] font-bold text-teal-100;
   }
 
   /* ---------------------------------------------------------- tokens */
   .token-chip {
-    @apply inline-flex items-center justify-center rounded-md bg-brand-50 px-2.5 py-1
-           text-[13px] font-bold tracking-tight text-brand-700;
+    @apply inline-flex min-w-[3.25rem] items-center justify-center rounded-lg border border-slate-200
+           bg-slate-50 px-2 py-1 font-mono text-sm font-bold text-slate-800;
   }
   .token-hero {
     @apply font-mono text-6xl font-black leading-none tracking-tight;
@@ -331,158 +259,13 @@
            text-[11px] font-semibold text-amber-800 ring-1 ring-amber-300;
   }
 
-  /* =================================================== live board =====
-     Geometry taken from the reference: 246px sidebar, 20px panel padding,
-     a 716/352 two-column split with a 29px gutter at 1484px wide.        */
-
-  .board-panel {
-    @apply rounded-2xl border border-hairline bg-white p-4 shadow-card sm:p-5;
-  }
-
-  /* ================================================ shared page kit ====
-     Every authenticated page is wrapped in .board-panel by the layout, so
-     these headers/sections are the same objects the Live board uses.     */
-
-  /* Page title block: a card on a phone, bare inside the desktop panel. */
-  .page-head {
-    @apply flex flex-wrap items-start justify-between gap-3 rounded-xl border
-           border-hairline bg-white p-4 shadow-card
-           lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none;
-  }
-  .page-title {
-    @apply text-[17px] font-bold leading-snug tracking-tight text-ink-900 sm:text-[22px];
-  }
-  .page-sub {
-    @apply mt-1.5 text-[11px] leading-snug text-ink-500 sm:text-[12px];
-  }
-
-  /* Card section header: white with a hairline, never the old grey strip. */
-  .section-head {
-    @apply flex flex-wrap items-center justify-between gap-2 border-b border-hairline
-           px-3 py-2.5 sm:px-4;
-  }
-  .section-title {
-    @apply text-[13px] font-bold tracking-tight text-ink-900 sm:text-[15px];
-  }
-  .section-link {
-    @apply text-[11px] font-semibold text-brand-700 hover:underline sm:text-[12px];
-  }
-
-  /* Filter / search rows above a list. */
-  .filter-bar {
-    @apply mt-3 flex flex-wrap items-end gap-2 sm:mt-5;
-  }
-
-  /* Body copy inside a card. */
-  .field-help { @apply mt-1 text-[11px] leading-relaxed text-ink-500; }
-  .kbd {
-    @apply rounded bg-slate-100 px-1 font-mono text-[11px] text-ink-700;
-  }
-
-  /* Top search bar: its own floating card, not a full-bleed strip. */
-  .topbar-card {
-    @apply flex h-12 items-center gap-3 rounded-xl border border-hairline bg-white
-           px-4 shadow-bar;
-  }
-  .topbar-search {
-    @apply h-9 w-full border-0 bg-transparent p-0 text-[13px] text-ink-900
-           placeholder:text-slate-400 focus:outline-none focus:ring-0;
-  }
-
-  /* Stat tiles: icon square + label/value/hint, five across on desktop. */
-  .stat-tile {
-    @apply flex items-center gap-3 rounded-xl border border-hairline bg-white
-           px-4 py-4 shadow-card;
-  }
-  .stat-ico {
-    @apply flex h-11 w-11 shrink-0 items-center justify-center rounded-xl;
-  }
-  .stat-label {
-    @apply text-[10px] font-semibold uppercase tracking-[0.06em] text-ink-500;
-    overflow-wrap: anywhere;
-  }
-  .stat-value {
-    @apply truncate text-[22px] font-bold leading-tight tracking-tight text-ink-900 tabular;
-  }
-  .stat-hint { @apply text-[11px] text-ink-500; }
-
-  /* Reference variant: 48px CIRCULAR icon, sentence-case label, calmer value.
-     The live board keeps the dense uppercase .stat-tile from its own mockup;
-     this is the same object with the softer treatment the inner pages use. */
-  .stat-soft { @apply gap-3.5 px-4 py-[18px]; }
-  .stat-soft .stat-ico { @apply h-12 w-12 rounded-full; }
-  .stat-soft .stat-ico svg { @apply h-5 w-5; }
-  .stat-soft .stat-label {
-    @apply text-[11.5px] font-medium normal-case tracking-normal text-ink-500;
-  }
-  .stat-soft .stat-value { @apply mt-0.5 text-[19px] font-bold; }
-  .stat-soft .stat-hint { @apply mt-0.5 text-[11.5px] text-ink-500; }
-
-  /* Doctor tabs inside the live-queue card. */
-  .qtab {
-    @apply relative shrink-0 whitespace-nowrap px-1 pb-2.5 pt-1 text-[13px] font-medium
-           text-ink-500 transition hover:text-ink-900;
-  }
-  .qtab-active {
-    @apply font-semibold text-brand-700;
-  }
-  .qtab-active::after {
-    content: "";
-    @apply absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-brand-600;
-  }
-
-  /* The two spotlight cards: in consultation (blue) and next in line (amber). */
-  .spot {
-    @apply rounded-xl border p-3;
-  }
-  .spot-now { @apply border-sky-300 bg-sky-50/50; }
-  .spot-next { @apply border-amber-200 bg-amber-50/40; }
-  .spot-tag {
-    @apply inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold;
-  }
-  .spot-token {
-    @apply inline-flex items-center justify-center rounded-lg bg-white/80 px-3 py-1.5
-           text-[17px] font-bold tracking-tight text-ink-900 ring-1 ring-black/5;
-  }
-
-  /* One waiting patient. Columns collapse rather than scroll on a phone. */
-  .prow {
-    @apply flex items-center gap-2.5 border-b border-slate-100 px-2.5 py-1.5 last:border-0;
-  }
-  .prow-name { @apply truncate text-[13px] font-semibold text-ink-900; }
-  .prow-meta { @apply truncate text-[11px] text-ink-500; }
-
-  /* Right rail rows: label left, value right, hairline between. */
-  .glance-row {
-    @apply flex items-center justify-between border-b border-slate-100 py-2
-           text-[12px] last:border-0;
-  }
-
-  /* Bottom tab bar (mobile only). */
-  .bottom-tabs {
-    @apply fixed inset-x-0 bottom-0 z-30 flex border-t border-hairline bg-white/95
-           backdrop-blur lg:hidden;
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-  .btab {
-    @apply flex min-h-[52px] flex-1 flex-col items-center justify-center gap-0.5
-           text-[10px] font-medium text-ink-500 transition;
-  }
-  .btab-active { @apply font-semibold text-brand-700; }
-
-  /* Role switcher popover on the sidebar user card. */
-  .role-pop {
-    @apply absolute bottom-full left-0 z-50 mb-2 w-[calc(100%+0px)] overflow-hidden
-           rounded-xl border border-hairline bg-white shadow-pop;
-  }
-
   /* --------------------------------------------------- mobile drawer */
   /* The old mobile menu was an inline list that pushed the page down and had
      no sections, no active state and no way to close it. This is a real
      off-canvas drawer: overlay, scroll lock, Escape, and the same grouped
      navigation the desktop sidebar shows. */
   .nav-overlay {
-    @apply fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-[2px] lg:hidden;
+    @apply fixed inset-0 z-40 bg-slate-900/60 backdrop-blur-sm lg:hidden;
     opacity: 0;
     pointer-events: none;
     transition: opacity .2s ease;
@@ -495,7 +278,7 @@
 
   .nav-drawer {
     @apply fixed inset-y-0 left-0 z-50 flex w-[86vw] max-w-[20rem] flex-col
-           border-r border-hairline bg-white shadow-pop lg:hidden;
+           bg-slate-900 shadow-2xl lg:hidden;
     transform: translateX(-100%);
     /* visibility keeps the off-screen links out of the tab order; a drawer
        that is merely translated away is still keyboard-reachable. */
@@ -519,8 +302,7 @@
   }
 
   .nav-section-label {
-    @apply mb-1.5 mt-5 px-3 text-[10px] font-semibold uppercase tracking-[0.09em]
-           text-ink-400 first:mt-0;
+    @apply mb-1 mt-4 px-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 first:mt-0;
   }
 
   .icon-btn {
@@ -540,27 +322,6 @@
     @apply min-w-full;
   }
   @media (max-width: 640px) {
-    /* Selects were rendering at 13px next to 10px labels and pushing their
-       row wider than the card. Keep them legible but proportional. */
-    .qtab { @apply min-h-[38px] text-[11.5px]; }
-    /* The "All doctors" jump list was 13px in a 24px box beside 11px tabs. */
-    .qselect { @apply h-8 max-w-[7.5rem] text-[11px]; }
-    .stat-ico { @apply h-6 w-6; }
-    .stat-label { @apply text-[9px]; }
-    .stat-hint { @apply text-[10px]; }
-    .glance-row { @apply py-1.5 text-[11.5px]; }
-    .select, select.select { @apply py-2 pr-8 text-[13px]; }
-    .section-head { @apply gap-1.5; }
-    .btn { @apply px-3 py-2 text-[13px]; }
-    .btn-lg { @apply px-4 py-3 text-[14px]; }
-    .label { @apply text-[10px]; }
-    .card-pad { @apply p-3; }
-    .stat-tile { @apply gap-1.5 px-2 py-2.5; }
-    .stat-ico { @apply rounded-lg; }
-    .stat-ico svg { @apply h-3.5 w-3.5; }
-    .stat-value { @apply text-[16px]; }
-    .stat-label { @apply leading-[1.25]; }
-    .stat-hint { @apply leading-tight; }
     /* Tap targets on phones: a 24px icon button is a miss most of the time. */
     .btn-sm { @apply min-h-[36px] px-3; }
     .act { @apply min-h-[44px] min-w-[44px]; }
@@ -581,13 +342,10 @@
     @apply flex min-h-screen;
   }
   .sidebar {
-    @apply fixed inset-y-0 left-0 z-30 hidden w-[var(--sidebar-w)] flex-col
-           border-r border-hairline bg-white lg:flex;
+    @apply fixed inset-y-0 left-0 z-30 hidden w-64 flex-col bg-slate-900 lg:flex;
   }
   .main-col {
-    /* min-w-0: a flex item defaults to min-width:auto, so one wide scroller
-       inside would stretch the whole column past the phone's width. */
-    @apply flex min-h-screen w-full min-w-0 flex-col lg:pl-[var(--sidebar-w)];
+    @apply flex min-h-screen w-full flex-col lg:pl-64;
   }
   .page {
     @apply mx-auto w-full max-w-[1400px] flex-1 px-3 py-4 sm:px-6 sm:py-6 lg:px-8;
@@ -605,207 +363,13 @@
   }
 
   /* ------------------------------------------------------ display mode */
-  /* ---------------------------------------------------------------------
-     Shared page furniture. Introduced with Priority rules but deliberately
-     generic: any list screen can use a toolbar, an explainer, a data table
-     and a collapsible side form.
-     --------------------------------------------------------------------- */
-
-  /* Leading icon in a page head, so a section is recognisable at a glance. */
-  .page-icon {
-    @apply flex h-7 w-7 shrink-0 items-center justify-center text-brand-600 sm:h-8 sm:w-8;
-  }
-  .page-icon svg { @apply h-6 w-6 sm:h-7 sm:w-7; }
-
-  /* Tabs + search + primary action on one row. Wraps before it squeezes. */
-  .toolbar {
-    @apply flex flex-wrap items-center gap-2 border-b border-hairline px-3 py-2.5 sm:gap-3 sm:px-4;
-  }
-  .utab {
-    @apply relative shrink-0 border-b-2 border-transparent px-1 pb-2 pt-1 text-[12.5px]
-           font-semibold text-ink-500 transition hover:text-ink-800;
-  }
-  .utab-active { @apply border-brand-600 text-brand-700; }
-
-  .search-mini {
-    @apply flex h-8 min-w-0 items-center gap-1.5 rounded-lg border border-hairline
-           bg-white px-2.5 text-[12px] text-ink-700;
-  }
-  .search-mini input {
-    @apply min-w-0 flex-1 border-0 bg-transparent p-0 text-[12px] outline-none
-           placeholder:text-ink-400 focus:ring-0;
-  }
-
-  /* A short "how this works" panel. Collapsible because staff read it once. */
-  .explainer {
-    @apply rounded-xl px-4 py-3.5;
-    background: #F7F8FB;
-  }
-  .explainer-list { @apply mt-2 space-y-1; }
-  .explainer-list li {
-    @apply flex items-start gap-2 text-[11.5px] leading-[1.35] text-ink-600;
-  }
-
-  /* Data table: header row, hairline dividers, no zebra. */
-  .dtable { @apply w-full border-collapse text-left; }
-  .dtable thead th {
-    @apply border-b border-hairline px-3 py-2 text-[10px] font-bold uppercase
-           tracking-wider text-ink-400;
-  }
-  .dtable tbody td { @apply border-b border-hairline px-3 py-3 align-middle; }
-  .dtable tbody tr:last-child td { @apply border-b-0; }
-
-  /* A table you have to scroll sideways on a phone hides the very columns
-     that matter (priority, status). Below sm the same rows become cards, so
-     nothing is off-screen and the markup stays single-sourced. */
-  @media (max-width: 639px) {
-    .dtable-stack { min-width: 0 !important; display: block; }
-    .dtable-stack thead { display: none; }
-    .dtable-stack tbody { display: block; }
-    .dtable-stack tbody tr {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 0.375rem 0.5rem;
-      position: relative;
-      padding: 0.75rem 0.875rem;
-      border-bottom: 1px solid #e8ecf1;
-    }
-    .dtable-stack tbody tr:last-child { border-bottom: 0; }
-    .dtable-stack tbody td { display: block; border: 0; padding: 0; }
-    .dtable-stack .dt-main   { grid-column: 1 / -1; padding-right: 2rem; }
-    .dtable-stack .dt-meta   { grid-column: 1 / -1; }
-    .dtable-stack .dt-inline { grid-column: auto; }
-    .dtable-stack .dt-hide   { display: none; }
-    .dtable-stack .dt-act    { position: absolute; right: 0.5rem; top: 0.625rem; }
-  }
-
-  /* Reorderable row. The grip is the only drag target so text stays selectable. */
-  .rule-grip {
-    @apply flex h-8 w-8 shrink-0 cursor-grab items-center justify-center rounded
-           text-ink-300 transition hover:bg-canvas hover:text-ink-500 active:cursor-grabbing;
-  }
-  .rule-num {
-    @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-full
-           text-[12px] font-bold text-ink-700 tabular;
-    background: #F1F3F7;
-  }
-  /* The reference table head sits OUTSIDE a rounded, bordered body. */
-  .dtable-frame {
-    @apply overflow-hidden rounded-xl border border-hairline;
-  }
-  .dtable-frame .dtable tbody tr:last-child td { @apply border-b-0; }
-  .status-on {
-    @apply inline-flex items-center rounded-md px-2.5 py-1 text-[11.5px] font-semibold;
-    background: #EBF8F1; color: #1E9E63;
-  }
-  .status-off {
-    @apply inline-flex items-center rounded-md bg-canvas px-2.5 py-1 text-[11.5px] font-semibold text-ink-500;
-  }
-  .row-dragging { @apply opacity-40; }
-  .row-drop-before { box-shadow: inset 0 2px 0 0 #0D7459; }
-  .row-drop-after  { box-shadow: inset 0 -2px 0 0 #0D7459; }
-
-  /* Priority strength, in words rather than a bare number. */
-  .prio { @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1 text-[11.5px] font-semibold; }
-  .prio-ahead    { background: #FCEDEC; color: #DC3B3B; }
-  .prio-slight   { background: #FEF4E8; color: #D98219; }
-  .prio-normal   { background: #EBF4FE; color: #2A7FD1; }
-  .prio-behind   { background: #F1F3F7; color: #64748B; }
-
-  /* Inline metric strip inside a report card. */
-  .metric-strip { @apply grid grid-cols-3 divide-x divide-hairline; }
-  .metric-strip > div { @apply min-w-0 px-2 py-1 text-center sm:px-3; }
-  .metric-value { @apply text-[15px] font-bold text-ink-900 tabular sm:text-[17px]; }
-  .metric-label { @apply mt-0.5 text-[11px] leading-tight text-ink-500; overflow-wrap: anywhere; }
-
-  /* Collapsible rail card (create form, filters). */
-  .disclosure-btn {
-    @apply flex w-full items-center justify-between gap-2 px-4 py-3 text-left
-           text-[13px] font-bold text-ink-900;
-  }
-
-  /* ---------------------------------------------------------------------
-     Waiting-room screen. Same palette and type as the console, inverted for
-     a screen read from six metres. Deliberately NOT the console shell: no
-     sidebar, no navigation, nothing clickable a patient could wander into.
-     --------------------------------------------------------------------- */
   .tv {
-    @apply text-white;
-    background: #07110E;
-    /* Fixed to the viewport: on a phone the page scrolls, and a background
-       sized to the document showed a visible seam where the glow ended. */
-    background-attachment: fixed;
-    background-image:
-      radial-gradient(1100px 520px at 18% -8%, rgba(13, 116, 89, 0.22), transparent 60%),
-      radial-gradient(900px 460px at 92% 4%, rgba(13, 116, 89, 0.10), transparent 62%);
+    @apply bg-slate-950 text-white;
   }
-  /* Inter, not font-mono: a monospace em-dash at 10rem rendered as a solid
-     white bar, which is what the empty state used to look like. */
   .tv-token {
     font-variant-numeric: tabular-nums;
-    font-feature-settings: 'tnum' 1;
-    @apply font-black tracking-tight;
+    @apply font-mono font-black tracking-tight;
   }
-  .tv-head {
-    @apply flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-5;
-  }
-  .tv-mark {
-    @apply flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-base font-black text-white;
-    background: linear-gradient(145deg, #12896B, #0D7459);
-  }
-  .tv-eyebrow {
-    @apply text-[11px] font-bold uppercase tracking-[0.28em] text-white/40;
-  }
-  .tv-panel {
-    @apply rounded-3xl border border-white/10 bg-white/[0.03] p-5 sm:p-7;
-  }
-  /* auto-fit so one room reads huge and five rooms still fit the wall. */
-  .tv-rooms {
-    @apply grid h-full gap-4 sm:gap-5;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
-    /* One row of two rooms should fill the wall, not leave two thirds of it
-       empty underneath. */
-    grid-auto-rows: 1fr;
-  }
-  .tv-room {
-    /* Centred as one stack: justify-between left a large void between the
-       token and the doctor once the tile grew to fill the wall. */
-    @apply relative flex flex-col justify-center overflow-hidden rounded-3xl border p-5 text-center sm:p-7;
-    min-height: 13rem;
-  }
-  .tv-room-call {
-    border-color: rgba(45, 212, 191, 0.45);
-    background: linear-gradient(160deg, rgba(13, 116, 89, 0.95), rgba(9, 82, 64, 0.92));
-    box-shadow: 0 20px 60px -24px rgba(13, 116, 89, 0.85);
-  }
-  .tv-room-busy {
-    @apply border-white/10 bg-white/[0.04];
-  }
-  .tv-room-token {
-    @apply tv-token leading-none text-white;
-    font-size: clamp(3.5rem, 8vw, 8.5rem);
-  }
-  .tv-room-meta { @apply mt-5 text-sm font-semibold text-white/80 sm:text-lg; }
-  .tv-room-sub  { @apply mt-0.5 text-[12px] text-white/50 sm:text-[13px]; }
-  .tv-chip {
-    @apply flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2.5;
-  }
-  .tv-chip-token { @apply tv-token text-2xl text-white sm:text-3xl; }
-  .tv-empty {
-    @apply flex flex-col items-center justify-center rounded-3xl border border-dashed
-           border-white/15 bg-white/[0.02] px-6 py-14 text-center;
-    min-height: 13rem;
-  }
-  .tv-btn {
-    @apply rounded-lg border border-white/15 px-2.5 py-1.5 text-[11px] font-medium
-           text-white/55 transition hover:border-white/30 hover:text-white;
-  }
-
-  /* The console is a dense staff tool and its 9px stat labels match the
-     reference. A patient reading their own position on a phone is a different
-     reader — give those labels back their legibility. */
-  .patient-view .stat-label { font-size: 11px; letter-spacing: 0.04em; }
-  .patient-view .stat-hint  { font-size: 11px; }
 }
 
 @layer utilities {
@@ -833,17 +397,14 @@
 .rise { animation: qp-rise 0.22s ease-out both; }
 
 @keyframes qp-call-flash {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0); }
-  50% { box-shadow: 0 0 0 8px rgba(45, 212, 191, 0.22); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(14, 165, 233, 0); }
+  50% { box-shadow: 0 0 0 6px rgba(14, 165, 233, 0.18); }
 }
 .call-flash { animation: qp-call-flash 1.8s ease-in-out infinite; }
-@media (prefers-reduced-motion: reduce) {
-  .call-flash { animation: none; box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.35); }
-}
 
 /* Print: reports should print clean, without chrome */
 @media print {
-  .sidebar, .nav-drawer, .nav-overlay, .bottom-tabs, .no-print, .btn, .act { display: none !important; }
+  .sidebar, .nav-drawer, .nav-overlay, .no-print, .btn, .act { display: none !important; }
   .main-col { padding-left: 0 !important; }
   .card { box-shadow: none !important; border-color: #cbd5e1 !important; }
   body { background: #fff; }

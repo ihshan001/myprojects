@@ -1,23 +1,20 @@
 <?php $dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']; ?>
 
-<div class="page-head">
-  <div class="flex min-w-0 items-start gap-3">
-    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-calendar"/></svg></span>
-    <div class="min-w-0">
-    <h1 class="page-title">Schedules &amp; holidays</h1>
-    <p class="page-sub">
+<div class="flex flex-wrap items-start justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold tracking-tight text-slate-900">Schedules &amp; holidays</h1>
+    <p class="mt-1 text-sm text-slate-500">
       Who works when, and which days the clinic is shut. The public booking page builds its times
       from this — nothing here is cosmetic.
     </p>
   </div>
-  </div>
 </div>
 
-<div class="mt-3 grid gap-3 sm:mt-6 sm:gap-5 lg:grid-cols-[1.3fr_.9fr]">
+<div class="mt-5 grid gap-5 lg:grid-cols-[1.3fr_.9fr]">
   <!-- doctor schedules -->
   <div class="card overflow-hidden">
-    <div class="section-head">
-      <p class="section-title">Doctor weekly schedule</p>
+    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+      <p class="text-xs font-semibold text-slate-600">Doctor weekly schedule</p>
       <form method="get" action="/calendar" class="flex items-center gap-2">
         <select class="select py-1 text-xs" name="doctor_id" onchange="this.form.submit()" aria-label="Doctor">
           <?php foreach ($doctors as $doc): ?>
@@ -30,7 +27,7 @@
     </div>
 
     <?php if ($selectedDoctor === null): ?>
-      <div class="p-6 text-center text-sm text-ink-500">Add a doctor first — there is nobody to schedule.</div>
+      <div class="p-6 text-center text-sm text-slate-500">Add a doctor first — there is nobody to schedule.</div>
     <?php else: ?>
       <div class="px-4 pb-2 pt-3">
         <?php if (!$hasSchedule): ?>
@@ -39,7 +36,7 @@
             hours on every open day. Fill in the grid below to restrict that to real shifts.
           </p>
         <?php else: ?>
-          <p class="text-[11px] leading-relaxed text-ink-500">
+          <p class="text-[11px] leading-relaxed text-slate-500">
             This doctor works the shifts below, intersected with clinic hours. Days left blank are
             days they do not work — the booking page will not offer them.
           </p>
@@ -55,11 +52,11 @@
           <?php $rowCount = max(1, count($shiftRanges) + 1); ?>
           <?php for ($i = 0; $i < $rowCount; $i++): ?>
             <?php $shiftFrom = $shiftRanges[$i][0] ?? ''; $shiftTo = $shiftRanges[$i][1] ?? ''; ?>
-            <div class="grid grid-cols-2 items-center gap-2 min-[430px]:grid-cols-[7rem_1fr_1fr]">
+            <div class="grid grid-cols-[7rem_1fr_1fr] items-center gap-2">
               <?php if ($i === 0): ?>
-                <span class="text-xs font-medium text-ink-700"><?= e($dayName) ?></span>
+                <span class="text-xs font-medium text-slate-600"><?= e($dayName) ?></span>
               <?php else: ?>
-                <span class="text-[10px] text-ink-400 pl-1">+ shift</span>
+                <span class="text-[10px] text-slate-400 pl-1">+ shift</span>
               <?php endif; ?>
               <input class="input py-1.5 text-xs" type="time" name="day_<?= $dow ?>_from[]"
                      value="<?= e($shiftFrom) ?>" aria-label="<?= e($dayName) ?> shift <?= $i + 1 ?> start"
@@ -92,11 +89,11 @@
   <!-- holidays -->
   <div class="space-y-5">
     <div class="card overflow-hidden">
-      <div class="section-head">
-        <p class="section-title">Clinic closure days</p>
+      <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+        <p class="text-xs font-semibold text-slate-600">Clinic closure days</p>
       </div>
       <?php if ($holidays === []): ?>
-        <div class="p-4 text-[11px] leading-relaxed text-ink-500">
+        <div class="p-4 text-[11px] leading-relaxed text-slate-500">
           No closure days ahead. Adding one closes the public booking page for that date, and
           outranks both clinic hours and any doctor's schedule.
         </div>
@@ -105,8 +102,8 @@
           <?php foreach ($holidays as $h): ?>
             <li class="flex items-center justify-between gap-3 px-4 py-2.5">
               <div>
-                <p class="text-xs font-semibold text-ink-900"><?= e($h['name']) ?></p>
-                <p class="text-[11px] text-ink-500"><?= e(date('D, j M Y', strtotime((string) $h['date']))) ?></p>
+                <p class="text-xs font-semibold text-slate-800"><?= e($h['name']) ?></p>
+                <p class="text-[11px] text-slate-500"><?= e(date('D, j M Y', strtotime((string) $h['date']))) ?></p>
               </div>
               <?php if ($canManage): ?>
                 <form method="post" action="/calendar/holidays/<?= (int) $h['id'] ?>/delete"
@@ -123,8 +120,8 @@
 
     <?php if ($canManage): ?>
       <div class="card">
-        <div class="section-head">
-          <p class="section-title">Close a date</p>
+        <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+          <p class="text-xs font-semibold text-slate-600">Close a date</p>
         </div>
         <form method="post" action="/calendar/holidays" class="space-y-3 p-4">
           <?= csrf_field() ?>
@@ -137,7 +134,7 @@
             <input class="input" id="holiday-name" name="name" required maxlength="120" placeholder="Vesak Full Moon Poya">
           </div>
           <button class="btn-primary w-full">Close the clinic that day</button>
-          <p class="text-[10px] leading-relaxed text-ink-400">
+          <p class="text-[10px] leading-relaxed text-slate-400">
             Existing appointments on that date are not cancelled — the confirmation tells you how
             many need rebooking, because that is a decision for a person.
           </p>

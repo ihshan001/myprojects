@@ -103,7 +103,7 @@ final class Router
                 'title' => 'Session expired',
                 'status' => 419,
                 'message' => 'Your page was open for too long. Reload and try again — nothing was changed.',
-            ], false);
+            ]);
             return;
         }
 
@@ -149,6 +149,6 @@ final class Router
             'title' => 'Page not found',
             'status' => 404,
             'message' => 'We could not find that page. It may have moved, or the link may be incomplete.',
-        ], false);
+        ]);
     }
 }

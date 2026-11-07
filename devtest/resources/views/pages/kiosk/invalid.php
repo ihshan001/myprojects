@@ -16,17 +16,17 @@
   <title><?= e($title ?? 'Kiosk not set up') ?></title>
   <link rel="stylesheet" href="<?= e(asset('build/app.css')) ?>">
 </head>
-<body class="patient-view flex min-h-full items-center justify-center bg-canvas px-5">
-  <div class="w-full max-w-md rounded-2xl border border-hairline bg-white p-8 text-center shadow-sm">
-    <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-canvas text-ink-500">
+<body class="flex min-h-full items-center justify-center bg-slate-100 px-5">
+  <div class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+    <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-500">
       <svg class="h-6 w-6"><use href="#i-shield"/></svg>
     </div>
-    <h1 class="mt-4 text-lg font-bold text-ink-900">This kiosk is not set up</h1>
-    <p class="mt-2 text-sm leading-relaxed text-ink-600">
+    <h1 class="mt-4 text-lg font-bold text-slate-900">This kiosk is not set up</h1>
+    <p class="mt-2 text-sm leading-relaxed text-slate-600">
       The check-in code on this screen is not valid any more. Please use the reception desk —
       they can print a number in a few seconds.
     </p>
-    <p class="mt-4 text-xs leading-relaxed text-ink-400">
+    <p class="mt-4 text-xs leading-relaxed text-slate-400">
       Staff: a new code is issued under <b>Settings → Waiting room</b>. Issuing a new one
       replaces the old code, so this screen will need the new address.
     </p>

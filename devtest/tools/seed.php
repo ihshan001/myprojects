@@ -237,29 +237,6 @@ Db::transaction(function () use ($planIds, $today) {
         [$c1, Str::urlToken(20)]
     );
 
-    /* ---------- Serenity: standing priority rules ----------
-       Only conditions the engine can actually evaluate. A "high fever" rule
-       would be a lie: temperature is not recorded anywhere, so it would sit
-       in the list looking authoritative and never match a single patient. */
-    $ruleDefs = [
-        ['Under-5 first', 3, null, null, null, 0, 4, null, null, 'Children under 5 get higher priority'],
-        ['Elderly support', 2, null, null, null, 65, null, null, null, 'Age 65 and above'],
-        ['Morning lab fast-track', 2, null, 'lab', null, null, null, 7, 11, 'Fasting samples before 11:00'],
-        ['Post-op review', 1, 'appointment', 'consultation', null, null, null, null, null, 'Patients with post-op visits'],
-        ['Routine review behind', -1, 'walkin', 'general', null, null, null, null, null, 'Routine walk-ins can safely wait'],
-    ];
-    $ruleOrder = 0;
-    foreach ($ruleDefs as [$rName, $rEffect, $rSource, $rKind, $rDoc, $rMin, $rMax, $rFrom, $rTo, $rReason]) {
-        Db::insert(
-            'INSERT INTO priority_rules
-               (clinic_id, queue_id, name, source, kind, doctor_id, min_age, max_age,
-                from_hour, to_hour, effect, reason, is_active, created_at, sort_order)
-             VALUES (?,NULL,?,?,?,?,?,?,?,?,?,?,1,?,?)',
-            [$c1, $rName, $rSource, $rKind, $rDoc, $rMin, $rMax, $rFrom, $rTo, $rEffect, $rReason,
-             date('Y-m-d H:i:s', strtotime('-6 days') + $ruleOrder * 3600), ++$ruleOrder]
-        );
-    }
-
     /* ---------- tenant 2: Lakeview (small, starter) ---------- */
     $c2 = makeClinic([
         'slug' => 'lakeview', 'name' => 'Lakeview Medical Centre',

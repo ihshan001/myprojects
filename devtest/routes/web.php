@@ -55,7 +55,6 @@ Router::post('/locale', [ClinicController::class, 'locale']);
 
 /* ------------------------------------------------------------ reception */
 Router::get('/app', [DashboardController::class, 'index'], ['auth' => true, 'ability' => 'queue.operate']);
-Router::get('/app/panel', [DashboardController::class, 'panel'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::get('/queue/new', [QueueController::class, 'newPatient'], ['auth' => true, 'ability' => 'queue.issue']);
 Router::post('/queue/new', [QueueController::class, 'createEntry'], ['auth' => true, 'ability' => 'queue.issue']);
 Router::get('/queue', [QueueController::class, 'show'], ['auth' => true, 'ability' => 'queue.operate']);
@@ -107,7 +106,6 @@ Router::post('/queues/{id}/rename', [QueueConfigController::class, 'rename'], ['
 // Priority rules — the standing clinical decisions the desk used to retype.
 Router::get('/queues/priority-rules', [PriorityRuleController::class, 'index'], ['auth' => true]);
 Router::post('/queues/priority-rules', [PriorityRuleController::class, 'save'], ['auth' => true, 'ability' => 'clinic.manage']);
-Router::post('/queues/priority-rules/reorder', [PriorityRuleController::class, 'reorder'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/queues/priority-rules/{id}/toggle', [PriorityRuleController::class, 'toggle'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/queues/priority-rules/{id}/delete', [PriorityRuleController::class, 'delete'], ['auth' => true, 'ability' => 'clinic.manage']);
 

@@ -1,13 +1,10 @@
-<div class="page-head">
-  <div class="flex min-w-0 items-start gap-3">
-    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-list"/></svg></span>
-    <div class="min-w-0">
-    <h1 class="page-title">Support queue</h1>
-    <p class="page-sub">
+<div class="flex flex-wrap items-start justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold tracking-tight text-slate-900">Support queue</h1>
+    <p class="mt-1 text-sm text-slate-500">
       Every clinic's tickets. A ticket lands in <span class="font-medium">unanswered</span> until
       somebody on the platform replies to it.
     </p>
-  </div>
   </div>
 </div>
 
@@ -15,7 +12,7 @@
   <?php foreach ([
     ['Unanswered', $counts['unanswered'], 'text-rose-700 bg-rose-50 ring-rose-200'],
     ['Open — on the clinic', $counts['open'], 'text-amber-700 bg-amber-50 ring-amber-200'],
-    ['Waiting on us', $counts['waiting'], 'text-brand-700 bg-brand-50 ring-brand-200'],
+    ['Waiting on us', $counts['waiting'], 'text-teal-700 bg-teal-50 ring-teal-200'],
   ] as [$label, $value, $class]): ?>
     <div class="rounded-xl px-4 py-3 ring-1 <?= $class ?>">
       <p class="text-2xl font-bold tabular-nums"><?= (int) $value ?></p>
@@ -24,9 +21,9 @@
   <?php endforeach; ?>
 </div>
 
-<div class="card mt-3 sm:mt-4 overflow-hidden">
-  <div class="section-head">
-    <p class="section-title">All tickets</p>
+<div class="card mt-4 overflow-hidden">
+  <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+    <p class="text-xs font-semibold text-slate-600">All tickets</p>
   </div>
   <?php if ($tickets === []): ?>
     <?php $title = 'No tickets'; $message = 'Nothing has been raised. The queue fills when a clinic opens a ticket from its own Support page.'; $icon = 'lifebuoy'; ?>
@@ -37,11 +34,11 @@
         <li class="px-4 py-3 hover:bg-slate-50">
           <a href="/admin/support/<?= (int) $t['id'] ?>" class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <p class="truncate text-sm font-semibold text-ink-900">
+              <p class="truncate text-sm font-semibold text-slate-900">
                 #<?= (int) $t['id'] ?> · <?= e($t['subject']) ?>
               </p>
-              <p class="mt-0.5 text-[11px] text-ink-500">
-                <span class="font-medium text-ink-700"><?= e($t['clinic_name']) ?></span> ·
+              <p class="mt-0.5 text-[11px] text-slate-500">
+                <span class="font-medium text-slate-700"><?= e($t['clinic_name']) ?></span> ·
                 <?= e($t['opened_by'] ?? 'unknown') ?> ·
                 <?= e(ago($t['updated_at'])) ?>
                 <?php if ((int) $t['patient_replies'] > 0): ?>

@@ -1,16 +1,16 @@
 <div>
-  <a href="/patients" class="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-500 hover:text-ink-900">
+  <a href="/patients" class="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800">
     <svg class="h-3.5 w-3.5"><use href="#i-arrow-left"/></svg> All patients
   </a>
 
   <div class="mt-3 flex flex-wrap items-start justify-between gap-3">
     <div class="flex items-center gap-3">
-      <span class="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-sm font-bold text-brand-700">
+      <span class="flex h-12 w-12 items-center justify-center rounded-2xl bg-teal-50 text-sm font-bold text-teal-700">
         <?= e(App\Core\Str::initials((string) $patient['full_name'])) ?>
       </span>
       <div>
-        <h1 class="text-xl font-bold tracking-tight text-ink-900"><?= e($patient['full_name']) ?></h1>
-        <p class="text-xs text-ink-500">
+        <h1 class="text-xl font-bold tracking-tight text-slate-900"><?= e($patient['full_name']) ?></h1>
+        <p class="text-xs text-slate-500">
           <span class="font-mono"><?= e((string) $patient['code']) ?></span>
           <?php if (!empty($patient['phone'])): ?> · <?= e($patient['phone']) ?><?php endif; ?>
           <?php if (!empty($patient['gender'])): ?> · <?= e($patient['gender']) ?><?php endif; ?>
@@ -36,10 +36,10 @@
     ?>
   </div>
 
-  <div class="mt-3 grid gap-3 sm:mt-6 sm:gap-5 lg:grid-cols-[1fr_.8fr]">
+  <div class="mt-5 grid gap-5 lg:grid-cols-[1fr_.8fr]">
     <div class="card overflow-hidden">
-      <div class="section-head">
-        <p class="section-title">Visit history</p>
+      <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+        <p class="text-xs font-semibold text-slate-600">Visit history</p>
       </div>
       <?php if ($history === []): ?>
         <?php $title = 'No visits yet'; $message = 'This patient has not been added to a queue.'; $icon = 'queue'; include QP_ROOT . '/resources/views/components/empty.php'; ?>
@@ -51,7 +51,7 @@
           <?php foreach ($history as $h): ?>
           <tr>
           <td><a href="/queue/entry?id=<?= (int) $h['id'] ?>" class="token-chip"><?= e((string) $h['token_label']) ?></a></td>
-          <td class="text-xs text-ink-700"><?= e(fmt_time($h['joined_at'], 'j M, g:i A')) ?></td>
+          <td class="text-xs text-slate-600"><?= e(fmt_time($h['joined_at'], 'j M, g:i A')) ?></td>
           <td class="hidden sm:table-cell text-xs"><?= e((string) ($h['doctor_name'] ?? '—')) ?></td>
           <td><?php $b = ['status' => $h['status']]; include QP_ROOT . '/resources/views/components/badge.php'; ?></td>
           <td class="numeric hidden sm:table-cell text-xs"><?= $h['wait_minutes'] !== null ? (int) $h['wait_minutes'] . 'm' : '—' ?></td>
@@ -64,7 +64,7 @@
     </div>
 
     <div class="card card-pad">
-      <h2 class="text-sm font-bold text-ink-900">Edit record</h2>
+      <h2 class="text-sm font-bold text-slate-900">Edit record</h2>
       <form method="post" action="/patients/<?= (int) $patient['id'] ?>" class="mt-3 space-y-3">
         <?= csrf_field() ?>
         <div><label class="label" for="full_name">Full name</label>

@@ -1,23 +1,20 @@
-<div class="page-head">
-  <div class="flex min-w-0 items-start gap-3">
-    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-grid"/></svg></span>
-    <div class="min-w-0">
-    <h1 class="page-title">Departments</h1>
-    <p class="page-sub">
+<div class="flex flex-wrap items-start justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold tracking-tight text-slate-900">Departments</h1>
+    <p class="mt-1 text-sm text-slate-500">
       A department is the part of the building a patient walks to. Queues, doctors and displays
       can belong to one, which is what makes a per-department board possible.
     </p>
   </div>
-  </div>
 </div>
 
 <?php if ($departments === []): ?>
-  <div class="card mt-3 sm:mt-5">
+  <div class="card mt-5">
     <?php $title = 'No departments yet'; $message = 'A single-room clinic does not need them. Add one when two services share a waiting area and patients need to be told where to go.'; $icon = 'grid'; include QP_ROOT . '/resources/views/components/empty.php'; ?>
   </div>
 <?php endif; ?>
 
-<div class="mt-3 grid gap-3 sm:mt-6 sm:gap-5 lg:grid-cols-[1.4fr_.8fr]">
+<div class="mt-5 grid gap-5 lg:grid-cols-[1.4fr_.8fr]">
   <div class="space-y-3">
     <?php foreach ($departments as $d): ?>
       <?php // Resolved once per card: the action row and the body both need it,
@@ -27,7 +24,7 @@
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div class="flex items-center gap-2">
-              <p class="text-sm font-bold text-ink-900"><?= e($d['name']) ?></p>
+              <p class="text-sm font-bold text-slate-900"><?= e($d['name']) ?></p>
               <?php if (!empty($d['code'])): ?>
                 <span class="badge-slate"><?= e($d['code']) ?></span>
               <?php endif; ?>
@@ -35,30 +32,30 @@
                 <span class="badge-slate">inactive</span>
               <?php endif; ?>
             </div>
-            <p class="mt-0.5 text-[11px] text-ink-500">
+            <p class="mt-0.5 text-[11px] text-slate-500">
               <?= (int) $d['queue_count'] ?> queue<?= (int) $d['queue_count'] === 1 ? '' : 's' ?>
               · <?= (int) $d['doctor_count'] ?> doctor<?= (int) $d['doctor_count'] === 1 ? '' : 's' ?>
               <?php if (!empty($d['floor'])): ?> · <?= e($d['floor']) ?><?php endif; ?>
               <?php if (!empty($d['lead_name'])): ?> · led by <?= e($d['lead_name']) ?><?php endif; ?>
             </p>
             <?php if (!empty($d['description'])): ?>
-              <p class="mt-1.5 max-w-prose text-xs leading-relaxed text-ink-500"><?= e($d['description']) ?></p>
+              <p class="mt-1.5 max-w-prose text-xs leading-relaxed text-slate-500"><?= e($d['description']) ?></p>
             <?php endif; ?>
 
             <div class="mt-2 flex flex-wrap items-center gap-2">
               <?php if ($dkey !== null): ?>
-                <span class="max-w-[24rem] truncate rounded bg-slate-50 px-2 py-1 font-mono text-[10px] text-ink-500" title="<?= e($dkey) ?>">
+                <span class="max-w-[24rem] truncate rounded bg-slate-50 px-2 py-1 font-mono text-[10px] text-slate-500" title="<?= e($dkey) ?>">
                   <?= e($dkey) ?>
                 </span>
-                <a class="text-[10px] font-medium text-brand-700 hover:underline" href="<?= e($dkey) ?>" target="_blank">open display</a>
+                <a class="text-[10px] font-medium text-teal-700 hover:underline" href="<?= e($dkey) ?>" target="_blank">open display</a>
               <?php else: ?>
-                <span class="text-[10px] text-ink-400">No display link yet — this TV would show the whole clinic.</span>
+                <span class="text-[10px] text-slate-400">No display link yet — this TV would show the whole clinic.</span>
               <?php endif; ?>
               <?php if ($canManage): ?>
                 <form method="post" action="/departments/<?= (int) $d['id'] ?>/display-key"
                       onsubmit="return confirm('<?= $dkey !== null ? 'Replace the existing display link? Screens using the old one stop updating.' : 'Issue a display link for this department?' ?>')">
                   <?= csrf_field() ?>
-                  <button class="text-[10px] font-medium text-ink-500 underline hover:text-ink-700">
+                  <button class="text-[10px] font-medium text-slate-500 underline hover:text-slate-700">
                     <?= $dkey !== null ? 'rotate link' : 'issue link' ?>
                   </button>
                 </form>
@@ -71,7 +68,7 @@
               <details class="relative">
                 <summary class="btn-secondary btn-sm cursor-pointer list-none">Edit</summary>
                 <form method="post" action="/departments/<?= (int) $d['id'] ?>"
-                      class="absolute right-0 z-20 mt-2 w-72 space-y-2 rounded-xl border border-hairline bg-white p-3 shadow-lg">
+                      class="absolute right-0 z-20 mt-2 w-72 space-y-2 rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
                   <?= csrf_field() ?>
                   <div><label class="label">Name</label><input class="input" name="name" value="<?= e($d['name']) ?>" required maxlength="120"></div>
                   <div class="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2">
@@ -90,8 +87,8 @@
                       <?php endforeach; ?>
                     </select>
                   </div>
-                  <label class="flex items-center gap-2 text-xs text-ink-700">
-                    <input class="checkbox" type="checkbox" name="is_active" value="1" <?= (int) $d['is_active'] === 1 ? 'checked' : '' ?>>
+                  <label class="flex items-center gap-2 text-xs text-slate-600">
+                    <input type="checkbox" name="is_active" value="1" <?= (int) $d['is_active'] === 1 ? 'checked' : '' ?>>
                     Active
                   </label>
                   <button class="btn-primary btn-sm w-full">Save department</button>
@@ -114,8 +111,8 @@
   <div class="space-y-5">
     <?php if ($canManage): ?>
       <div class="card">
-        <div class="section-head">
-          <p class="section-title">Add a department</p>
+        <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+          <p class="text-xs font-semibold text-slate-600">Add a department</p>
         </div>
         <form method="post" action="/departments" class="space-y-3 p-4">
           <?= csrf_field() ?>
@@ -139,11 +136,11 @@
     <?php endif; ?>
 
     <div class="card">
-      <div class="section-head">
-        <p class="section-title">Today's assignments</p>
+      <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+        <p class="text-xs font-semibold text-slate-600">Today's assignments</p>
       </div>
       <div class="p-4">
-        <p class="text-[11px] leading-relaxed text-ink-500">
+        <p class="text-[11px] leading-relaxed text-slate-500">
           Assigning a queue or a doctor to a department is what makes the per-department display
           and the department report meaningful. An unassigned queue simply does not appear there.
         </p>

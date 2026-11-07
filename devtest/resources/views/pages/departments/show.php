@@ -1,35 +1,32 @@
-<div class="page-head">
-  <div class="flex min-w-0 items-start gap-3">
-    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-grid"/></svg></span>
-    <div class="min-w-0">
-    <div class="flex items-center gap-2 text-xs text-ink-500">
+<div class="flex flex-wrap items-start justify-between gap-3">
+  <div>
+    <div class="flex items-center gap-2 text-xs text-slate-500">
       <a href="/departments" class="hover:underline">Departments</a>
       <span>/</span>
-      <span class="font-medium text-ink-700"><?= e($department['name']) ?></span>
+      <span class="font-medium text-slate-700"><?= e($department['name']) ?></span>
     </div>
-    <h1 class="page-title mt-1"><?= e($department['name']) ?> — today</h1>
-    <p class="page-sub">
+    <h1 class="mt-1 text-2xl font-bold tracking-tight text-slate-900"><?= e($department['name']) ?> — today</h1>
+    <p class="mt-1 text-sm text-slate-500">
       <?= e(date('l, j F Y')) ?>
       <?php if (!empty($department['floor'])): ?> · <?= e($department['floor']) ?><?php endif; ?>
     </p>
-  </div>
   </div>
   <a class="btn-secondary btn-sm" href="/app">Full board</a>
 </div>
 
 <?php if ($queues === []): ?>
-  <div class="card mt-3 sm:mt-5">
+  <div class="card mt-5">
     <?php $title = 'No queues in this department today'; $message = 'Either no session is scheduled, or the queues have not been assigned to this department yet.'; $icon = 'queue'; include QP_ROOT . '/resources/views/components/empty.php'; ?>
   </div>
 <?php endif; ?>
 
-<div class="mt-3 grid gap-3 sm:mt-6 sm:gap-4 md:grid-cols-2">
+<div class="mt-5 grid gap-4 md:grid-cols-2">
   <?php foreach ($queues as $q): ?>
     <div class="card card-pad">
       <div class="flex items-start justify-between gap-3">
         <div>
-          <p class="text-sm font-bold text-ink-900"><?= e($q['name']) ?></p>
-          <p class="text-[11px] text-ink-500">
+          <p class="text-sm font-bold text-slate-900"><?= e($q['name']) ?></p>
+          <p class="text-[11px] text-slate-500">
             <?= e($q['doctor_name'] ?? 'No doctor assigned') ?>
             <?php if (!empty($q['room_name'])): ?> · <?= e($q['room_name']) ?><?php endif; ?>
           </p>
@@ -51,8 +48,8 @@
         );
         ?>
         <div class="rounded-lg bg-slate-50 py-2">
-          <p class="text-lg font-bold text-ink-900"><?= $waiting ?></p>
-          <p class="text-[10px] uppercase tracking-wide text-ink-500">waiting</p>
+          <p class="text-lg font-bold text-slate-900"><?= $waiting ?></p>
+          <p class="text-[10px] uppercase tracking-wide text-slate-500">waiting</p>
         </div>
         <div class="rounded-lg bg-sky-50 py-2">
           <p class="text-lg font-bold text-sky-900"><?= $called ?></p>

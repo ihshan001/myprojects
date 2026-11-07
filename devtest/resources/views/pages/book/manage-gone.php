@@ -19,13 +19,13 @@
   <title><?= e($title) ?> · QueuePilot</title>
   <link rel="stylesheet" href="<?= e(asset('build/app.css')) ?>">
 </head>
-<body class="patient-view flex min-h-full items-center justify-center bg-canvas px-5">
-  <div class="w-full max-w-sm rounded-2xl border border-hairline bg-white p-6 text-center shadow-sm">
-    <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-canvas text-ink-600">
+<body class="flex min-h-full items-center justify-center bg-slate-100 px-5">
+  <div class="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+    <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-600">
       <svg class="h-6 w-6"><use href="#i-clock"/></svg>
     </div>
-    <h1 class="mt-4 text-lg font-bold text-ink-900"><?= e($title) ?></h1>
-    <p class="mt-2 text-sm leading-relaxed text-ink-600">
+    <h1 class="mt-4 text-lg font-bold text-slate-900"><?= e($title) ?></h1>
+    <p class="mt-2 text-sm leading-relaxed text-slate-600">
       <?php if ((string) $appointment['status'] === 'cancelled'): ?>
         This appointment was cancelled, so the link that pointed at it no longer opens anything.
       <?php else: ?>
@@ -36,7 +36,7 @@
     </p>
 
     <?php if ((string) $appointment['status'] === 'cancelled'): ?>
-      <a class="btn mt-5 w-full justify-center bg-brand-700 text-sm text-white"
+      <a class="btn mt-5 w-full justify-center bg-teal-700 text-sm text-white"
          href="/book/<?= e((string) $clinicRecord['slug']) ?>">Book a new appointment</a>
     <?php endif; ?>
 

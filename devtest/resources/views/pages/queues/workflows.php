@@ -1,15 +1,12 @@
-<div class="page-head">
-  <div class="flex min-w-0 items-start gap-3">
-    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-switch"/></svg></span>
-    <div class="min-w-0">
-    <h1 class="page-title">Service workflows</h1>
-    <p class="mt-1 max-w-2xl text-sm text-ink-500">
+<div class="flex flex-wrap items-start justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold tracking-tight text-slate-900">Service workflows</h1>
+    <p class="mt-1 max-w-2xl text-sm text-slate-500">
       The steps a visit must pass before it counts as finished. A doctor's visit
       is one act; a laboratory's is a sample, a verified result and a handed-over
       report. Name them here and the desk cannot complete the visit until each
       one is ticked.
     </p>
-  </div>
   </div>
   <div class="flex gap-2">
     <a class="btn-secondary btn-sm" href="/queues/priority-rules">Priority rules</a>
@@ -26,18 +23,18 @@
   </div>
 <?php endif; ?>
 
-<div class="mt-3 grid gap-3 sm:mt-6 sm:gap-5 lg:grid-cols-[1.1fr_.9fr]">
+<div class="mt-5 grid gap-5 lg:grid-cols-[1.1fr_.9fr]">
   <div class="space-y-5">
     <div class="card">
-      <div class="section-head">
-        <p class="section-title">Configured steps</p>
-        <span class="text-[11px] text-ink-500">
+      <div class="flex items-center justify-between border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+        <p class="text-xs font-semibold text-slate-600">Configured steps</p>
+        <span class="text-[11px] text-slate-500">
           <?= count(array_filter($steps, static fn ($s) => (int) $s['is_active'] === 1)) ?> active
         </span>
       </div>
 
       <?php if ($steps === []): ?>
-        <div class="px-4 py-6 text-sm text-ink-500">
+        <div class="px-4 py-6 text-sm text-slate-500">
           <p>No steps configured, so every visit completes in one action — the behaviour
              this product has always had.</p>
           <p class="mt-2">Add steps only for a service that genuinely has them. A
@@ -49,20 +46,20 @@
           <?php foreach ($steps as $step): ?>
             <?php $isActive = (int) $step['is_active'] === 1; ?>
             <div class="flex flex-wrap items-start gap-3 px-4 py-3 <?= $isActive ? '' : 'bg-slate-50/70' ?>">
-              <span class="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[11px] font-semibold text-ink-700">
+              <span class="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[11px] font-semibold text-slate-600">
                 <?= (int) $step['position'] ?>
               </span>
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-2">
-                  <span class="font-medium text-ink-900"><?= e($step['name']) ?></span>
+                  <span class="font-medium text-slate-900"><?= e($step['name']) ?></span>
                   <?php if ((int) $step['is_required'] !== 1): ?>
-                    <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-ink-700">Optional</span>
+                    <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">Optional</span>
                   <?php endif; ?>
                   <?php if (!$isActive): ?>
-                    <span class="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold text-ink-700">Retired</span>
+                    <span class="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-600">Retired</span>
                   <?php endif; ?>
                 </div>
-                <p class="mt-1 text-xs text-ink-500">
+                <p class="mt-1 text-xs text-slate-500">
                   Applies to:
                   <?php if ((int) $step['queue_id'] > 0): ?>
                     queue <?= e((string) ($step['queue_name'] ?? ('#' . $step['queue_id']))) ?> only
@@ -84,8 +81,8 @@
       <?php endif; ?>
     </div>
 
-    <div class="rounded-lg border border-hairline bg-slate-50 px-4 py-3 text-xs leading-relaxed text-ink-700">
-      <p class="font-semibold text-ink-700">How steps work</p>
+    <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-relaxed text-slate-600">
+      <p class="font-semibold text-slate-700">How steps work</p>
       <ul class="mt-1 list-disc space-y-1 pl-5">
         <li>A step belongs to a queue kind, or to one queue. A queue-level step with the same name replaces the kind-wide one for that queue.</li>
         <li>The visit stays <span class="font-medium">in consultation</span> until it is completed. Steps are recorded beside the entry, not as new statuses, so the board, the display and the patient's tracking link keep working.</li>
@@ -97,8 +94,8 @@
   </div>
 
   <div class="card h-fit">
-    <div class="section-head">
-      <p class="section-title">New step</p>
+    <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+      <p class="text-xs font-semibold text-slate-600">New step</p>
     </div>
 
     <form method="post" action="/queues/workflows" class="space-y-3 p-4">
@@ -108,7 +105,7 @@
         <label class="label" for="name">Step</label>
         <input class="input" id="name" name="name" required maxlength="60"
                value="<?= e($old['name'] ?? '') ?>" placeholder="Sample taken">
-        <p class="mt-1 text-[11px] text-ink-500">Name it the way staff say it out loud.</p>
+        <p class="mt-1 text-[11px] text-slate-500">Name it the way staff say it out loud.</p>
       </div>
 
       <div class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
@@ -138,12 +135,12 @@
             </option>
           <?php endforeach; ?>
         </select>
-        <p class="mt-1 text-[11px] text-ink-500">Leave blank to apply to every queue of that type.</p>
+        <p class="mt-1 text-[11px] text-slate-500">Leave blank to apply to every queue of that type.</p>
       </div>
 
-      <label class="flex items-center gap-2 text-sm text-ink-700">
+      <label class="flex items-center gap-2 text-sm text-slate-700">
         <input type="hidden" name="is_required" value="1">
-        <input class="checkbox" type="checkbox" checked disabled>
+        <input type="checkbox" checked disabled>
         <span>Required before the visit can be completed</span>
       </label>
 

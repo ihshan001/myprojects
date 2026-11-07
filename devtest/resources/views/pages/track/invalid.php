@@ -7,14 +7,14 @@
   <title><?= e($title ?? 'Link not valid') ?> · QueuePilot</title>
   <link rel="stylesheet" href="<?= e(asset('build/app.css')) ?>">
 </head>
-<body class="patient-view flex min-h-full items-center justify-center bg-canvas px-5">
-  <div class="w-full max-w-sm rounded-2xl border border-hairline bg-white p-6 text-center shadow-sm">
+<body class="flex min-h-full items-center justify-center bg-slate-100 px-5">
+  <div class="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
     <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-700">
       <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
            stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
     </div>
-    <h1 class="mt-4 text-lg font-bold text-ink-900"><?= e($title ?? 'Link not valid') ?></h1>
-    <p class="mt-2 text-sm leading-relaxed text-ink-600">
+    <h1 class="mt-4 text-lg font-bold text-slate-900"><?= e($title ?? 'Link not valid') ?></h1>
+    <p class="mt-2 text-sm leading-relaxed text-slate-600">
       <?php if (!empty($expired)): ?>
         This tracking link has expired because the clinic session ended.
         Ask the reception desk to issue a new token.

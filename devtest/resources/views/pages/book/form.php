@@ -7,7 +7,7 @@
  *  - one screen, no account, no password
  *  - the clinic's own colour, so it does not look like a third-party site
  */
-$brand = $clinicRecord['brand_color'] ?: '#0D7459';
+$brand = $clinicRecord['brand_color'] ?: '#0F766E';
 // $slots comes from SlotService: real clinic hours, real doctor length, minus
 // times already booked. Never rebuilt here — a view that invents availability
 // is how the page came to offer 08:30 on days nobody works.
@@ -23,7 +23,7 @@ $brand = $clinicRecord['brand_color'] ?: '#0D7459';
   <link rel="icon" href="/assets/img/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="<?= e(asset('build/app.css')) ?>">
 </head>
-<body class="patient-view min-h-full bg-canvas">
+<body class="min-h-full bg-slate-50">
   <header class="px-5 py-5 text-white" style="background: <?= e($brand) ?>">
     <div class="mx-auto flex max-w-lg items-center gap-3">
       <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-white/15 text-sm font-black">
@@ -53,7 +53,7 @@ $brand = $clinicRecord['brand_color'] ?: '#0D7459';
       <label class="label mt-4" for="phone">Mobile number</label>
       <input class="input" id="phone" name="phone" required inputmode="tel"
              autocomplete="tel" placeholder="077 123 4567">
-      <p class="mt-1 text-[11px] text-ink-500">We use this only to contact you about this appointment.</p>
+      <p class="mt-1 text-[11px] text-slate-500">We use this only to contact you about this appointment.</p>
 
       <label class="label mt-4" for="doctor_id">Doctor</label>
       <select class="select" id="doctor_id" name="doctor_id" required>
@@ -102,7 +102,7 @@ $brand = $clinicRecord['brand_color'] ?: '#0D7459';
           <?= e($slotReason) ?>
         </p>
       <?php elseif (!empty($hours['open'])): ?>
-        <p class="mt-2 text-[11px] leading-relaxed text-ink-500">
+        <p class="mt-2 text-[11px] leading-relaxed text-slate-500">
           <?= e(date('l', strtotime($date))) ?> hours:
           <?= e(date('g:i A', strtotime($hours['open']))) ?>–<?= e(date('g:i A', strtotime($hours['close']))) ?>.
           <?php if (empty($hours['configured'])): ?>
@@ -113,15 +113,15 @@ $brand = $clinicRecord['brand_color'] ?: '#0D7459';
 
       <button class="btn-primary mt-5 w-full" type="submit"<?= $slots === [] ? ' disabled' : '' ?>>Request appointment</button>
 
-      <p class="mt-3 text-center text-[11px] leading-relaxed text-ink-500">
+      <p class="mt-3 text-center text-[11px] leading-relaxed text-slate-500">
         This holds your slot. Please arrive 10 minutes early and check in at reception.
       </p>
     </form>
 
     <?php if (!empty($clinicRecord['phone'])): ?>
-      <p class="mt-4 text-center text-xs text-ink-500">
+      <p class="mt-4 text-center text-xs text-slate-500">
         Prefer to call?
-        <a class="font-semibold text-brand-700" href="tel:<?= e(preg_replace('/[^0-9+]/', '', (string) $clinicRecord['phone'])) ?>">
+        <a class="font-semibold text-teal-700" href="tel:<?= e(preg_replace('/[^0-9+]/', '', (string) $clinicRecord['phone'])) ?>">
           <?= e((string) $clinicRecord['phone']) ?>
         </a>
       </p>

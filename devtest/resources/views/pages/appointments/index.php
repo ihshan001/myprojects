@@ -1,14 +1,11 @@
-<div class="page-head">
-  <div class="flex min-w-0 items-start gap-3">
-    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-calendar"/></svg></span>
-    <div class="min-w-0">
-    <h1 class="page-title">Appointments</h1>
-    <p class="page-sub">Booked patients keep their slot priority when they check in.</p>
-  </div>
+<div class="flex flex-wrap items-start justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold tracking-tight text-slate-900">Appointments</h1>
+    <p class="mt-1 text-sm text-slate-500">Booked patients keep their slot priority when they check in.</p>
   </div>
 </div>
 
-<form method="get" action="/appointments" class="mt-3 flex sm:mt-5 flex-wrap items-end gap-2">
+<form method="get" action="/appointments" class="mt-5 flex flex-wrap items-end gap-2">
   <div>
     <label class="label" for="date">Date</label>
     <input class="input !py-2" type="date" id="date" name="date" value="<?= e($date) ?>">
@@ -26,26 +23,26 @@
   <a href="/appointments?date=<?= e(date('Y-m-d')) ?>" class="btn-ghost text-xs">Today</a>
 </form>
 
-<div class="mt-3 grid gap-3 sm:mt-6 sm:gap-5 lg:grid-cols-[1.4fr_.6fr]">
+<div class="mt-5 grid gap-5 lg:grid-cols-[1.4fr_.6fr]">
   <div class="card overflow-hidden">
-    <div class="section-head">
-      <p class="section-title"><?= e(date('l, j F Y', strtotime($date))) ?></p>
-      <p class="text-[11px] text-ink-400"><?= count($appointments) ?> booking(s)</p>
+    <div class="flex items-center justify-between border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+      <p class="text-xs font-semibold text-slate-600"><?= e(date('l, j F Y', strtotime($date))) ?></p>
+      <p class="text-[11px] text-slate-400"><?= count($appointments) ?> booking(s)</p>
     </div>
     <?php if ($appointments === []): ?>
-      <?php $title = 'Nothing booked'; $message = 'Use the booking form to add an appointment.'; $icon = 'calendar'; include QP_ROOT . '/resources/views/components/empty.php'; ?>
+      <?php $title = 'Nothing booked'; $message = 'Use the form on the right to book an appointment.'; $icon = 'calendar'; include QP_ROOT . '/resources/views/components/empty.php'; ?>
     <?php else: ?>
       <div class="divide-y divide-slate-100">
         <?php foreach ($appointments as $a): ?>
           <?php $open = in_array($a['status'], ['booked'], true); ?>
           <div class="flex flex-wrap items-center gap-3 px-4 py-3">
             <div class="w-16 shrink-0">
-              <p class="font-mono text-sm font-bold text-ink-900"><?= e(date('H:i', strtotime((string) $a['scheduled_for']))) ?></p>
-              <p class="text-[10px] text-ink-400"><?= (int) $a['duration_minutes'] ?> min</p>
+              <p class="font-mono text-sm font-bold text-slate-800"><?= e(date('H:i', strtotime((string) $a['scheduled_for']))) ?></p>
+              <p class="text-[10px] text-slate-400"><?= (int) $a['duration_minutes'] ?> min</p>
             </div>
             <div class="min-w-0 flex-1">
-              <p class="truncate text-sm font-semibold text-ink-900"><?= e($a['full_name']) ?></p>
-              <p class="truncate text-[11px] text-ink-400">
+              <p class="truncate text-sm font-semibold text-slate-800"><?= e($a['full_name']) ?></p>
+              <p class="truncate text-[11px] text-slate-400">
                 <?= e($a['doctor_name']) ?>
                 <?php if (!empty($a['phone'])): ?> · <?= e($a['phone']) ?><?php endif; ?>
                 · <?= e($a['source']) ?>
@@ -68,7 +65,7 @@
   </div>
 
   <div class="card card-pad lg:sticky lg:top-6 lg:self-start">
-    <h2 class="text-sm font-bold text-ink-900">Book an appointment</h2>
+    <h2 class="text-sm font-bold text-slate-900">Book an appointment</h2>
     <form method="post" action="/appointments" class="mt-3 space-y-3">
       <?= csrf_field() ?>
       <div>
@@ -106,7 +103,7 @@
 $cancelResult = \App\Core\Session::takeFlash('cancel_day_result');
 ?>
 <?php if (is_array($cancelResult)): ?>
-  <div class="card mt-3 sm:mt-5 overflow-hidden ring-2 ring-amber-200">
+  <div class="card mt-5 overflow-hidden ring-2 ring-amber-200">
     <div class="border-b border-amber-200 bg-amber-50 px-4 py-3">
       <p class="text-sm font-bold text-amber-900">
         <?= (int) $cancelResult['count'] ?> patient(s) need a call
@@ -120,8 +117,8 @@ $cancelResult = \App\Core\Session::takeFlash('cancel_day_result');
       <?php foreach ($cancelResult['patients'] as $p): ?>
         <li class="flex items-center justify-between gap-3 px-4 py-2.5">
           <div class="min-w-0">
-            <p class="truncate text-sm text-ink-900"><?= e((string) $p['name']) ?></p>
-            <p class="text-[11px] text-ink-400">was booked for <?= e((string) $p['time']) ?></p>
+            <p class="truncate text-sm text-slate-800"><?= e((string) $p['name']) ?></p>
+            <p class="text-[11px] text-slate-400">was booked for <?= e((string) $p['time']) ?></p>
           </div>
           <?php if (!empty($p['phone'])): ?>
             <a class="btn-secondary btn-sm shrink-0 text-xs" href="tel:<?= e(preg_replace('/[^\d+]/', '', (string) $p['phone'])) ?>">
@@ -133,7 +130,7 @@ $cancelResult = \App\Core\Session::takeFlash('cancel_day_result');
         </li>
       <?php endforeach; ?>
     </ul>
-    <p class="border-t border-slate-100 px-4 py-2.5 text-[11px] leading-relaxed text-ink-500">
+    <p class="border-t border-slate-100 px-4 py-2.5 text-[11px] leading-relaxed text-slate-500">
       Nothing was deleted — the day's history still shows what was booked and that it was cancelled.
     </p>
   </div>
@@ -146,8 +143,8 @@ $cancelDoctor = $doctorId ?? null;
 $futureDay = strtotime($date) >= strtotime(\App\Core\Db::today());
 ?>
 <?php if ($futureDay && $appointments !== [] && $cancelDoctor !== null): ?>
-  <details class="card mt-3 sm:mt-5 p-4">
-    <summary class="cursor-pointer text-sm font-medium text-ink-700">
+  <details class="card mt-5 p-4">
+    <summary class="cursor-pointer text-sm font-medium text-slate-700">
       The doctor cannot come in — cancel this whole day
     </summary>
     <form method="post" action="/appointments/cancel-day" class="mt-3 space-y-3"
@@ -159,7 +156,7 @@ $futureDay = strtotime($date) >= strtotime(\App\Core\Db::today());
         <label class="label" for="reason">Reason (recorded, shown to staff)</label>
         <input class="input" id="reason" name="reason" maxlength="120" placeholder="Doctor unwell, rescheduled theatre list…">
       </div>
-      <p class="text-[11px] leading-relaxed text-ink-500">
+      <p class="text-[11px] leading-relaxed text-slate-500">
         Every live booking for this doctor on <?= e(date('D j M', strtotime($date))) ?> becomes
         <b>cancelled</b>, and the next screen lists every patient with their number so someone can
         ring them. Bookings are not deleted. This cannot be undone from here.

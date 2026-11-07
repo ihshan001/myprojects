@@ -45,8 +45,7 @@ final class DisplayController
             'canRotate' => Auth::can('clinic.manage'),
             'kioskKey' => (new KioskService())->keyFor($clinicId),
             'kioskNewKey' => Session::takeFlash('kiosk_new_key'),
-            'departmentName' => null,
-        ] + $this->initialBoard($clinicId, null), false);
+        ], false);
     }
 
     /**
@@ -67,7 +66,6 @@ final class DisplayController
         );
 
         $departmentName = null;
-        $scopeId = null;
         if (!$clinicId) {
             $row = Db::one(
                 "SELECT owner_id, key_name FROM settings
@@ -77,7 +75,6 @@ final class DisplayController
             if ($row) {
                 $clinicId = (int) $row['owner_id'];
                 $departmentId = (int) substr((string) $row['key_name'], strlen('display.department.'));
-                $scopeId = $departmentId;
                 $departmentName = Db::scalar(
                     'SELECT name FROM departments WHERE id = ? AND clinic_id = ?',
                     [$departmentId, $clinicId]
@@ -102,21 +99,7 @@ final class DisplayController
             'canRotate' => false,
             'publicScreen' => true,
             'departmentName' => $departmentName,
-        ] + $this->initialBoard((int) $clinicId, $scopeId), false);
-    }
-
-    /**
-     * First paint uses the same builder as /api/display, so the wall shows the
-     * real board immediately instead of an empty shell until the first poll
-     * lands four seconds later.
-     */
-    private function initialBoard(int $clinicId, ?int $departmentId): array
-    {
-        $board = (new \App\Services\DisplayService())->payload($clinicId, $departmentId);
-        return [
-            'servingRooms' => $board['serving'] ?? [],
-            'upcomingTokens' => $board['upcoming'] ?? [],
-        ];
+        ], false);
     }
 
     /**
