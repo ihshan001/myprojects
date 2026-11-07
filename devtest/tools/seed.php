@@ -242,11 +242,11 @@ Db::transaction(function () use ($planIds, $today) {
        would be a lie: temperature is not recorded anywhere, so it would sit
        in the list looking authoritative and never match a single patient. */
     $ruleDefs = [
-        ['Under-5 first', 3, null, null, null, 0, 4, null, null, 'Children under 5 are seen ahead of adults'],
-        ['Elderly support', 2, null, null, null, 65, null, null, null, 'Age 65 and above; long waits are harder to tolerate'],
-        ['Morning lab fast-track', 2, null, 'lab', null, null, null, 7, 11, 'Fasting samples are time-critical before 11:00'],
-        ['Post-op review', 1, 'appointment', 'consultation', null, null, null, null, null, 'Booked post-operative reviews'],
-        ['Routine review behind', -1, 'walkin', 'general', null, null, null, null, null, 'Routine walk-in reviews can safely wait'],
+        ['Under-5 first', 3, null, null, null, 0, 4, null, null, 'Children under 5 get higher priority'],
+        ['Elderly support', 2, null, null, null, 65, null, null, null, 'Age 65 and above'],
+        ['Morning lab fast-track', 2, null, 'lab', null, null, null, 7, 11, 'Fasting samples before 11:00'],
+        ['Post-op review', 1, 'appointment', 'consultation', null, null, null, null, null, 'Patients with post-op visits'],
+        ['Routine review behind', -1, 'walkin', 'general', null, null, null, null, null, 'Routine walk-ins can safely wait'],
     ];
     $ruleOrder = 0;
     foreach ($ruleDefs as [$rName, $rEffect, $rSource, $rKind, $rDoc, $rMin, $rMax, $rFrom, $rTo, $rReason]) {

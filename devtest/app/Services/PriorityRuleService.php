@@ -71,10 +71,11 @@ final class PriorityRuleService
             $errors[] = 'The rule name is limited to 80 characters.';
         }
 
+        // Optional on the form. The column is NOT NULL because the reason is
+        // copied onto every entry the rule decides, so an omitted reason falls
+        // back to the rule name rather than storing an empty string.
         $reason = trim((string) ($in['reason'] ?? ''));
-        if ($reason === '') {
-            $errors[] = 'A rule must carry the clinical reason it applies — it is copied onto every entry it decides.';
-        } elseif (mb_strlen($reason) > 160) {
+        if (mb_strlen($reason) > 160) {
             $errors[] = 'The reason is limited to 160 characters.';
         }
 
@@ -93,13 +94,15 @@ final class PriorityRuleService
             $errors[] = 'Unknown queue kind.';
         }
 
-        $fromHour = $this->nullableHour($in['from_hour'] ?? null);
-        $toHour = $this->nullableHour($in['to_hour'] ?? null);
+        // Validate the CONVERTED hours, so a clock time from the form is
+        // judged on the same value that will actually be stored.
+        $fromHour = $this->hourFromInput($in['from_hour'] ?? null, false);
+        $toHour = $this->hourFromInput($in['to_hour'] ?? null, true);
         if (($in['from_hour'] ?? '') !== '' && $fromHour === null) {
-            $errors[] = 'From hour must be 0 to 23.';
+            $errors[] = 'Start time must be a valid time of day.';
         }
         if (($in['to_hour'] ?? '') !== '' && $toHour === null) {
-            $errors[] = 'To hour must be 1 to 24.';
+            $errors[] = 'End time must be a valid time of day.';
         }
         if ($fromHour !== null && $toHour !== null) {
             if ($fromHour >= $toHour) {
@@ -176,10 +179,12 @@ final class PriorityRuleService
                 $doctorId,
                 $this->nullableInt($in['min_age'] ?? null),
                 $this->nullableInt($in['max_age'] ?? null),
-                $this->nullableHour($in['from_hour'] ?? null),
-                $this->nullableHour($in['to_hour'] ?? null),
+                $this->hourFromInput($in['from_hour'] ?? null, false),
+                $this->hourFromInput($in['to_hour'] ?? null, true),
                 $effect,
-                trim((string) $in['reason']),
+                (trim((string) ($in['reason'] ?? '')) !== ''
+                    ? trim((string) $in['reason'])
+                    : trim((string) $in['name'])),
                 $actorId, Db::now(), $order,
             ]
             );
@@ -454,6 +459,32 @@ final class PriorityRuleService
             return null;
         }
         return filter_var($value, FILTER_VALIDATE_INT) === false ? null : (int) $value;
+    }
+
+    /**
+     * The form offers a clock time ("07:00"); the engine stores whole hours.
+     *
+     * A start rounds DOWN and an end rounds UP, because to_hour is exclusive:
+     * a window ending "11:30" must still cover the 11:00 hour, and silently
+     * truncating it to 11 would drop the last half hour of the clinic's window.
+     * "23:59" therefore becomes 24, i.e. through the end of the day.
+     */
+    private function hourFromInput(mixed $value, bool $isEnd): ?int
+    {
+        if ($value === null || $value === '' || $value === false) {
+            return null;
+        }
+        $s = trim((string) $value);
+        if (preg_match('/^(\d{1,2}):(\d{2})$/', $s, $m) === 1) {
+            $h = (int) $m[1];
+            $mins = (int) $m[2];
+            if ($h > 24 || $mins > 59) {
+                return null;
+            }
+            $h = ($mins > 0 && $isEnd) ? $h + 1 : $h;
+            return max($isEnd ? 1 : 0, min(24, $h));
+        }
+        return $this->nullableHour($value);
     }
 
     private function nullableHour(mixed $value): ?int

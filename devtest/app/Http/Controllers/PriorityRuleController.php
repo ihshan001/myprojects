@@ -48,7 +48,7 @@ final class PriorityRuleController
      */
     private function viewData(int $clinicId, array $old, array $errors): array
     {
-        $from = Request::string('from', date('Y-m-d', strtotime('-30 days')));
+        $from = Request::string('from', date('Y-m-d', strtotime('-6 days')));
         $to = Request::string('to', Db::today());
 
         $rules = $this->rules->rules($clinicId, false);

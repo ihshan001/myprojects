@@ -2810,7 +2810,7 @@ Assert::test('a rule cannot be saved half-written or pointed at another clinic',
     $rules = new App\Services\PriorityRuleService();
     $bad = [
         ['name' => '', 'effect' => 2, 'reason' => 'x'],
-        ['name' => 'No reason', 'effect' => 2, 'reason' => ''],
+
         ['name' => 'Zero effect', 'effect' => 0, 'reason' => 'x'],
         ['name' => 'Backwards hours', 'effect' => 2, 'reason' => 'x', 'from_hour' => 15, 'to_hour' => 9],
         ['name' => 'Half a window', 'effect' => 2, 'reason' => 'x', 'from_hour' => 9],
@@ -2826,6 +2826,14 @@ Assert::test('a rule cannot be saved half-written or pointed at another clinic',
         }
         Assert::true($refused, 'input ' . $i . ' (' . ($input['name'] ?: 'unnamed') . ') is refused');
     }
+
+    // The reason is optional on the form, but the column is NOT NULL because
+    // it is copied onto every entry the rule decides. An omitted reason must
+    // fall back to the rule name, never to an empty string on a patient record.
+    $noReason = $rules->create(81, ['name' => 'Reason omitted', 'effect' => 2, 'reason' => ''], null);
+    Assert::same('Reason omitted', (string) Db::scalar('SELECT reason FROM priority_rules WHERE id = ?', [$noReason]),
+        'an omitted reason falls back to the rule name');
+    $rules->delete(81, $noReason);
 
     $foreignQueue = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 1 LIMIT 1');
     $refused = false;
@@ -4540,6 +4548,25 @@ Assert::test('reorder is scoped to the clinic', function (): void {
 
     $svc->delete($clinicId, $mine);
     $svc->delete($other, $theirs);
+});
+
+Assert::test('a clock time becomes whole hours without losing the end of a window', function (): void {
+    $clinicId = 1;
+    $svc = new \App\Services\PriorityRuleService();
+    $id = $svc->create($clinicId, [
+        'name' => 'Clock window', 'effect' => 2,
+        'from_hour' => '07:30', 'to_hour' => '11:30',
+    ]);
+    $row = Db::one('SELECT from_hour, to_hour FROM priority_rules WHERE id = ?', [$id]);
+    Assert::same(7, (int) $row['from_hour'], 'a start rounds down to the hour it falls in');
+    Assert::same(12, (int) $row['to_hour'], 'an exclusive end rounds up so 11:30 still covers the 11:00 hour');
+    $svc->delete($clinicId, $id);
+
+    $late = $svc->create($clinicId, ['name' => 'All day', 'effect' => 1, 'from_hour' => '00:00', 'to_hour' => '23:59']);
+    $row2 = Db::one('SELECT from_hour, to_hour FROM priority_rules WHERE id = ?', [$late]);
+    Assert::same(0, (int) $row2['from_hour'], 'midnight is hour 0');
+    Assert::same(24, (int) $row2['to_hour'], '23:59 means through the end of the day');
+    $svc->delete($clinicId, $late);
 });
 
 Assert::test('rule stats report a comparison, not an invented saving', function (): void {

@@ -121,18 +121,39 @@ foreign list, so a stale tab cannot drop a rule it never saw.
 - Saves debounce and queue: two quick moves used to lose the second one,
   because the in-flight guard returned early and the screen showed an order
   the server never received.
-- Below `sm` the table becomes stacked cards (`.dtable-stack`) so priority and
-  status are never hidden off the right edge.
-- The create form is a collapsible rail card, open automatically when a save
-  fails so the error and the field are on screen together.
+- Below `sm` the table becomes stacked cards so priority and status are never
+  hidden off the right edge, and the row controls grow to 32px tap targets.
+- The create form is a rail card, **open on arrival** as in the mockup, with a
+  chevron that actually flips. `Priority` is coloured by the strength it names,
+  so the select reads the same red/amber/grey as the badge it will produce.
+- The time window takes **clock times** (`07:30`), not bare hour integers.
+  `hourFromInput()` floors a start and ceils an end, so `23:59` becomes the
+  exclusive upper bound `24` and a window means what the label says.
+  `validate()` checks the *converted* value, not the raw string.
+- `Reason` is optional; it falls back to the rule name so the audit trail and
+  the patient's recorded reason are never blank.
 
-### Two deliberate deviations from the mockup
+### Matching the mockup
 
-- **"Avg. wait improvement 18%"** is shown as **"Wait difference"**, labelled
-  *shorter for flagged*, with the underlying averages spelled out underneath.
+Rebuilt against `docs/design/priority-rules-reference.png` at its own
+1484×1060: bare outline page glyph, 100px stat tiles with 48px circular icons,
+sentence-case labels, a borderless `#F7F8FB` explainer with the evaluation
+diagram, an uppercase header **outside** a rounded table body, 58px rows,
+flat ring-free badges, and a one-line override report.
+
+The last row, **"Default queue order / First come, first served"**, is
+*synthetic*. It is what the engine falls back to, so it belongs at the bottom
+of the list — but it is not a stored rule (`effect ≠ 0` is a CHECK), so it has
+no drag handle and no delete action, it renumbers when the real rules move,
+and it hides while a filter is applied rather than reading as a sixth match.
+
+### Two deliberate deviations
+
+- **"Avg. wait improvement 18%"** reads `—` until there is a real comparison.
   Patients a rule flags are clinically different from those it does not, so
-  the gap is a comparison of two groups, never proof the rule caused it. It
-  reads `—` until there are at least five flagged visits.
+  the gap is a comparison of two groups, never proof the rule caused it. The
+  averages are spelled out underneath once there are at least five flagged
+  visits. The layout matches; the number is measured, not styled in.
 - **No "High fever" rule** in the seed. Temperature is not recorded anywhere,
   so such a rule would look authoritative and never match a patient. The five
   seeded rules use only conditions the engine can actually evaluate.
@@ -141,9 +162,11 @@ foreign list, so a stale tab cannot drop a rule it never saw.
 
 Everything new lives in `resources/css/app.css` as generic primitives:
 `.page-icon`, `.toolbar`, `.utab`, `.search-mini`, `.explainer`, `.dtable`,
-`.dtable-stack`, `.rule-grip`, `.prio-*`, `.metric-strip`, `.disclosure-btn`.
-The icon-led page head was applied to **33 page heads** across the console and
-the platform admin, so the upgrade reads the same everywhere.
+`.dtable-frame`, `.dtable-stack`, `.rule-grip`, `.rule-num`, `.prio-*`,
+`.status-on/-off`, `.stat-soft`, `.label-soft`, `.btn-tint`,
+`.btn-outline-brand`, `.metric-strip`, `.disclosure-btn`. The icon-led page
+head was applied to **33 page heads** across the console and the platform
+admin, so the upgrade reads the same everywhere.
 
 ## The two patient-facing screens
 

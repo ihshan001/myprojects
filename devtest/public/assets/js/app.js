@@ -635,6 +635,7 @@
     if (!panel) return;
     const open = panel.classList.toggle('hidden') === false;
     t.setAttribute('aria-expanded', String(open));
+    t.querySelector('[data-chevron]')?.classList.toggle('rotate-180', open);
     if (open && panel.classList.contains('flex-wrap')) panel.classList.add('flex');
     else panel.classList.remove('flex');
   });
@@ -686,6 +687,10 @@
         if (ok) shown++;
       });
       if (empty) empty.classList.toggle('hidden', shown !== 0);
+      // The fallback row is not a rule; showing it under a filtered list would
+      // read as a sixth match.
+      const fallback = $('[data-rule-default]');
+      if (fallback) fallback.classList.toggle('hidden', Boolean(q || strength || status));
     }
     search?.addEventListener('input', applyFilters);
     filters.forEach((f) => f.addEventListener('change', applyFilters));
@@ -708,12 +713,29 @@
     };
     $$('[data-open-form]').forEach((b) => b.addEventListener('click', () => setForm(true)));
     $('[data-close-form]')?.addEventListener('click', () => setForm(false));
+    formToggle?.querySelector('[data-chevron]')
+      ?.classList.toggle('rotate-180', formToggle.getAttribute('aria-expanded') === 'true');
+
+    /* Colour the priority select by the strength it names, so the choice reads
+       the same red/amber/grey as the badge it will produce. */
+    const eff = $('[data-effect-select]');
+    const paintEff = () => {
+      if (!eff) return;
+      const n = Number(eff.value);
+      eff.style.color = n >= 2 ? '#DC3B3B' : (n > 0 ? '#D98219' : '#64748B');
+    };
+    eff?.addEventListener('change', paintEff);
+    paintEff();
 
     /* ------------------------------------------------------- reordering */
-    const renumber = () => rows().forEach((r, i) => {
-      const n = r.querySelector('[data-rule-num]');
-      if (n) n.textContent = String(i + 1);
-    });
+    const renumber = () => {
+      rows().forEach((r, i) => {
+        const n = r.querySelector('[data-rule-num]');
+        if (n) n.textContent = String(i + 1);
+      });
+      const last = $('[data-rule-default-num]');
+      if (last) last.textContent = String(rows().length + 1);
+    };
 
     /* Two arrow presses in a row used to lose the second one: the guard
        returned early while the first save was in flight, so the screen showed

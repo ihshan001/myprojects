@@ -165,7 +165,17 @@
            disabled:opacity-50;
   }
   .btn-primary {
-    @apply btn bg-brand-700 text-white shadow-sm hover:bg-brand-800;
+    @apply btn text-white shadow-sm;
+    background-image: linear-gradient(100deg, #128055, #0F6E48);
+  }
+  .btn-primary:hover { background-image: linear-gradient(100deg, #0F6E48, #0B5A3B); }
+  /* Pale brand fill with brand text: "Today's board" in the reference. */
+  .btn-tint {
+    @apply btn border border-brand-100 bg-brand-50 text-brand-700 hover:bg-brand-100;
+  }
+  /* White with brand text: "View report". */
+  .btn-outline-brand {
+    @apply btn border border-hairline bg-white text-brand-700 shadow-card hover:bg-brand-50;
   }
   .btn-secondary {
     @apply btn border border-hairline bg-white text-ink-700 shadow-card hover:bg-slate-50;
@@ -221,6 +231,9 @@
   /* ------------------------------------------------------------ inputs */
   .label {
     @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+  .label-soft {
+    @apply mb-1.5 block text-[11.5px] font-semibold text-ink-600;
   }
   .input {
     @apply w-full rounded-lg border border-hairline bg-white px-3 py-2.5 text-sm text-ink-900
@@ -392,6 +405,18 @@
     @apply truncate text-[22px] font-bold leading-tight tracking-tight text-ink-900 tabular;
   }
   .stat-hint { @apply text-[11px] text-ink-500; }
+
+  /* Reference variant: 48px CIRCULAR icon, sentence-case label, calmer value.
+     The live board keeps the dense uppercase .stat-tile from its own mockup;
+     this is the same object with the softer treatment the inner pages use. */
+  .stat-soft { @apply gap-3.5 px-4 py-[18px]; }
+  .stat-soft .stat-ico { @apply h-12 w-12 rounded-full; }
+  .stat-soft .stat-ico svg { @apply h-5 w-5; }
+  .stat-soft .stat-label {
+    @apply text-[11.5px] font-medium normal-case tracking-normal text-ink-500;
+  }
+  .stat-soft .stat-value { @apply mt-0.5 text-[19px] font-bold; }
+  .stat-soft .stat-hint { @apply mt-0.5 text-[11.5px] text-ink-500; }
 
   /* Doctor tabs inside the live-queue card. */
   .qtab {
@@ -588,9 +613,9 @@
 
   /* Leading icon in a page head, so a section is recognisable at a glance. */
   .page-icon {
-    @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-xl
-           bg-brand-50 text-brand-600 sm:h-10 sm:w-10;
+    @apply flex h-7 w-7 shrink-0 items-center justify-center text-brand-600 sm:h-8 sm:w-8;
   }
+  .page-icon svg { @apply h-6 w-6 sm:h-7 sm:w-7; }
 
   /* Tabs + search + primary action on one row. Wraps before it squeezes. */
   .toolbar {
@@ -613,11 +638,12 @@
 
   /* A short "how this works" panel. Collapsible because staff read it once. */
   .explainer {
-    @apply rounded-xl border border-hairline bg-canvas px-4 py-3.5;
+    @apply rounded-xl px-4 py-3.5;
+    background: #F7F8FB;
   }
-  .explainer-list { @apply mt-2 space-y-1.5; }
+  .explainer-list { @apply mt-2 space-y-1; }
   .explainer-list li {
-    @apply flex items-start gap-2 text-[12px] leading-relaxed text-ink-600;
+    @apply flex items-start gap-2 text-[11.5px] leading-[1.35] text-ink-600;
   }
 
   /* Data table: header row, hairline dividers, no zebra. */
@@ -659,25 +685,38 @@
            text-ink-300 transition hover:bg-canvas hover:text-ink-500 active:cursor-grabbing;
   }
   .rule-num {
-    @apply flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-canvas
-           text-[11px] font-bold text-ink-500 tabular;
+    @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-full
+           text-[12px] font-bold text-ink-700 tabular;
+    background: #F1F3F7;
+  }
+  /* The reference table head sits OUTSIDE a rounded, bordered body. */
+  .dtable-frame {
+    @apply overflow-hidden rounded-xl border border-hairline;
+  }
+  .dtable-frame .dtable tbody tr:last-child td { @apply border-b-0; }
+  .status-on {
+    @apply inline-flex items-center rounded-md px-2.5 py-1 text-[11.5px] font-semibold;
+    background: #EBF8F1; color: #1E9E63;
+  }
+  .status-off {
+    @apply inline-flex items-center rounded-md bg-canvas px-2.5 py-1 text-[11.5px] font-semibold text-ink-500;
   }
   .row-dragging { @apply opacity-40; }
   .row-drop-before { box-shadow: inset 0 2px 0 0 #0D7459; }
   .row-drop-after  { box-shadow: inset 0 -2px 0 0 #0D7459; }
 
   /* Priority strength, in words rather than a bare number. */
-  .prio { @apply inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset; }
-  .prio-ahead    { @apply bg-rose-100 text-rose-700 ring-rose-200; }
-  .prio-slight   { @apply bg-amber-100 text-amber-800 ring-amber-200; }
-  .prio-normal   { @apply bg-sky-50 text-sky-700 ring-sky-100; }
-  .prio-behind   { @apply bg-canvas text-ink-500 ring-hairline; }
+  .prio { @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1 text-[11.5px] font-semibold; }
+  .prio-ahead    { background: #FCEDEC; color: #DC3B3B; }
+  .prio-slight   { background: #FEF4E8; color: #D98219; }
+  .prio-normal   { background: #EBF4FE; color: #2A7FD1; }
+  .prio-behind   { background: #F1F3F7; color: #64748B; }
 
   /* Inline metric strip inside a report card. */
   .metric-strip { @apply grid grid-cols-3 divide-x divide-hairline; }
   .metric-strip > div { @apply min-w-0 px-2 py-1 text-center sm:px-3; }
   .metric-value { @apply text-[15px] font-bold text-ink-900 tabular sm:text-[17px]; }
-  .metric-label { @apply mt-0.5 text-[10.5px] leading-tight text-ink-500; overflow-wrap: anywhere; }
+  .metric-label { @apply mt-0.5 text-[11px] leading-tight text-ink-500; overflow-wrap: anywhere; }
 
   /* Collapsible rail card (create form, filters). */
   .disclosure-btn {
