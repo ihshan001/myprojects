@@ -740,3 +740,20 @@
   paintNet();
   render();
 })();
+
+/* ---- sign-in demo chips ------------------------------------------------
+   Inline handlers are impossible on this page: the response ships
+   `Content-Security-Policy: script-src 'self'`, so the fill lives here, in
+   an external file — same reason every other script is external. */
+(function () {
+  document.addEventListener('click', function (e) {
+    var btn = e.target && e.target.closest ? e.target.closest('[data-demo-email]') : null;
+    if (!btn) return;
+    var form = btn.closest('form');
+    var email = (form && form.querySelector('[name="email"]')) || document.getElementById('email');
+    var password = (form && form.querySelector('[name="password"]')) || document.getElementById('password');
+    if (email) email.value = btn.getAttribute('data-demo-email') || '';
+    if (password) password.value = btn.getAttribute('data-demo-pass') || '';
+    if (email) email.focus();
+  });
+})();

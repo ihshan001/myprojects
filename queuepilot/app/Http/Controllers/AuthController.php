@@ -19,7 +19,7 @@ final class AuthController
             redirect(Auth::isSuper() ? '/admin' : '/app');
             return;
         }
-        view('auth/login', ['title' => 'Sign in', 'email' => '']);
+        view('auth/login', ['title' => 'Sign in', 'email' => ''], false);
     }
 
     public function login(): void

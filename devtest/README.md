@@ -265,6 +265,19 @@ the same sidebar, top bar, cards, buttons, tables and mobile behaviour. The
 clinic board and the platform console are built from the same parts — greeting,
 five stat tiles, a main card and a right rail — with each role's own data.
 
+**Scale: 90% everywhere.** Every page — console and homepage — renders at the
+proportions of a browser zoomed to 90%, so nobody has to press Ctrl/Cmd −.
+`html { zoom: 0.9 }` in `resources/css/app.css` is the rule (it scales px
+utilities and images too, which a `font-size` root knob cannot). Element zoom
+does not resize the viewport media queries see, so three companions are
+retuned ×0.9 and must move with it: `screens` in
+`resources/tailwind/tailwind.config.js`, the two `max-width` rules in the same
+stylesheet, and the `matchMedia` lg query in `public/assets/js/app.js`.
+Print is exempt (`zoom: 1` inside `@media print`) — a browser at 90% still
+prints at 100%, so slips and QR codes keep their true size. Verified against a
+headless Chromium rendering the real 90%-zoom state (viewport ÷ 0.9, raster
+0.9): identical density, identical layout, no gap, fixed bars intact.
+
 ## The two patient-facing screens
 
 These are deliberately **not** the console shell. They render as standalone

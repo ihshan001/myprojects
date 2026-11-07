@@ -423,19 +423,25 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
           <li class="lp-duet-row">
             <div class="lp-duet-node order-1 md:order-2">
               <span class="lp-duet-dot"><?= e($n) ?></span>
-              <span class="lp-duet-moment"><?= e($moment) ?></span>
+              <span class="lp-duet-moment lp-display"><?= e($moment) ?></span>
             </div>
             <div class="lp-duet-side lp-duet-side--desk order-2 md:order-1">
               <span class="lp-duet-label md:hidden">At the desk</span>
               <p class="lp-duet-text"><?= e($desk) ?></p>
             </div>
-            <div class="lp-duet-side lp-duet-side--hand order-3">
+            <div class="lp-duet-side lp-duet-side--hand lp-duet-side--phone order-3">
               <span class="lp-duet-label md:hidden">In their hand</span>
               <p class="lp-duet-text"><?= e($hand) ?></p>
             </div>
           </li>
         <?php endforeach; ?>
       </ol>
+
+      <!-- The rail lands here: the loop closes on the brand's gold dot. -->
+      <div class="lp-duet-end">
+        <span class="lp-duet-end-dot"></span>
+        <span class="lp-duet-end-text">One loop, every visit</span>
+      </div>
     </div>
   </section>
 
@@ -663,9 +669,24 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
   </section>
 
 <!-- ============================================================ footer -->
-<footer class="lp-footer">
-  <div class="lp-wrap py-12">
-    <div class="flex flex-wrap items-start justify-between gap-8">
+<footer class="lp-footer" data-reveal>
+  <div class="lp-wrap py-14 md:py-16">
+
+    <!-- Closing offer: the page ends the way a good counter does — with an invitation. -->
+    <div class="lp-foot-cta">
+      <div class="max-w-xl">
+        <span class="lp-eyebrow">Start today</span>
+        <p class="lp-foot-cta-line">Open your first queue today.</p>
+      </div>
+      <div class="flex flex-wrap gap-3">
+        <a href="/register" class="lp-btn-gold lp-tap">Start 14-day free trial &rarr;</a>
+        <a href="/login" class="lp-btn-ghost lp-btn-ghost--dark lp-tap">Sign in</a>
+      </div>
+    </div>
+
+    <div class="lp-rail my-10 opacity-25"></div>
+
+    <div class="lp-foot-grid">
       <div class="max-w-xs">
         <div class="flex items-center gap-2.5">
           <span class="h-8 w-8 shrink-0 rounded-[0.625rem] p-0.5" style="<?= e($markBg) ?>"><?= $mark ?></span>
@@ -675,27 +696,37 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
           The queue operating system for Sri Lankan outpatient clinics. Tokens and rooms
           on every public screen &mdash; never a patient name.
         </p>
+        <p class="lp-foot-lang">
+          <svg aria-hidden="true"><use href="#i-globe"/></svg>
+          <span>The console speaks English, සිංහල and தமிழ்.</span>
+        </p>
       </div>
-      <nav class="grid w-full grid-cols-2 gap-x-6 sm:flex sm:w-auto sm:flex-wrap sm:gap-x-8 sm:gap-y-1">
-        <?php foreach ([['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pricing'], ['#patient', 'Patient view'], ['/demo/board', 'Live demo'], ['/login', 'Sign in'], ['/register', 'Start trial']] as [$href, $label]): ?>
+
+      <nav class="lp-foot-col" aria-label="Product">
+        <p class="lp-foot-head">Product</p>
+        <?php foreach ([['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pricing'], ['#patient', 'Patient view'], ['/demo/board', 'Live demo']] as [$href, $label]): ?>
           <a href="<?= e($href) ?>" class="lp-footer-link lp-tap"><?= e($label) ?></a>
         <?php endforeach; ?>
       </nav>
-      <div class="flex items-center gap-1.5">
-        <?php foreach (['EN', 'SI', 'TA'] as $lang): ?>
-          <span class="lp-mono flex h-7 items-center rounded-full px-2.5 text-[0.625rem] font-bold" style="background:rgba(255,255,255,.08);color:#CFE0DB"><?= e($lang) ?></span>
+
+      <nav class="lp-foot-col" aria-label="Account">
+        <p class="lp-foot-head">Account</p>
+        <?php foreach ([['/login', 'Sign in'], ['/register', 'Start trial'], ['/forgot-password', 'Forgot password?']] as [$href, $label]): ?>
+          <a href="<?= e($href) ?>" class="lp-footer-link lp-tap"><?= e($label) ?></a>
         <?php endforeach; ?>
-      </div>
+      </nav>
     </div>
 
-    <div class="lp-rail my-9 opacity-25"></div>
+    <div class="lp-rail my-10 opacity-25"></div>
 
     <!-- The wordmark as the closing image: the last thing on the page is the brand. -->
-    <div class="flex flex-wrap items-end justify-between gap-4">
-      <p class="lp-display select-none text-[3.25rem] leading-none text-white sm:text-[5rem] lg:text-[6.5rem]">
-        QueuePilot<span style="color:#E0A63C">.</span>
-      </p>
-      <p class="lp-mono pb-2 text-[0.6875rem]" style="color:#7FA098">&copy; <?= e(date('Y')) ?> QueuePilot</p>
+    <p class="lp-display select-none text-[3.25rem] leading-none text-white sm:text-[5rem] lg:text-[6.5rem]">
+      QueuePilot<span style="color:#E0A63C">.</span>
+    </p>
+
+    <div class="lp-foot-bottom mt-7">
+      <p class="lp-foot-legal">QueuePilot is queue-management software &mdash; never a medical record.</p>
+      <p class="lp-mono text-[0.6875rem]" style="color:#7FA098">&copy; <?= e(date('Y')) ?> QueuePilot</p>
     </div>
   </div>
 </footer>

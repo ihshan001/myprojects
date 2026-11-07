@@ -22,6 +22,24 @@ module.exports = {
       boxShadow: {
         soft: '0 1px 2px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(15,23,42,0.12)',
       },
+      // BREAKPOINTS AT 90% — html { zoom: 0.9 } (resources/css/app.css)
+      // renders every page at browser-90% proportions, but element zoom
+      // does not resize the viewport media queries evaluate against
+      // (real browser zoom divides it by 0.9). Every min-width is
+      // therefore the stock Tailwind value × 0.9, so layouts flip at the
+      // same PHYSICAL window widths as a browser at 90%:
+      //   real: window 950 → viewport 1056 ≥ lg 1024 → lg on
+      //   ours: window 950 → viewport 950  ≥ lg 921.6 → lg on
+      // The homepage's hand-written layout uses only rem and %, so this
+      // list mainly governs the tailwind responsive classes in the views.
+      // Keep these in step with the zoom rule; change one, change both.
+      screens: {
+        sm: '576px',       // 640 × 0.9
+        md: '691.2px',     // 768 × 0.9
+        lg: '921.6px',     // 1024 × 0.9
+        xl: '1152px',      // 1280 × 0.9
+        '2xl': '1382.4px', // 1536 × 0.9
+      },
     },
   },
   plugins: [],

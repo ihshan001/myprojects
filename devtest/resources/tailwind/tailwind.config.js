@@ -41,6 +41,26 @@ module.exports = {
         bar: '0 1px 3px rgba(15,23,42,0.04), 0 1px 2px rgba(15,23,42,0.03)',
         pop: '0 12px 32px -8px rgba(15,23,42,0.18), 0 2px 8px rgba(15,23,42,0.06)',
       },
+      // BREAKPOINTS AT 90% — html { zoom: 0.9 } (resources/css/app.css)
+      // renders every page at browser-90% proportions, but element zoom
+      // does not resize the viewport media queries evaluate against
+      // (real browser zoom divides it by 0.9). Every min-width is
+      // therefore the stock Tailwind value × 0.9, so layouts flip at the
+      // same PHYSICAL window widths as a browser at 90%:
+      //   real: window 950 → viewport 1056 ≥ lg 1024 → lg on
+      //   ours: window 950 → viewport 950  ≥ lg 921.6 → lg on
+      // Phones are unaffected: 360/426 land on the same side of every
+      // breakpoint as before, and the hand-written min-[380px] phone
+      // breakpoints in the views stay un-retuned on purpose — they are
+      // device thresholds, and desktop zoom does not run on devices.
+      // Keep these in step with the zoom rule; change one, change both.
+      screens: {
+        sm: '576px',       // 640 × 0.9
+        md: '691.2px',     // 768 × 0.9
+        lg: '921.6px',     // 1024 × 0.9
+        xl: '1152px',      // 1280 × 0.9
+        '2xl': '1382.4px', // 1536 × 0.9
+      },
     },
   },
   plugins: [],
