@@ -2,11 +2,19 @@
 use App\Core\Db;
 $plans = Db::all('SELECT * FROM plans ORDER BY sort_order');
 $demoQueue = Db::one("SELECT q.*, c.name AS clinic_name, c.slug FROM queues q JOIN clinics c ON c.id=q.clinic_id WHERE c.slug='serenity' ORDER BY q.id LIMIT 1");
+// This panel is on an unauthenticated marketing page that anyone can open or
+// screenshot, so it shows the same projection the waiting-room TV does: tokens
+// and rooms, never a patient name. The patients join is deliberately absent —
+// the name must not be reachable here, not merely unprinted.
 $liveRows = $demoQueue ? Db::all(
-    "SELECT e.token_label, e.status, p.full_name FROM queue_entries e JOIN patients p ON p.id=e.patient_id
+    "SELECT e.token_label, e.status, r.name AS room_name
+      FROM queue_entries e
+      JOIN queues q ON q.id = e.queue_id
+      LEFT JOIN doctors d ON d.id = q.doctor_id
+      LEFT JOIN rooms r ON r.id = d.room_id
       WHERE e.queue_id = ? AND e.status IN ('waiting','called','in_consultation')
       ORDER BY CASE e.status WHEN 'in_consultation' THEN 0 WHEN 'called' THEN 1 ELSE 2 END,
-               e.priority DESC, e.id LIMIT 4",
+               e.priority DESC, e.token_no LIMIT 4",
     [$demoQueue['id']]
 ) : [];
 ?>
@@ -84,7 +92,7 @@ $liveRows = $demoQueue ? Db::all(
       </div>
 
       <p class="mt-3 text-xs text-slate-500">
-        No card required · works on a ₹ phone and a 3G line · your patients never install anything
+        No card required · works on a basic smartphone and a 3G line · your patients never install anything
       </p>
 
       <dl class="mt-9 grid max-w-lg grid-cols-3 gap-4 border-t border-slate-300/60 pt-6">
@@ -104,7 +112,7 @@ $liveRows = $demoQueue ? Db::all(
             <span class="h-2.5 w-2.5 rounded-full bg-amber-400"></span>
             <span class="h-2.5 w-2.5 rounded-full bg-emerald-400"></span>
           </div>
-          <p class="text-[11px] font-semibold text-slate-500"><?= e($demoQueue['clinic_name'] ?? 'Live demo') ?> · reception</p>
+          <p class="text-[11px] font-semibold text-slate-500"><?= e($demoQueue['clinic_name'] ?? 'Live demo') ?> · waiting room</p>
           <span class="live-pill"><span class="pulse-dot"><span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span></span>Live</span>
         </div>
 
@@ -128,8 +136,8 @@ $liveRows = $demoQueue ? Db::all(
             <div class="flex items-center gap-3 px-4 py-3 <?= $i === 0 ? 'bg-teal-50/40' : '' ?>">
               <span class="token-chip"><?= e($r['token_label']) ?></span>
               <div class="min-w-0 flex-1">
-                <p class="truncate text-sm font-medium text-slate-800"><?= e($r['full_name']) ?></p>
-                <p class="text-[11px] text-slate-400"><?= e(App\Domain\Queue\QueueStateMachine::meta($r['status'])['label']) ?></p>
+                <p class="truncate text-sm font-medium text-slate-800"><?= e(App\Domain\Queue\QueueStateMachine::meta($r['status'])['label']) ?></p>
+                <p class="text-[11px] text-slate-400"><?= e($r['room_name'] ?? 'Waiting room') ?></p>
               </div>
               <?php if ($r['status'] === 'in_consultation'): ?>
                 <span class="badge-teal">In room</span>
@@ -145,7 +153,7 @@ $liveRows = $demoQueue ? Db::all(
           <?php endif; ?>
         </div>
         <div class="border-t border-slate-200 bg-slate-50/60 px-4 py-2.5 text-center text-[11px] text-slate-500">
-          Every row is real data from this database, polled every 5 s.
+          Real data from this database &mdash; tokens and rooms only, exactly what the waiting-room screen shows.
         </div>
       </div>
     </div>

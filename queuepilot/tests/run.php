@@ -4753,6 +4753,28 @@ Assert::test('revenue is billed at each doctor\'s fee, and says so', function ()
     Assert::same(0.0, round($empty['total'], 2), 'an empty range reports zero');
     Assert::same([], $empty['rows'], 'with no rows rather than a zero-filled fake');
 });
+/* ---- the public homepage must not expose patients ------------------ */
+
+Assert::test('the public landing page cannot reach a patient name', function (): void {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/landing.php');
+    // Strip comments first: the docblock explains WHY there is no name, and
+    // grepping the raw file would match that explanation.
+    $code = (string) preg_replace('~/\*.*?\*/~s', '', $view);
+    $code = (string) preg_replace('~^\s*//.*$~m', '', $code);
+
+    // The homepage is unauthenticated and screenshot-able. Its own FAQ promises
+    // "tokens and room numbers only", so the demo panel must match that promise.
+    Assert::true(strpos($code, 'full_name') === false, 'never selects or prints a patient name');
+    Assert::true(strpos($code, 'JOIN patients') === false, 'the patients join is absent, not merely unprinted');
+    // Match data access, not the word: 'phone' is also a legitimate icon name
+    // in the feature list on this page.
+    Assert::true(strpos($code, 'p.phone') === false && strpos($code, 'e.phone') === false
+        && strpos($code, "['phone']") === false, 'no phone number either');
+    Assert::true(strpos($code, 'track_token') === false, 'no capability token that could cancel a visit');
+    Assert::true(strpos($code, 'token_label') !== false, 'it still shows the token, which is the point');
+    Assert::true(strpos($code, 'room_name') !== false, 'and the room, matching the waiting-room screen');
+});
+
 /* ------------------------------------------------------------------ */
 
 $code = Assert::summary();

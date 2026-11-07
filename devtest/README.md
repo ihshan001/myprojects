@@ -42,8 +42,7 @@ isolation: it must never show Serenity's patients. It is also the solo-doctor
 fixture: one session, so it exercises the single-doctor board and console.
 
 **8085 is not devtest.** devtest has no landing page, no sign-in and no
-registration by design, so the homepage only exists in the pristine reference
-app. `tools/serve-landing.mjs` runs `../queuepilot`'s own unmodified server on
+registration by design, so the homepage only exists in the reference app. `tools/serve-landing.mjs` runs `../queuepilot`'s own unmodified server on
 8085, changing the transport only:
 
 - strips `X-Frame-Options` and `frame-ancestors` so the Arena preview iframe can
@@ -53,7 +52,16 @@ app. `tools/serve-landing.mjs` runs `../queuepilot`'s own unmodified server on
   `X-Content-Type-Options: nosniff` the browser refuses to guess and prints the
   page as escaped source. devtest's `serve-role.mjs` already carried this fix.
 
-No file under `queuepilot/` is modified; `git status queuepilot/` stays clean.
+The shim modifies no file under `queuepilot/`. The reference app does carry two
+bug fixes made on request, both unrelated to design:
+
+- its homepage demo panel selected `p.full_name` and printed real patient names on
+  an unauthenticated marketing page, while the page's own FAQ promised "tokens and
+  room numbers only". The patients join is now gone entirely, so the name is not
+  reachable rather than merely unprinted; rows show the token, status and room. A
+  test asserts the join stays out.
+- the hero read "works on a ₹ phone" — a stray rupee sign where a number had been
+  lost. Now "works on a basic smartphone".
 
 ```bash
 PORT=8085 node tools/serve-landing.mjs     # from devtest/
