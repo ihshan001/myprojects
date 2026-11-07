@@ -81,7 +81,7 @@ final class QueueRepository
     public function board(int $clinicId, int $queueId): array
     {
         return Db::all(
-            "SELECT e.*, p.full_name, p.phone, p.gender, p.code AS patient_code
+            "SELECT e.*, p.full_name, p.phone, p.gender, p.birth_year, p.code AS patient_code
                FROM queue_entries e
                JOIN patients p ON p.id = e.patient_id
               WHERE e.clinic_id = ? AND e.queue_id = ?
@@ -97,7 +97,7 @@ final class QueueRepository
     public function clinicBoard(int $clinicId): array
     {
         return Db::all(
-            "SELECT e.*, p.full_name, p.code AS patient_code, q.name AS queue_name,
+            "SELECT e.*, p.full_name, p.gender, p.birth_year, p.code AS patient_code, q.name AS queue_name,
                     q.doctor_id, d.name AS doctor_name
                FROM queue_entries e
                JOIN patients p ON p.id = e.patient_id

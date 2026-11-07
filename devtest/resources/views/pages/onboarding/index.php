@@ -1,22 +1,25 @@
-<div class="flex flex-wrap items-start justify-between gap-3">
-  <div>
-    <h1 class="text-2xl font-bold tracking-tight text-slate-900">Getting started</h1>
-    <p class="mt-1 max-w-2xl text-sm text-slate-500">
+<div class="page-head">
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-sparkles"/></svg></span>
+    <div class="min-w-0">
+    <h1 class="page-title">Getting started</h1>
+    <p class="mt-1 max-w-2xl text-sm text-ink-500">
       Everything below is read from your clinic's own data — a step is done when
       the clinic is actually set up for it, not when a box was ticked. Nothing
       here nags about work that is finished.
     </p>
   </div>
+  </div>
   <div class="flex items-center gap-3">
     <div class="text-right">
-      <p class="text-2xl font-bold tabular-nums text-slate-900"><?= (int) $summary['done'] ?><span class="text-sm font-normal text-slate-400">/<?= (int) $summary['total'] ?></span></p>
-      <p class="text-[11px] text-slate-500">steps complete</p>
+      <p class="stat-value"><?= (int) $summary['done'] ?><span class="text-sm font-normal text-ink-400">/<?= (int) $summary['total'] ?></span></p>
+      <p class="text-[11px] text-ink-500">steps complete</p>
     </div>
   </div>
 </div>
 
 <div class="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
-  <div class="h-full rounded-full bg-teal-600 transition-all" style="width: <?= (int) $summary['percent'] ?>%"></div>
+  <div class="h-full rounded-full bg-brand-600 transition-all" style="width: <?= (int) $summary['percent'] ?>%"></div>
 </div>
 
 <?php if ($summary['blocking_open']): ?>
@@ -39,20 +42,20 @@
   <?php foreach ($steps as $i => $step): ?>
     <div class="card flex flex-wrap items-start gap-4 p-4 <?= $step['done'] ? 'opacity-75' : '' ?>">
       <span class="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-bold
-        <?= $step['done'] ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500' ?>">
+        <?= $step['done'] ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-ink-500' ?>">
         <?= $step['done'] ? '✓' : ($i + 1) ?>
       </span>
 
       <div class="min-w-0 flex-1">
         <div class="flex flex-wrap items-center gap-2">
-          <p class="font-medium text-slate-900 <?= $step['done'] ? 'line-through decoration-slate-300' : '' ?>">
+          <p class="font-medium text-ink-900 <?= $step['done'] ? 'line-through decoration-slate-300' : '' ?>">
             <?= e($step['title']) ?>
           </p>
           <?php if ($step['blocking'] && !$step['done']): ?>
             <span class="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">Blocks tokens</span>
           <?php endif; ?>
         </div>
-        <p class="mt-1 text-xs leading-relaxed text-slate-500"><?= e($step['why']) ?></p>
+        <p class="mt-1 text-xs leading-relaxed text-ink-500"><?= e($step['why']) ?></p>
       </div>
 
       <div class="shrink-0">
@@ -66,8 +69,8 @@
   <?php endforeach; ?>
 </div>
 
-<div class="mt-5 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-relaxed text-slate-600">
-  <p class="font-semibold text-slate-700">Two things worth knowing before the first patient</p>
+<div class="mt-5 rounded-lg border border-hairline bg-slate-50 px-4 py-3 text-xs leading-relaxed text-ink-700">
+  <p class="font-semibold text-ink-700">Two things worth knowing before the first patient</p>
   <ul class="mt-1 list-disc space-y-1 pl-5">
     <li><span class="font-medium">Reception, not the doctor, should issue tokens.</span> Staff can be invited from Settings with a single-use link that expires; everyone sharing one login means the audit log cannot say who did what.</li>
     <li><span class="font-medium">This page stays available.</span> If the clinic later changes its hours or removes every doctor, the steps go back to incomplete rather than staying green from one good day.</li>

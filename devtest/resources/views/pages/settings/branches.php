@@ -21,18 +21,21 @@ foreach ($grants as $g) {
     $grantsByBranch[(int) $g['clinic_id']][] = $g;
 }
 ?>
-<div class="flex flex-wrap items-start justify-between gap-3">
-  <div>
-    <h1 class="text-2xl font-bold tracking-tight text-slate-900">Branches</h1>
-    <p class="mt-1 text-sm text-slate-500">
+<div class="page-head">
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-building"/></svg></span>
+    <div class="min-w-0">
+    <h1 class="page-title">Branches</h1>
+    <p class="page-sub">
       Staff work in their own branch. Grant another one here and it appears in their switcher.
     </p>
+  </div>
   </div>
   <a href="/settings" class="btn-secondary text-xs">Back to settings</a>
 </div>
 
-<div class="mt-4 rounded-xl border border-slate-200 bg-white px-4 py-3">
-  <p class="text-xs leading-relaxed text-slate-600">
+<div class="mt-4 rounded-xl border border-hairline bg-white px-4 py-3">
+  <p class="text-xs leading-relaxed text-ink-700">
     <b>Nothing widens by accident.</b> A branch grant selects one of the branches a person is
     already allowed to use — it does not create a group-wide view. Every screen, report and queue
     in the product scopes to the branch that is currently active, so switching branches changes
@@ -44,10 +47,10 @@ foreach ($grants as $g) {
   <?php foreach ($branches as $b): ?>
     <?php $branchGrants = $grantsByBranch[(int) $b['id']] ?? []; ?>
     <div class="card overflow-hidden">
-      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+      <div class="section-head">
         <div>
-          <p class="text-sm font-semibold text-slate-800"><?= e((string) $b['name']) ?></p>
-          <p class="text-[11px] text-slate-400">
+          <p class="text-sm font-semibold text-ink-900"><?= e((string) $b['name']) ?></p>
+          <p class="text-[11px] text-ink-400">
             <?= e((string) ($b['city'] ?? '')) ?>
             <?php if ((int) $b['id'] === (int) $clinic['id']): ?> · this branch<?php endif; ?>
           </p>
@@ -56,7 +59,7 @@ foreach ($grants as $g) {
       </div>
 
       <?php if ($branchGrants === [] && (int) $b['id'] !== (int) $clinic['id']): ?>
-        <p class="px-4 py-3 text-xs text-slate-500">
+        <p class="px-4 py-3 text-xs text-ink-500">
           Nobody has been granted this branch yet.
         </p>
       <?php else: ?>
@@ -64,8 +67,8 @@ foreach ($grants as $g) {
           <?php foreach ($branchGrants as $g): ?>
             <li class="flex items-center justify-between gap-3 px-4 py-2.5">
               <div class="min-w-0">
-                <p class="truncate text-sm text-slate-800"><?= e((string) $g['user_name']) ?></p>
-                <p class="truncate text-[11px] text-slate-400">
+                <p class="truncate text-sm text-ink-900"><?= e((string) $g['user_name']) ?></p>
+                <p class="truncate text-[11px] text-ink-400">
                   <?= e((string) $g['email']) ?> · granted <?= e(date('j M Y', strtotime((string) $g['created_at']))) ?>
                 </p>
               </div>
@@ -83,8 +86,8 @@ foreach ($grants as $g) {
       <?php endif; ?>
 
       <?php if ($canManage): ?>
-        <details class="border-t border-slate-200">
-          <summary class="cursor-pointer px-4 py-2.5 text-xs font-semibold text-teal-700 hover:bg-slate-50">
+        <details class="border-t border-hairline">
+          <summary class="cursor-pointer px-4 py-2.5 text-xs font-semibold text-brand-700 hover:bg-slate-50">
             Grant this branch to someone
           </summary>
           <form method="post" action="/settings/branches" class="flex flex-wrap items-end gap-2 px-4 pb-4">
@@ -104,7 +107,7 @@ foreach ($grants as $g) {
             </div>
             <button class="btn-primary text-xs">Grant</button>
           </form>
-          <p class="px-4 pb-4 text-[11px] leading-relaxed text-slate-400">
+          <p class="px-4 pb-4 text-[11px] leading-relaxed text-ink-400">
             The person keeps their own role — a receptionist granted a second branch is still a
             receptionist there. Their home branch cannot be removed this way.
           </p>
@@ -114,9 +117,9 @@ foreach ($grants as $g) {
   <?php endforeach; ?>
 </div>
 
-<div class="card mt-5 overflow-hidden">
-  <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
-    <p class="text-xs font-semibold text-slate-600">Who can reach this branch</p>
+<div class="card mt-3 sm:mt-5 overflow-hidden">
+  <div class="section-head">
+    <p class="section-title">Who can reach this branch</p>
   </div>
   <div class="table-scroll">
     <table class="table">
@@ -125,7 +128,7 @@ foreach ($grants as $g) {
     <?php foreach ($staff as $s): ?>
     <tr>
     <td class="font-medium"><?= e((string) $s['name']) ?></td>
-    <td class="hidden sm:table-cell text-xs text-slate-500"><?= e((string) $s['email']) ?></td>
+    <td class="hidden sm:table-cell text-xs text-ink-500"><?= e((string) $s['email']) ?></td>
     <td><span class="badge-slate"><?= e(str_replace('_', ' ', (string) $s['role'])) ?></span></td>
     <td>
     <span class="<?= (string) $s['via'] === 'home' ? 'badge-teal' : 'badge-violet' ?>">

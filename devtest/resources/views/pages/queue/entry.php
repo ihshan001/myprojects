@@ -1,29 +1,29 @@
 <?php use App\Domain\Queue\QueueStateMachine; $meta = QueueStateMachine::meta((string) $entry['status']); ?>
 <div class="mx-auto max-w-3xl">
-  <a href="/app" class="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800">
+  <a href="/app" class="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-500 hover:text-ink-900">
     <svg class="h-3.5 w-3.5"><use href="#i-arrow-left"/></svg> Back to board
   </a>
 
   <div class="mt-3 flex flex-wrap items-start justify-between gap-3">
     <div>
       <div class="flex items-center gap-2.5">
-        <h1 class="font-mono text-3xl font-black tracking-tight text-slate-900"><?= e($entry['token_label']) ?></h1>
+        <h1 class="font-mono text-3xl font-black tracking-tight text-ink-900"><?= e($entry['token_label']) ?></h1>
         <?php $b = ['status' => $entry['status']]; include QP_ROOT . '/resources/views/components/badge.php'; ?>
         <?php if ((int) $entry['priority'] === 1): ?><span class="badge-priority">Priority</span><?php endif; ?>
       </div>
-      <p class="mt-1 text-sm text-slate-600">
+      <p class="mt-1 text-sm text-ink-700">
         <?= e($entry['full_name']) ?> · <?= e($entry['queue_name']) ?>
       </p>
     </div>
     <div class="text-right">
-      <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Position</p>
-      <p class="text-2xl font-black tabular text-slate-900"><?= $position > 0 ? (int) $position : '—' ?></p>
+      <p class="text-[10px] font-bold uppercase tracking-wider text-ink-400">Position</p>
+      <p class="text-2xl font-black tabular text-ink-900"><?= $position > 0 ? (int) $position : '—' ?></p>
     </div>
   </div>
 
-  <div class="mt-5 grid gap-4 sm:grid-cols-2">
+  <div class="mt-3 grid gap-3 sm:mt-6 sm:gap-4 sm:grid-cols-2">
     <div class="card card-pad">
-      <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Visit</h2>
+      <h2 class="text-xs font-bold uppercase tracking-wider text-ink-400">Visit</h2>
       <dl class="mt-3 space-y-2 text-sm">
         <?php foreach ([
             ['Doctor', $entry['doctor_name'] ?? '—'],
@@ -37,8 +37,8 @@
             ['Consult', $entry['consult_minutes'] !== null ? (int) $entry['consult_minutes'] . ' min' : '—'],
         ] as [$k, $v]): ?>
           <div class="flex items-center justify-between border-b border-slate-100 pb-2 last:border-0 last:pb-0">
-            <dt class="text-slate-500"><?= e($k) ?></dt>
-            <dd class="font-medium text-slate-800"><?= e((string) $v) ?></dd>
+            <dt class="text-ink-500"><?= e($k) ?></dt>
+            <dd class="font-medium text-ink-900"><?= e((string) $v) ?></dd>
           </div>
         <?php endforeach; ?>
       </dl>
@@ -58,7 +58,7 @@
         <?php endif; ?>
       <?php endif; ?>
       <?php if (!empty($entry['note'])): ?>
-        <div class="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+        <div class="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-ink-700">
           <b>Note:</b> <?= e($entry['note']) ?>
         </div>
       <?php endif; ?>
@@ -67,7 +67,7 @@
     <div class="space-y-4">
       <?php if ($canOperate): ?>
         <div class="card card-pad">
-          <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Actions</h2>
+          <h2 class="text-xs font-bold uppercase tracking-wider text-ink-400">Actions</h2>
           <form method="post" action="/queue/action" class="mt-3 grid grid-cols-2 gap-2">
             <?= csrf_field() ?>
             <input type="hidden" name="entry_id" value="<?= (int) $entry['id'] ?>">
@@ -95,12 +95,12 @@
       <?php if (!empty($steps)): ?>
         <div class="card card-pad">
           <div class="flex items-baseline justify-between">
-            <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">Service steps</h2>
-            <span class="text-[10px] text-slate-400">
+            <h2 class="text-xs font-bold uppercase tracking-wider text-ink-400">Service steps</h2>
+            <span class="text-[10px] text-ink-400">
               <?= count(array_filter($steps, static fn ($st) => $st['done'])) ?>/<?= count($steps) ?> done
             </span>
           </div>
-          <p class="mt-1 text-[11px] leading-relaxed text-slate-500">
+          <p class="mt-1 text-[11px] leading-relaxed text-ink-500">
             This visit cannot be completed until every required step is ticked.
           </p>
           <ul class="mt-3 space-y-2">
@@ -123,7 +123,7 @@
                   </form>
                 <?php endif; ?>
                 <div class="min-w-0 flex-1">
-                  <p class="text-xs <?= $step['done'] ? 'font-medium text-slate-800' : 'text-slate-700' ?>">
+                  <p class="text-xs <?= $step['done'] ? 'font-medium text-ink-900' : 'text-ink-700' ?>">
                     <?php if ($step['done']): ?>
                       <span class="mr-1 text-emerald-600">✓</span>
                     <?php else: ?>
@@ -131,11 +131,11 @@
                     <?php endif; ?>
                     <?= e($step['name']) ?>
                     <?php if ($step['is_required'] !== 1): ?>
-                      <span class="text-[10px] text-slate-400">(optional)</span>
+                      <span class="text-[10px] text-ink-400">(optional)</span>
                     <?php endif; ?>
                   </p>
                   <?php if ($step['done'] && $step['done_at']): ?>
-                    <p class="text-[10px] text-slate-400">
+                    <p class="text-[10px] text-ink-400">
                       <?= e(fmt_time($step['done_at'], 'j M, g:i A')) ?><?php if (!empty($step['done_by'])): ?> · <?= e($step['done_by']) ?><?php endif; ?>
                     </p>
                   <?php endif; ?>
@@ -147,18 +147,18 @@
       <?php endif; ?>
 
       <div class="card card-pad">
-        <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400">History</h2>
+        <h2 class="text-xs font-bold uppercase tracking-wider text-ink-400">History</h2>
         <ol class="mt-3 space-y-3">
           <?php foreach ($events as $ev): ?>
             <li class="flex gap-2.5">
               <span class="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-300"></span>
               <div class="min-w-0">
-                <p class="text-xs font-medium text-slate-800"><?= e(str_replace(['entry.', 'token_'], '', (string) $ev['action'])) ?>
+                <p class="text-xs font-medium text-ink-900"><?= e(str_replace(['entry.', 'token_'], '', (string) $ev['action'])) ?>
                   <?php if ($ev['from_status'] || $ev['to_status']): ?>
-                    <span class="text-slate-400"><?= e((string) $ev['from_status']) ?> → <?= e((string) $ev['to_status']) ?></span>
+                    <span class="text-ink-400"><?= e((string) $ev['from_status']) ?> → <?= e((string) $ev['to_status']) ?></span>
                   <?php endif; ?>
                 </p>
-                <p class="text-[10px] text-slate-400">
+                <p class="text-[10px] text-ink-400">
                   <?= e(fmt_time($ev['created_at'], 'j M, g:i:s A')) ?>
                   <?php if (!empty($ev['actor'])): ?> · <?= e($ev['actor']) ?><?php endif; ?>
                   <?php if (!empty($ev['reason'])): ?> · <?= e($ev['reason']) ?><?php endif; ?>
@@ -167,7 +167,7 @@
             </li>
           <?php endforeach; ?>
           <?php if ($events === []): ?>
-            <li class="text-xs text-slate-400">No events recorded yet.</li>
+            <li class="text-xs text-ink-400">No events recorded yet.</li>
           <?php endif; ?>
         </ol>
       </div>

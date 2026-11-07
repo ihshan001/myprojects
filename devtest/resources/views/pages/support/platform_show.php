@@ -1,17 +1,20 @@
 <?php $isClosed = in_array((string) $ticket['status'], ['resolved', 'closed'], true); ?>
-<div class="flex flex-wrap items-start justify-between gap-3">
-  <div>
-    <div class="flex items-center gap-2 text-xs text-slate-500">
+<div class="page-head">
+  <div class="flex min-w-0 items-start gap-3">
+    <span class="page-icon"><svg class="h-5 w-5"><use href="#i-list"/></svg></span>
+    <div class="min-w-0">
+    <div class="flex items-center gap-2 text-xs text-ink-500">
       <a href="/admin/support" class="hover:underline">Support queue</a>
       <span>/</span>
-      <span class="font-medium text-slate-700">#<?= (int) $ticket['id'] ?></span>
+      <span class="font-medium text-ink-700">#<?= (int) $ticket['id'] ?></span>
     </div>
-    <h1 class="mt-1 text-2xl font-bold tracking-tight text-slate-900"><?= e($ticket['subject']) ?></h1>
-    <p class="mt-1 text-sm text-slate-500">
-      <a href="/admin/clinics" class="font-medium text-slate-700 hover:underline"><?= e($ticket['clinic_name']) ?></a>
+    <h1 class="page-title mt-1"><?= e($ticket['subject']) ?></h1>
+    <p class="page-sub">
+      <a href="/admin/clinics" class="font-medium text-ink-700 hover:underline"><?= e($ticket['clinic_name']) ?></a>
       · opened by <?= e($ticket['opened_by'] ?? 'unknown') ?> <?= e(ago($ticket['created_at'])) ?>
       · <?= e($ticket['category']) ?> · <?= e($ticket['priority']) ?>
     </p>
+  </div>
   </div>
   <div class="flex items-center gap-2">
     <span class="<?= match ((string) $ticket['status']) {
@@ -22,7 +25,7 @@
 </div>
 
 <?php if (!$isClosed): ?>
-  <div class="card mt-4">
+  <div class="card mt-3 sm:mt-4">
     <form method="post" action="/admin/support/<?= (int) $ticket['id'] ?>/status" class="flex flex-wrap items-end gap-2 p-3">
       <?= csrf_field() ?>
       <div class="min-w-40">
@@ -34,7 +37,7 @@
         </select>
       </div>
       <button class="btn-secondary btn-sm">Update</button>
-      <p class="ml-auto max-w-sm text-[11px] leading-relaxed text-slate-500">
+      <p class="ml-auto max-w-sm text-[11px] leading-relaxed text-ink-500">
         Replying moves the ticket to <span class="font-medium">open</span> so it is clear the
         clinic owes an answer next.
       </p>
@@ -44,26 +47,26 @@
 
 <div class="mt-4 space-y-3">
   <div class="card card-pad">
-    <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Original request</p>
-    <p class="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-slate-800"><?= e($ticket['body']) ?></p>
+    <p class="stat-label">Original request</p>
+    <p class="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-ink-900"><?= e($ticket['body']) ?></p>
   </div>
 
   <?php foreach ($replies as $r): ?>
-    <div class="card card-pad <?= (int) $r['is_staff'] === 1 ? 'border-teal-200 bg-teal-50/40' : '' ?>">
+    <div class="card card-pad <?= (int) $r['is_staff'] === 1 ? 'border-brand-200 bg-brand-50/40' : '' ?>">
       <div class="flex items-center justify-between">
-        <p class="text-xs font-semibold text-slate-700">
+        <p class="text-xs font-semibold text-ink-700">
           <?= e($r['author_name'] ?? 'Support') ?>
           <?php if ((int) $r['is_staff'] === 1): ?><span class="badge-teal ml-1">platform</span>
           <?php else: ?><span class="badge-slate ml-1">clinic</span><?php endif; ?>
         </p>
-        <p class="text-[11px] text-slate-400"><?= e(ago($r['created_at'])) ?></p>
+        <p class="text-[11px] text-ink-400"><?= e(ago($r['created_at'])) ?></p>
       </div>
-      <p class="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-slate-800"><?= e($r['body']) ?></p>
+      <p class="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-ink-900"><?= e($r['body']) ?></p>
     </div>
   <?php endforeach; ?>
 
   <?php if ($isClosed): ?>
-    <p class="text-xs text-slate-500">
+    <p class="text-xs text-ink-500">
       This ticket is <?= e($ticket['status']) ?>. Reopen it above if the clinic comes back.
     </p>
   <?php else: ?>

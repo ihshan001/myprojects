@@ -55,6 +55,7 @@ Router::post('/locale', [ClinicController::class, 'locale']);
 
 /* ------------------------------------------------------------ reception */
 Router::get('/app', [DashboardController::class, 'index'], ['auth' => true, 'ability' => 'queue.operate']);
+Router::get('/app/panel', [DashboardController::class, 'panel'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::get('/queue/new', [QueueController::class, 'newPatient'], ['auth' => true, 'ability' => 'queue.issue']);
 Router::post('/queue/new', [QueueController::class, 'createEntry'], ['auth' => true, 'ability' => 'queue.issue']);
 Router::get('/queue', [QueueController::class, 'show'], ['auth' => true, 'ability' => 'queue.operate']);

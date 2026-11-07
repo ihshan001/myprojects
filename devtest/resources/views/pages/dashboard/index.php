@@ -1,240 +1,174 @@
 <?php
+/**
+ * The live board. Layout, spacing and colour follow the approved reference
+ * (clinicodesk.png / clinicomob.png); the numbers are the clinic's real data.
+ *
+ * Desktop: one white panel wrapping the greeting, five stat tiles and a
+ * 1fr/352px split. Mobile: the same blocks as separate cards, stat tiles in
+ * a swipeable strip, and the rail cards two-up.
+ */
+use App\Core\Auth;
 use App\Core\Session;
-use App\Domain\Queue\QueueStateMachine;
 
-$status = $summary['status'] ?? null;
-$waitingTotal = 0;
-$inRoomTotal = 0;
+$waitingTotal = 0; $inRoomTotal = 0;
 foreach ($queues as $q) {
     $waitingTotal += (int) ($q['waiting_count'] ?? 0);
     $inRoomTotal += (int) ($q['active_count'] ?? 0);
 }
 $completed = (int) ($summary['completed'] ?? 0);
 $avgWait = $summary['avg_wait'] ?? null;
+$longest = (int) ($longestWait ?? 0);
+$hm = static function (int $m): string {
+    return $m >= 60 ? intdiv($m, 60) . 'h ' . ($m % 60) . 'm' : $m . ' min';
+};
+$hour = (int) date('G');
+$greet = $hour < 12 ? 'Good morning' : ($hour < 17 ? 'Good afternoon' : 'Good evening');
+$parts = preg_split('/\s+/', trim((string) ($user['name'] ?? ''))) ?: [];
+$shortName = implode(' ', array_slice($parts, 0, 2));
+
+$stats = [
+    ['Waiting now', (string) $waitingTotal, 'patients', 'users', 'bg-brand-50 text-brand-600'],
+    ['In consultation', (string) $inRoomTotal, 'with doctor', 'users', 'bg-sky-50 text-sky-500'],
+    ['Completed today', (string) $completed, 'patients', 'check-circle', 'bg-emerald-50 text-emerald-500'],
+    ['Average wait', $avgWait !== null ? round((float) $avgWait) . ' min' : '—', 'today', 'clock', 'bg-violet-50 text-violet-500'],
+    ['Longest wait', $longest > 0 ? $hm($longest) : '—', 'today', 'hourglass', 'bg-amber-50 text-amber-500'],
+];
+$glance = [
+    ['Tokens issued', (int) ($summary['total'] ?? 0)],
+    ['Completed', $completed],
+    ['No shows', (int) ($summary['no_show'] ?? 0)],
+    ['Skipped', (int) ($summary['skipped'] ?? 0)],
+    ['Clinical priority', (int) ($summary['prioritised'] ?? 0)],
+    ['Longest wait', $longest > 0 ? $hm($longest) : '—'],
+];
 ?>
-<div class="flex flex-wrap items-start justify-between gap-4">
-  <div>
-    <h1 class="text-2xl font-bold tracking-tight text-slate-900">Live board</h1>
-    <p class="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
-      <span><?= e(date('l, j F Y')) ?></span>
-      <span class="text-slate-300">·</span>
-      <?php $p = ['stale' => false]; include QP_ROOT . '/resources/views/components/live-pill.php'; ?>
-      <span class="text-xs text-slate-400">auto-updates every 5s</span>
-    </p>
-  </div>
-  <div class="flex flex-wrap gap-2">
-    <a href="/display" target="_blank" class="btn-secondary">
-      <svg class="h-4 w-4"><use href="#i-monitor"/></svg>
-      Waiting room screen
-    </a>
-    <?php if (!empty($canOperate) && empty($isDoctor)): ?>
-      <a href="/queue/new" class="btn-primary">
-        <svg class="h-4 w-4"><use href="#i-plus"/></svg>
-        New patient
-      </a>
-    <?php endif; ?>
-  </div>
-</div>
+<div data-board-fragment="/app/panel?queue=<?= (int) $activeId ?>">
 
-<div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-  <?php
-  $stats = [
-      ['Waiting now', $waitingTotal, 'clock', 'amber', $waitingTotal > 0 ? 'in ' . count(array_filter($queues, fn ($q) => (int) $q['waiting_count'] > 0)) . ' queue(s)' : 'none waiting'],
-      ['In consultation', $inRoomTotal, 'stethoscope', 'teal', 'with a doctor now'],
-      ['Completed today', $completed, 'check-circle', 'emerald', 'out of ' . (int) ($summary['total'] ?? 0) . ' tokens'],
-      ['Average wait', $avgWait !== null ? round((float) $avgWait) . ' min' : '—', 'chart', 'sky', 'recorded this day'],
-  ];
-  foreach ($stats as [$label, $value, $icon, $tone, $hint]) {
-      include QP_ROOT . '/resources/views/components/stat.php';
-  }
-  ?>
-</div>
-
-<div class="mt-6 grid gap-5 xl:grid-cols-3">
-  <div class="space-y-5 xl:col-span-2">
-    <?php if ($queues === []): ?>
-      <div class="card">
-        <?php $title = 'No sessions open today'; $message = 'Open a session for one of your doctors to start issuing tokens.'; $icon = 'calendar'; $action = '<a href="/doctors" class="btn-primary">Open a session</a>'; include QP_ROOT . '/resources/views/components/empty.php'; ?>
+  <!-- ---------------------------------------------------- greeting ---- -->
+  <div class="card p-4 lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
+    <div class="flex items-start justify-between gap-3">
+      <div class="min-w-0">
+        <h1 class="text-[17px] font-bold leading-snug tracking-tight text-ink-900 sm:text-[22px]">
+          <?= e($greet) ?>, <?= e($shortName) ?> <span class="emoji align-middle">&#128075;</span>
+        </h1>
+        <div class="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[10.5px] text-ink-500 sm:gap-x-2 sm:text-[12px]">
+          <span class="tabular"><?= e(date('l, j F Y')) ?> &middot; <?= e(date('g:i A')) ?></span>
+          <?php $p = ['stale' => false]; include QP_ROOT . '/resources/views/components/live-pill.php'; ?>
+          <span class="hidden text-[11px] text-ink-400 sm:inline">Auto-updates every 5s</span>
+        </div>
+        <p class="text-[11px] text-ink-400 sm:hidden">Auto-updates every 5s</p>
       </div>
-    <?php endif; ?>
+      <?php if ($clinic): ?>
+        <?php /* Same tab, not target="_blank": inside an embedded preview a
+                  popup is silently blocked, so the button appeared to do
+                  nothing. The screen has its own "Exit display" link back. */ ?>
+        <a href="/display"
+           class="flex shrink-0 items-center gap-2 rounded-xl border border-hairline bg-white px-3 py-2.5 text-[12px] font-semibold text-ink-700 shadow-card transition hover:bg-slate-50 sm:px-4">
+          <svg class="h-[18px] w-[18px] shrink-0 text-ink-500"><use href="#i-monitor"/></svg>
+          <span class="max-w-[72px] text-left text-[11px] leading-tight sm:max-w-none sm:text-[12px]">Waiting room screen</span>
+        </a>
+      <?php endif; ?>
+    </div>
+  </div>
 
-    <?php foreach ($queues as $queue): ?>
-      <?php
-      $qid = (int) $queue['id'];
-      $nowServing = $serving[$qid] ?? null;
-      $rows = $byQueue[$qid] ?? [];
-      $isOpen = $queue['status'] === 'open';
-      ?>
-      <section class="card overflow-hidden" data-queue-board="<?= $qid ?>">
-        <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50/60 px-3 py-3 sm:px-4">
-          <div class="min-w-0">
-            <div class="flex flex-wrap items-center gap-2">
-              <h2 class="truncate text-sm font-bold text-slate-900"><?= e($queue['name']) ?></h2>
-              <span class="<?= $isOpen ? 'badge-emerald' : ($queue['status'] === 'paused' ? 'badge-amber' : 'badge-slate') ?>">
-                <?= e(ucfirst($queue['status'])) ?>
-              </span>
-            </div>
-            <p class="mt-0.5 truncate text-xs text-slate-500">
-              <?= e($queue['doctor_name'] ?? 'Unassigned') ?>
-              <?php if (!empty($queue['specialty'])): ?> · <?= e($queue['specialty']) ?><?php endif; ?>
-              <?php if (!empty($queue['room_name'])): ?> · <?= e($queue['room_name']) ?><?php endif; ?>
-            </p>
-          </div>
-
-          <div class="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
-            <div class="text-right" data-now-serving-wrap>
-              <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Now serving</p>
-              <p class="font-mono text-lg font-black leading-tight text-teal-700" data-now-serving>
-                <?= e($nowServing['token_label'] ?? '—') ?>
-              </p>
-              <p class="max-w-[9rem] truncate text-[11px] text-slate-400" data-now-serving-sub>
-                <?= e($nowServing['full_name'] ?? 'No one in the room') ?>
-              </p>
-            </div>
-            <form method="post" action="/queue/session" class="flex items-center gap-1">
-              <?= csrf_field() ?>
-              <input type="hidden" name="queue_id" value="<?= $qid ?>">
-              <?php if ($isOpen): ?>
-                <input type="hidden" name="status" value="paused">
-                <button class="btn-sm btn-secondary" title="Pause this queue (keeps every waiting patient, stops new calls)">
-                  <svg class="h-3.5 w-3.5"><use href="#i-pause"/></svg>
-                </button>
-              <?php else: ?>
-                <input type="hidden" name="status" value="open">
-                <button class="btn-sm btn-secondary" title="Reopen this queue">
-                  <svg class="h-3.5 w-3.5"><use href="#i-play"/></svg>
-                </button>
-              <?php endif; ?>
-            </form>
-            <?php $pending = Session::takeFlash('pending_close'); ?>
-            <?php if (is_array($pending) && (int) $pending['queue_id'] === $qid): ?>
-              <form method="post" action="/queue/session" class="flex items-center gap-1">
-                <?= csrf_field() ?>
-                <input type="hidden" name="queue_id" value="<?= $qid ?>">
-                <input type="hidden" name="status" value="closed">
-                <input type="hidden" name="resolve" value="acknowledge">
-                <button class="btn-sm btn-stop" title="Close the day and mark unseen patients as not seen">
-                  Close day · <?= (int) $pending['waiting'] ?> unseen
-                </button>
-              </form>
-            <?php else: ?>
-              <form method="post" action="/queue/session" class="flex items-center gap-1">
-                <?= csrf_field() ?>
-                <input type="hidden" name="queue_id" value="<?= $qid ?>">
-                <input type="hidden" name="status" value="closed">
-                <button class="btn-sm btn-secondary" title="End today's session">
-                  <svg class="h-3.5 w-3.5"><use href="#i-check"/></svg>
-                </button>
-              </form>
-            <?php endif; ?>
-          </div>
-        </header>
-
-        <div data-queue-stats class="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-100 px-3 py-2 text-xs text-slate-500 sm:gap-5 sm:px-4">
-          <span>Waiting <b class="tabular text-slate-800" data-stat="waiting"><?= (int) ($queue['waiting_count'] ?? 0) ?></b></span>
-          <span>In room <b class="tabular text-slate-800" data-stat="in_room"><?= (int) ($queue['active_count'] ?? 0) ?></b></span>
-          <span class="ml-auto">Tokens issued <b class="tabular text-slate-800"><?= (int) $queue['last_token_no'] ?></b></span>
+  <!-- ------------------------------------------------------- stats ---- -->
+  <div class="mt-3 flex gap-1.5 overflow-x-auto pb-1 sm:mt-6 sm:grid sm:grid-cols-3 sm:gap-4 sm:overflow-visible sm:pb-0 lg:grid-cols-5">
+    <?php foreach ($stats as [$label, $value, $hint, $icon, $tone]): ?>
+      <div class="stat-tile w-[112px] shrink-0 sm:w-auto">
+        <span class="stat-ico <?= e($tone) ?>">
+          <svg class="h-5 w-5"><use href="#i-<?= e($icon) ?>"/></svg>
+        </span>
+        <div class="min-w-0 flex-1">
+          <p class="stat-label"><?= e($label) ?></p>
+          <p class="stat-value"><?= e($value) ?></p>
+          <p class="stat-hint"><?= e($hint) ?></p>
         </div>
-
-        <div data-queue-list>
-          <?php if ($rows === []): ?>
-            <p class="px-4 py-10 text-center text-sm text-slate-500">
-              No patients in this queue right now.
-              <a href="/queue/new?queue=<?= $qid ?>" class="font-semibold text-teal-700 hover:underline">Issue the first token →</a>
-            </p>
-          <?php else: ?>
-            <?php
-            $position = 0;
-            foreach ($rows as $entry) {
-                if ($entry['status'] === 'waiting') {
-                    $position++;
-                }
-                $canOperate = $canOperate;
-                include QP_ROOT . '/resources/views/components/queue-row.php';
-            }
-            ?>
-          <?php endif; ?>
-        </div>
-      </section>
+      </div>
     <?php endforeach; ?>
   </div>
 
-  <!-- right rail -->
-  <div class="space-y-5">
-    <div class="card card-pad">
-      <div class="flex items-center justify-between">
-        <h3 class="text-sm font-bold text-slate-900">Patient tracking</h3>
-        <span class="badge-teal">No app needed</span>
-      </div>
-      <p class="mt-2 text-xs leading-relaxed text-slate-500">
-        Every token gets a private link. Print it on the slip or send it by SMS — the patient sees their
-        position and an honest wait range, and nothing else.
-      </p>
-      <a href="/queue/new<?= isset($q) && is_array($q) ? '?queue=' . (int) $q['id'] : '' ?>" class="btn-secondary mt-4 w-full">
-        <svg class="h-4 w-4"><use href="#i-plus"/></svg>
-        Issue a token
-      </a>
-    </div>
+  <!-- --------------------------------------------------- two columns -- -->
+  <div class="mt-3 grid min-w-0 gap-3 sm:mt-7 lg:grid-cols-[minmax(0,1fr)_352px] lg:gap-7">
 
-    <div class="card card-pad">
-      <h3 class="text-sm font-bold text-slate-900">Today at a glance</h3>
-      <dl class="mt-3 space-y-2.5 text-sm">
-        <?php foreach ([
-            ['Tokens issued', (int) ($summary['total'] ?? 0)],
-            ['Completed', $completed],
-            ['No shows', (int) ($summary['no_show'] ?? 0)],
-            ['Skipped', (int) ($summary['skipped'] ?? 0)],
-            ['Clinical priority', (int) ($summary['prioritised'] ?? 0)],
-            ['Longest wait', ($summary['max_wait'] ?? null) !== null ? round((float) $summary['max_wait']) . ' min' : '—'],
-        ] as [$label, $value]): ?>
-          <div class="flex items-center justify-between border-b border-slate-100 pb-2 last:border-0 last:pb-0">
-            <dt class="text-slate-500"><?= e($label) ?></dt>
-            <dd class="font-semibold tabular text-slate-900"><?= e((string) $value) ?></dd>
-          </div>
-        <?php endforeach; ?>
-      </dl>
-      <a href="/reports" class="btn-ghost mt-3 w-full text-xs">Open full reports →</a>
-    </div>
+    <?php include QP_ROOT . '/resources/views/partials/board-panel.php'; ?>
 
-    <?php if (!empty($displayToken)): ?>
-      <div class="card card-pad">
-        <h3 class="text-sm font-bold text-slate-900">Waiting room display</h3>
-        <p class="mt-2 text-xs leading-relaxed text-slate-500">
-          Open on a TV or spare tablet. Shows token numbers and room names only — no patient names.
-        </p>
-        <div class="mt-3 flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2">
-          <code class="flex-1 truncate text-[11px] text-slate-600">/api/display/<?= e(substr($displayToken, 0, 10)) ?>…</code>
-          <button class="rounded p-1 text-slate-400 hover:bg-white hover:text-slate-700"
-                  data-copy="<?= e($_SERVER['HTTP_HOST'] ?? 'localhost') ?>/display">
-            <svg class="h-3.5 w-3.5"><use href="#i-copy"/></svg>
-          </button>
+    <!-- ================================================= right rail === -->
+    <div class="grid min-w-0 grid-cols-1 gap-3 min-[380px]:grid-cols-2 lg:block lg:space-y-5">
+
+      <!-- Patient tracking -->
+      <section class="card p-3 sm:p-4">
+        <div class="flex items-start justify-between gap-2">
+          <h2 class="text-[12px] font-bold tracking-tight text-ink-900 sm:text-[15px]">Patient tracking</h2>
+          <span class="shrink-0 rounded-full bg-brand-50 px-1.5 py-0.5 text-[9.5px] font-semibold text-brand-700 sm:px-2 sm:text-[10px]">No app needed</span>
         </div>
-        <a href="/display" target="_blank" class="btn-secondary mt-3 w-full">
-          <svg class="h-4 w-4"><use href="#i-monitor"/></svg>
-          Open display
-        </a>
-      </div>
-    <?php endif; ?>
-
-    <div class="card card-pad">
-      <h3 class="text-sm font-bold text-slate-900">Doctors on duty</h3>
-      <div class="mt-3 space-y-2">
-        <?php foreach (array_slice($doctors, 0, 6) as $doc): ?>
-          <div class="flex items-center gap-2.5">
-            <span class="flex h-7 w-7 items-center justify-center rounded-full bg-teal-50 text-[10px] font-bold text-teal-700">
-              <?= e(App\Core\Str::initials((string) $doc['name'])) ?>
-            </span>
-            <div class="min-w-0 flex-1">
-              <p class="truncate text-xs font-medium text-slate-800"><?= e($doc['name']) ?></p>
-              <p class="truncate text-[10px] text-slate-400"><?= e($doc['specialty'] ?? 'General') ?></p>
+        <p class="mt-1.5 text-[11.5px] leading-snug text-ink-500">
+          Share this QR or link with patients to check their position in queue.
+        </p>
+        <?php if ($trackUrl): ?>
+          <div class="mt-2.5 flex items-center gap-2 rounded-xl bg-slate-50 p-2 sm:gap-2.5 sm:p-2.5">
+            <div class="h-[56px] w-[56px] shrink-0 overflow-hidden rounded bg-white [&>svg]:h-full [&>svg]:w-full sm:h-[68px] sm:w-[68px]">
+              <?= $trackQr ?>
             </div>
-            <span class="text-[10px] text-slate-400 tabular"><?= round((float) $doc['avg_consult_minutes']) ?>m avg</span>
+            <div class="min-w-0">
+              <p class="truncate text-[11.5px] font-bold text-ink-900"><?= e(preg_replace('#^https?://#', '', $trackUrl)) ?></p>
+              <p class="mt-0.5 truncate text-[10.5px] text-ink-500">
+                <?= e($activeQueue['room_name'] ?? 'Waiting room') ?> &middot; <?= e($activeQueue['specialty'] ?? $clinic['name'] ?? '') ?>
+              </p>
+              <button type="button" data-copy="<?= e($trackUrl) ?>"
+                      class="mt-1.5 inline-flex min-h-[32px] items-center gap-1 whitespace-nowrap rounded-lg border border-hairline bg-white px-2 py-1 text-[10.5px] font-semibold text-ink-700 shadow-card hover:bg-slate-50 sm:gap-1.5 sm:text-[11px]">
+                <svg class="h-3 w-3"><use href="#i-link"/></svg>Copy link
+              </button>
+            </div>
           </div>
-        <?php endforeach; ?>
-        <?php if ($doctors === []): ?>
-          <p class="text-xs text-slate-500">No doctors yet. <a href="/doctors" class="font-semibold text-teal-700">Add one →</a></p>
+          <?php if (!empty($canOperate) && empty($isDoctor)): ?>
+            <a href="/queue/new" class="btn-primary mt-2.5 w-full !py-2.5 !text-[13px]">
+              <svg class="h-4 w-4"><use href="#i-ticket"/></svg>Issue a token
+            </a>
+          <?php endif; ?>
+        <?php else: ?>
+          <p class="mt-3 rounded-lg bg-slate-50 p-3 text-[11.5px] text-ink-500">
+            No public screen key yet. Create one to let patients follow the queue from their own phone.
+          </p>
+          <?php if (Auth::can('clinic.manage')): ?>
+            <a href="/settings" class="btn-secondary mt-2.5 w-full !py-2 !text-[12px]">Set up waiting room screen</a>
+          <?php endif; ?>
         <?php endif; ?>
-      </div>
+      </section>
+
+      <!-- Today at a glance -->
+      <section class="card p-3 sm:p-4">
+        <h2 class="text-[12.5px] font-bold tracking-tight text-ink-900 sm:text-[15px]">Today at a glance</h2>
+        <div class="mt-1.5">
+          <?php foreach ($glance as [$label, $val]): ?>
+            <div class="glance-row">
+              <span class="text-ink-500"><?= e($label) ?></span>
+              <span class="font-bold text-ink-900 tabular"><?= e((string) $val) ?></span>
+            </div>
+          <?php endforeach; ?>
+        </div>
+        <?php if (Auth::can('reports.view')): ?>
+          <a href="/reports" class="mt-1 flex min-h-[36px] items-center justify-center gap-1.5 py-1 text-[12px] font-semibold text-ink-700 hover:text-brand-700">
+            <svg class="h-3.5 w-3.5"><use href="#i-external"/></svg>Open full reports
+          </a>
+        <?php endif; ?>
+      </section>
+
+      <!-- System status -->
+      <section class="card p-3 min-[380px]:col-span-2 sm:p-4">
+        <h2 class="text-[14px] font-bold tracking-tight text-ink-900 sm:text-[15px]">System status</h2>
+        <div class="mt-2 flex flex-wrap items-center gap-x-6 gap-y-1.5">
+          <p class="flex min-w-0 items-center gap-1.5 text-[11.5px] font-semibold text-brand-700 sm:gap-2 sm:text-[12px]" data-live-text>
+            <svg class="h-[18px] w-[18px]"><use href="#i-shield-check"/></svg>
+            All systems operational
+          </p>
+          <p class="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-ink-500 sm:gap-2">
+            Last updated: <span class="tabular" data-last-updated><?= e(date('g:i:s A')) ?></span>
+            <button type="button" data-refresh-now class="-m-2 inline-flex h-8 w-8 items-center justify-center rounded-lg text-ink-500 hover:bg-slate-100 hover:text-brand-700" aria-label="Refresh now">
+              <svg class="h-3.5 w-3.5"><use href="#i-refresh"/></svg>
+            </button>
+          </p>
+        </div>
+      </section>
     </div>
   </div>
 </div>

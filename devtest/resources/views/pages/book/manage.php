@@ -26,9 +26,9 @@ $statusCopy = (string) $appointment['status'] === 'checked_in'
   <title><?= e($title) ?> · QueuePilot</title>
   <link rel="stylesheet" href="<?= e(asset('build/app.css')) ?>">
 </head>
-<body class="min-h-full bg-slate-100">
+<body class="patient-view min-h-full bg-canvas">
   <main class="mx-auto max-w-lg px-5 py-8">
-    <p class="text-center text-xs font-semibold uppercase tracking-wide text-slate-400">
+    <p class="text-center text-xs font-semibold uppercase tracking-wide text-ink-400">
       <?= e((string) $clinicRecord['name']) ?>
     </p>
 
@@ -40,7 +40,7 @@ $statusCopy = (string) $appointment['status'] === 'checked_in'
       <?php endif; ?>
 
       <?php if (!empty($cancelled)): ?>
-        <div class="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-3 text-xs leading-relaxed text-slate-700">
+        <div class="mb-4 rounded-xl border border-hairline bg-canvas px-3.5 py-3 text-xs leading-relaxed text-ink-700">
           <b>This appointment is cancelled.</b> The time is now free for someone else. You can book
           again whenever you need to — no explanation required.
         </div>
@@ -52,29 +52,29 @@ $statusCopy = (string) $appointment['status'] === 'checked_in'
         </div>
       <?php endif; ?>
 
-      <h1 class="text-lg font-bold text-slate-900">Your appointment</h1>
-      <p class="mt-0.5 text-xs text-slate-500"><?= e((string) $appointment['full_name']) ?></p>
+      <h1 class="text-lg font-bold text-ink-900">Your appointment</h1>
+      <p class="mt-0.5 text-xs text-ink-500"><?= e((string) $appointment['full_name']) ?></p>
 
-      <dl class="mt-4 space-y-2 rounded-xl bg-slate-50 p-4 text-sm">
+      <dl class="mt-4 space-y-2 rounded-xl bg-canvas p-4 text-sm">
         <div class="flex justify-between gap-3">
-          <dt class="text-slate-500">When</dt>
-          <dd class="font-semibold text-slate-900">
+          <dt class="text-ink-500">When</dt>
+          <dd class="font-semibold text-ink-900">
             <?= e(date('D j M Y', strtotime($when))) ?> · <?= e(date('g:i A', strtotime($when))) ?>
           </dd>
         </div>
         <div class="flex justify-between gap-3">
-          <dt class="text-slate-500">Doctor</dt>
-          <dd class="font-semibold text-slate-900"><?= e((string) $appointment['doctor_name']) ?></dd>
+          <dt class="text-ink-500">Doctor</dt>
+          <dd class="font-semibold text-ink-900"><?= e((string) $appointment['doctor_name']) ?></dd>
         </div>
         <div class="flex justify-between gap-3">
-          <dt class="text-slate-500">Status</dt>
-          <dd class="text-slate-700"><?= e($statusCopy) ?></dd>
+          <dt class="text-ink-500">Status</dt>
+          <dd class="text-ink-700"><?= e($statusCopy) ?></dd>
         </div>
       </dl>
 
       <?php if ((string) $appointment['status'] === 'booked'): ?>
         <details class="mt-4" <?= (empty($moved) && empty($error)) ? '' : 'open' ?>>
-          <summary class="cursor-pointer text-sm font-medium text-teal-700">I need a different time</summary>
+          <summary class="cursor-pointer text-sm font-medium text-brand-700">I need a different time</summary>
 
           <form method="get" action="/a/<?= e($token) ?>" class="mt-3 flex gap-2">
             <input class="input text-xs" type="date" name="date" value="<?= e($date) ?>"
@@ -86,7 +86,7 @@ $statusCopy = (string) $appointment['status'] === 'checked_in'
           <?php if ($slotReason !== null): ?>
             <p class="mt-2 text-[11px] leading-relaxed text-amber-800"><?= e((string) $slotReason) ?></p>
           <?php elseif ($slots === []): ?>
-            <p class="mt-2 text-[11px] leading-relaxed text-slate-500">
+            <p class="mt-2 text-[11px] leading-relaxed text-ink-500">
               Nothing is open on that day. Try another date.
             </p>
           <?php else: ?>
@@ -97,17 +97,17 @@ $statusCopy = (string) $appointment['status'] === 'checked_in'
                 <?php foreach ($slots as $slot): ?>
                   <label class="cursor-pointer">
                     <input type="radio" name="time" value="<?= e($slot) ?>" class="peer sr-only" required>
-                    <span class="block rounded-lg border border-slate-200 bg-white px-1 py-1.5 text-center text-[11px] text-slate-700
-                                 peer-checked:border-teal-600 peer-checked:bg-teal-50 peer-checked:font-semibold peer-checked:text-teal-800">
+                    <span class="block rounded-lg border border-hairline bg-white px-1 py-1.5 text-center text-[11px] text-ink-700
+                                 peer-checked:border-brand-600 peer-checked:bg-brand-50 peer-checked:font-semibold peer-checked:text-brand-800">
                       <?= e($slot) ?>
                     </span>
                   </label>
                 <?php endforeach; ?>
               </div>
-              <button class="btn w-full justify-center bg-teal-700 text-xs text-white" type="submit">
+              <button class="btn w-full justify-center bg-brand-700 text-xs text-white" type="submit">
                 Move my appointment
               </button>
-              <p class="text-[10px] leading-relaxed text-slate-400">
+              <p class="text-[10px] leading-relaxed text-ink-400">
                 You keep <?= e((string) $appointment['doctor_name']) ?>. Times shown are this doctor's real
                 openings, so a slot you pick will not be refused.
               </p>
@@ -118,12 +118,12 @@ $statusCopy = (string) $appointment['status'] === 'checked_in'
         <form method="post" action="/a/<?= e($token) ?>/cancel" class="mt-3"
               onsubmit="return confirm('Cancel this appointment? The time goes back to the clinic.');">
           <?= csrf_field() ?>
-          <button type="submit" class="btn w-full justify-center border border-slate-300 bg-white text-xs text-rose-700 hover:bg-rose-50">
+          <button type="submit" class="btn w-full justify-center border border-hairline bg-white text-xs text-rose-700 hover:bg-rose-50">
             I cannot come — cancel it
           </button>
         </form>
       <?php else: ?>
-        <p class="mt-4 text-xs leading-relaxed text-slate-500">
+        <p class="mt-4 text-xs leading-relaxed text-ink-500">
           This appointment has already started at the clinic. Speak to reception if you need
           another day.
         </p>
@@ -131,15 +131,15 @@ $statusCopy = (string) $appointment['status'] === 'checked_in'
     </div>
 
     <?php if (!empty($clinicRecord['phone'])): ?>
-      <p class="mt-4 text-center text-xs text-slate-500">
+      <p class="mt-4 text-center text-xs text-ink-500">
         Rather speak to someone? Call
-        <a class="font-semibold text-teal-700" href="tel:<?= e(preg_replace('/[^\d+]/', '', (string) $clinicRecord['phone'])) ?>">
+        <a class="font-semibold text-brand-700" href="tel:<?= e(preg_replace('/[^\d+]/', '', (string) $clinicRecord['phone'])) ?>">
           <?= e((string) $clinicRecord['phone']) ?>
         </a>
       </p>
     <?php endif; ?>
 
-    <p class="mt-6 text-center text-[10px] leading-relaxed text-slate-400">
+    <p class="mt-6 text-center text-[10px] leading-relaxed text-ink-400">
       This link is personal to your booking. Anyone holding it can change this appointment,
       so please do not forward it.
     </p>

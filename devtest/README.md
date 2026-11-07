@@ -68,24 +68,153 @@ role's own `home` path, so the doctor never arrives on `/admin` and gets a 403.
 
 ---
 
-## Mobile
+## Design
 
-The layout is built phone-first; the desktop sidebar is the large-screen variant.
+The UI follows the approved ClinicQueue reference boards. Both the reference
+images and screenshots of this build are in `docs/design/`.
 
-- **Off-canvas drawer** below `lg`, not an inline list that pushes the page down.
-  Dimmed backdrop, page scroll locked behind it, closes on Escape / backdrop /
-  link tap / the × button. Focus is trapped inside while open and returned to
-  the menu button on close. Off-screen links are `visibility:hidden`, so they
-  stay out of the tab order.
-- **Same navigation as desktop** — grouped sections and the active-page marker,
-  not a flat dump of every link.
-- **44px touch targets** on nav rows, queue actions and the close button.
-- **No horizontal page overflow.** Every table scrolls inside its own card
-  (`.table-scroll`); `html, body` are clipped as a backstop.
-- **16px inputs on small screens**, so iOS Safari does not zoom the page in and
-  leave it mis-scaled for the rest of the session.
-- **Safe-area insets** for notched phones, and form grids stack below 420px.
-- Rotating to landscape past `lg` closes the drawer and releases the scroll lock.
+| Token | Value | Where it came from |
+|---|---|---|
+| Primary action | `#0D7459` | sampled from the reference's buttons |
+| Active nav pill | `#DFF4EE` | sampled from the reference's sidebar |
+| Canvas | `#F7F8FA` | area outside the board panel |
+| Hairline | `#E8ECF1` | card and table borders |
+| Sidebar | `246px` | measured from the reference |
+| Board split | `1fr / 352px`, 28px gutter | measured at 1484px wide |
+| Type | Inter, self-hosted | `public/assets/fonts/`, no CDN |
+
+**One design, every role.** The shell (`layouts/app.php`) and the primitives in
+`resources/css/app.css` are shared, so all ~60 pages and all five ports inherit
+the same sidebar, top bar, cards, buttons, tables and mobile behaviour. The
+clinic board and the platform console are built from the same parts — greeting,
+five stat tiles, a main card and a right rail — with each role's own data.
+
+## The two patient-facing screens
+
+These are deliberately **not** the console shell. They render as standalone
+documents (`view($tpl, $data, false)`) because neither audience should see a
+sidebar, and one of them is not even signed in.
+
+| Screen | Route | Who looks at it |
+|---|---|---|
+| Waiting room | `/display` (staff preview) · `/board/{key}` (the wall) | everyone in the room |
+| Patient view | `/t/{token}` | one patient, on their own phone |
+| Self check-in | `/kiosk/{key}` | a walk-in at a lobby tablet |
+
+### Waiting room
+
+- **One tile per room, not one token per clinic.** The old screen collapsed
+  five consulting rooms into a single headline token, so a patient whose room
+  was called never saw it. `DisplayService::payload()` now returns `serving[]`
+  and keeps `now_serving` for older consumers.
+- Tokens are disambiguated by room **and** doctor: every queue restarts its own
+  A-series, so three rooms can all be waiting on "A002".
+- `called` gets a filled brand tile and a flash; `in_consultation` is quieter.
+  Voice announcements fire once per room per token, not on every poll.
+- Inter tabular numerals. The old `font-mono` em-dash at 10rem rendered as a
+  solid white bar, which is what the empty state looked like.
+- Fits a 1920×1080 wall exactly with no scrolling; reflows to one column on a
+  phone. Full-screen button, wake lock, offline banner.
+- First paint is server-rendered from the **same** builder the poller uses, so
+  the wall is never blank for four seconds and the two cannot drift.
+- Staff setup controls (kiosk, rotate key, exit) are hidden on `/board/{key}`.
+
+### Patient view
+
+- Position when waiting ("2 people ahead of you"), the real status otherwise.
+  It used to print a bare `—` for every non-waiting state.
+- Guidance follows the visit: a called patient is told to go to the room, not
+  to "wait until your token is called". The wait estimate reads `Now` /
+  `In progress` / `Finished` instead of a stale range.
+- `.patient-view` raises stat labels back to 11px. The console's 9px labels suit
+  a dense staff tool; a patient reading their own position deserves better.
+- Staff can reopen it: **Patient view** and **Copy patient link** in each queue
+  row's overflow menu, so a lost slip no longer means a new token.
+
+Privacy on the wall: tokens, rooms and **doctor** names only. Verified by
+scraping every patient name from the directory and asserting none appear in
+either the HTML or the JSON of the public board.
+
+Verified: 20 patient-surface checks at 360 / 426 / 768 / 1484 / 1920px, zero
+overflow, zero JS errors, zero sub-10px type, no console chrome.
+
+### Every page, not just the board
+
+The layout wraps **every** authenticated page in the same `.board-panel`, and
+the shared kit in `resources/css/app.css` supplies the parts:
+
+| Class | Used for |
+|---|---|
+| `.page-head` / `.page-title` / `.page-sub` | page title block (a card on a phone, bare on desktop) |
+| `.section-head` / `.section-title` / `.section-link` | card headers — white with a hairline, never the old grey strip |
+| `.stat-tile` / `.stat-label` / `.stat-value` / `.stat-hint` | every number, via `components/stat.php` |
+| `.filter-bar` | search and date-filter rows |
+| `.glance-row` | label/value rail rows |
+
+So Appointments, Patients, Doctors & rooms, Queue settings, Priority rules,
+Service workflows, Policies, Incidents, Breaks, Schedules & holidays,
+Departments, Reports, Audit log, Subscription, Notifications, Settings,
+Support, Getting started and the platform console are all built from the same
+objects as the Live board. Verified: 150 page/viewport checks across the five
+roles at 360 / 426 / 1484px, zero horizontal scroll, zero JS errors, and every
+page carrying the shared panel.
+
+Full-bleed surfaces (waiting-room TV, kiosk, patient tracking, online booking,
+error pages) deliberately opt out via `view($tpl, $data, false)`.
+
+### Small-screen details
+
+Found by measuring every page in a real browser, not by eye:
+
+- Grid/flex children get `min-width: 0`. Without it a single long input or
+  nowrap label stretches the whole page past the phone. Fixed-size controls
+  (buttons, icons, checkboxes) are excluded so they do not get squashed.
+- The "All doctors" jump list dropped from 13px/24px to 11px/32px and is capped
+  at 7.5rem; the doctor tabs next to it are 11.5px with a 38px hit area.
+- Stat tiles: 9px labels (was 7.5px), 10px hints, and a fixed width only inside
+  the board's swipe strip — in a grid they stay fluid.
+- Sub-10px type elsewhere raised to 10px; bare checkboxes given the shared
+  20px `.checkbox`; 14–22px icon buttons raised to 32px.
+- Stat rows are two-up on a phone instead of a tall stack; the rail cards go
+  single-column below 380px so the QR block fits.
+
+Two pre-existing bugs surfaced while sweeping and are fixed here:
+
+- `view()` ignored its third argument, so full-document views were nested
+  inside the console shell whenever a staff session existed (a document
+  inside a document). The parameter now exists and 21 call sites use it.
+- `QrCode::dataUri()` was never implemented, so **every patient tracking link
+  (`/t/{token}`) returned a 500**. Implemented as a colourable SVG data URI.
+  NOTE: the same two bugs exist in `queuepilot/`, which is deliberately
+  untouched here.
+
+### The board refreshes without a second template
+
+`GET /app/panel` returns the live-queue card as rendered HTML, and the poller
+swaps it in every 5s. There is deliberately **no JS row template**: a duplicate
+template is how a redesign silently reverts five seconds after load. The older
+JSON board endpoint still serves `/queue`, which has its own denser layout.
+
+### Mobile
+
+- Off-canvas drawer with backdrop, scroll lock, Escape, focus trap and restore.
+- Bottom tab bar (Live board / Appointments / Patients / More); More opens the drawer.
+- Stat tiles become a swipeable strip; the rail cards sit two-up.
+- 44px touch targets, safe-area insets, 16px inputs (no iOS zoom-on-focus).
+- Every table scrolls inside its own card. Verified no horizontal page scroll
+  at 360px, 426px and 1484px across all five roles.
+
+### Where the build differs from the reference, on purpose
+
+- **Waiting rows say "Call", not "Start".** `waiting → call` is the real state
+  machine transition; `start` only applies to an already-called token. The
+  button is labelled with the action it actually performs.
+- **Estimated wait is a range** (`8–19 min`), not a single number. That is the
+  domain's existing `QueueService::estimate()`, which refuses false precision.
+- **No "Analytics" nav item.** There is no analytics route; Reports covers it.
+  A link that 403s or 404s is worse than a shorter sidebar.
+- **Names, counts and the tracking URL are live data**, so they differ from the
+  mockup's sample values.
 
 ---
 
@@ -209,7 +338,10 @@ they no longer depend on test order.
 ```
 dev/roles.json                              port → role → identity map
 app/Core/DevIdentity.php                    identity from QP_PORT + siblingUrl()
-resources/views/components/role-switcher.php  the role chips / drawer rows
+resources/views/components/role-switcher.php  role popover / drawer rows
+resources/views/partials/board-panel.php      the live-queue card (also the refresh fragment)
+resources/views/components/board/patient-row.php  one waiting patient
+docs/design/                                  reference boards + build screenshots
 tools/serve-role.mjs                        one port, one role
 tools/fleet.mjs                             all ports at once (terminal only)
 README.md                                   this file
