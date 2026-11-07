@@ -4753,6 +4753,252 @@ Assert::test('revenue is billed at each doctor\'s fee, and says so', function ()
     Assert::same(0.0, round($empty['total'], 2), 'an empty range reports zero');
     Assert::same([], $empty['rows'], 'with no rows rather than a zero-filled fake');
 });
+/* ---- the public homepage must not expose patients ------------------ */
+
+Assert::test('the public landing page cannot reach a patient name', function (): void {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/landing.php');
+    // Strip comments first: the docblock explains WHY there is no name, and
+    // grepping the raw file would match that explanation.
+    $code = (string) preg_replace('~/\*.*?\*/~s', '', $view);
+    $code = (string) preg_replace('~^\s*//.*$~m', '', $code);
+
+    // The homepage is unauthenticated and screenshot-able. Its own FAQ promises
+    // "tokens and room numbers only", so the demo panel must match that promise.
+    Assert::true(strpos($code, 'full_name') === false, 'never selects or prints a patient name');
+    Assert::true(strpos($code, 'JOIN patients') === false, 'the patients join is absent, not merely unprinted');
+    // Match data access, not the word: 'phone' is also a legitimate icon name
+    // in the feature list on this page.
+    Assert::true(strpos($code, 'p.phone') === false && strpos($code, 'e.phone') === false
+        && strpos($code, "['phone']") === false, 'no phone number either');
+    Assert::true(strpos($code, 'track_token') === false, 'no capability token that could cancel a visit');
+    Assert::true(strpos($code, 'token_label') !== false, 'it still shows the token, which is the point');
+    Assert::true(strpos($code, 'room_name') !== false, 'and the room, matching the waiting-room screen');
+});
+
+/* ---- the public homepage must not overclaim ------------------------- */
+
+/**
+ * The landing design was supplied as a mockup full of placeholder credibility:
+ * five hospital logos, a named medical director, "500+ clinics", "47% shorter
+ * waits". None of it is ours. These tests keep it from creeping back in when
+ * somebody tidies the copy later.
+ */
+$landingCopy = static function (): string {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/landing.php');
+    // Comments explain why a claim is ABSENT, so they must be stripped before
+    // searching for the claim itself — otherwise the explanation fails the test.
+    $code = (string) preg_replace('~/\*.*?\*/~s', '', $view);
+    $code = (string) preg_replace('~^\s*//.*$~m', '', $code);
+
+    return (string) preg_replace('~<!--.*?-->~s', '', $code);
+};
+
+Assert::test('the homepage borrows no credibility it has not earned', function () use ($landingCopy): void {
+    $code = $landingCopy();
+    foreach (['Nawaloka', 'Lanka Hospitals', 'Asiri', 'Durdans', 'Unity Healthcare'] as $brand) {
+        Assert::true(strpos($code, $brand) === false, 'no hospital named as a customer: ' . $brand);
+    }
+    foreach (['500+', '47%', '92%', '2.5 hrs', '30%'] as $stat) {
+        Assert::true(strpos($code, $stat) === false, 'no statistic we cannot measure: ' . $stat);
+    }
+    Assert::true(strpos($code, 'Medical Director') === false, 'no invented testimonial author');
+});
+
+Assert::test('homepage prices and limits are read from the plan row', function () use ($landingCopy): void {
+    $code = $landingCopy();
+    // A hardcoded price drifts the moment a plan is repriced, and the homepage
+    // would then be advertising a number billing does not honour.
+    foreach (['3500', '3,500', '7900', '7,900', '14900', '14,900'] as $literal) {
+        Assert::true(strpos($code, $literal) === false, 'no hardcoded price: ' . $literal);
+    }
+    Assert::true(strpos($code, 'price_monthly') !== false, 'the price comes from the column');
+    Assert::true(strpos($code, 'number_format') !== false, 'and is formatted, not typed');
+    foreach (['max_doctors', 'max_staff', 'max_queues'] as $col) {
+        Assert::true(strpos($code, $col) !== false, 'limits come from ' . $col);
+    }
+});
+
+Assert::test('the homepage advertises the trial signup actually grants', function () use ($landingCopy): void {
+    $svc = (string) file_get_contents(QP_ROOT . '/app/Services/ClinicService.php');
+    Assert::true(preg_match("~strtotime\('\+(\d+) days'\)~", $svc, $m) === 1, 'the trial length is readable from the signup code');
+    $days = (int) ($m[1] ?? 0);
+    Assert::true($days > 0, 'a real trial length was found');
+    $code = $landingCopy();
+    Assert::true(strpos($code, $days . '-day free trial') !== false, 'the CTA matches the granted trial');
+    Assert::true(strpos($code, $days . ' days, full access') !== false, 'so does the reassurance line');
+});
+
+Assert::test('the homepage quotes one currency and no exchange rate', function () use ($landingCopy): void {
+    $code = $landingCopy();
+    Assert::true(strpos($code, 'LKR') !== false, 'prices are labelled LKR');
+    Assert::true(strpos($code, 'USD') === false, 'no second currency we have no rate for');
+});
+
+Assert::test('the homepage keeps its script external for the CSP', function (): void {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/landing.php');
+    Assert::true(
+        preg_match('~<script(?![^>]*\bsrc=)[^>]*>~i', $view) === 0,
+        'no inline script: script-src is self, so inline would silently not run'
+    );
+    Assert::true(strpos($view, "js/landing.js") !== false, 'the page behaviour ships as its own file');
+});
+
+/* ---- a rebuild must actually reach a returning browser -------------- */
+
+Assert::test('a rebuilt asset is a new url, so the immutable cache is safe', function (): void {
+    // serve.mjs sends `max-age=31536000, immutable` for /assets/build/. That is
+    // only correct for a content-addressed url. asset() used to return a fixed
+    // path, so a browser that had visited once kept the OLD stylesheet for a
+    // year and rendered the redesigned homepage unstyled — new markup, old CSS.
+    $css = asset('build/app.css');
+    Assert::true(strpos($css, '?v=') !== false, 'the stylesheet url carries a fingerprint');
+
+    $file = QP_ROOT . '/public/assets/build/app.css';
+    Assert::true(is_file($file), 'the built stylesheet exists');
+    Assert::true(strpos($css, substr((string) md5_file($file), 0, 10)) !== false, 'the fingerprint is the file digest');
+
+    // The header that makes this mandatory, asserted so the pairing is explicit.
+    $serve = (string) file_get_contents(QP_ROOT . '/tools/serve.mjs');
+    Assert::true(strpos($serve, 'immutable') !== false, 'build assets really are served immutable');
+
+    // A missing file must not produce a bogus "?v=" that caches a 404 forever.
+    Assert::true(strpos(asset('build/definitely-not-built.css'), '?v=') === false, 'no fingerprint invented for a missing file');
+});
+
+Assert::test('the service worker cannot pin an old stylesheet', function (): void {
+    $sw = (string) file_get_contents(QP_ROOT . '/public/sw.js');
+    Assert::true(strpos($sw, 'hit || fetch(req)') === false, 'the shell is no longer cache-first');
+    Assert::true(strpos($sw, 'SHELL_ASSETS.includes(url.pathname)') !== false, 'the shell branch still exists');
+    Assert::true(strpos($sw, 'qp-v2') === false, 'the old cache version is gone, so activate() drops it');
+    // Data must still bypass the cache entirely: a stale "you are next" is a lie.
+    Assert::true(strpos($sw, "url.pathname.startsWith('/api/')") !== false, 'the api bypass survives');
+});
+
+/* ---- brand surface: one document, one scale, honest motion ----------- */
+
+Assert::test('a full-document view is not wrapped in the console layout', function (): void {
+    // view() took two parameters while nine callers passed a third `false`.
+    // PHP silently drops extra arguments, so the landing, kiosk and track
+    // error pages were rendered INSIDE the console layout: two <html> tags.
+    // The browser keeps the first, so the page's own html/body classes — the
+    // brand tokens and the scale knob — were thrown away.
+    $fn = new \ReflectionFunction('view');
+    Assert::same(3, $fn->getNumberOfParameters(), 'view() accepts the asLayout flag');
+    $render = new \ReflectionMethod(\App\Core\View::class, 'render');
+    Assert::same(3, $render->getNumberOfParameters(), 'View::render accepts it too');
+    $helpers = (string) file_get_contents(QP_ROOT . '/app/helpers.php');
+    Assert::true(strpos($helpers, 'View::render($template, $data, $asLayout)') !== false, 'and the helper actually forwards it');
+});
+
+Assert::test('the homepage scale is a single knob that reaches every size', function (): void {
+    $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+    Assert::true(strpos($css, '.lp-root { font-size: 90%; }') !== false, 'the page renders at the 90% proportions');
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/landing.php');
+    Assert::true(strpos($view, 'class="lp-root') !== false, 'and the document opts into it');
+    // A stray px size would silently ignore the knob and break the proportion.
+    Assert::true(preg_match('~\[[0-9.]+px\]~', $view) === 0, 'every arbitrary size in the view is in rem');
+});
+
+Assert::test('scroll reveal is an enhancement, never a gate on content', function (): void {
+    $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+    $js  = (string) file_get_contents(QP_ROOT . '/public/assets/js/landing.js');
+    // Hidden ONLY once the script has armed it, so a no-JS visitor sees everything.
+    Assert::true(
+        preg_match('~\.lp-reveal-ready\s+\[data-reveal\]\s*\{\s*opacity:\s*0~', $css) === 1,
+        'hiding is scoped to the armed class'
+    );
+    Assert::true(strpos($js, "classList.add('lp-reveal-ready')") !== false, 'the script arms it');
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/landing.php');
+    Assert::true(strpos($view, 'lp-reveal-ready') === false, 'the markup never ships pre-hidden');
+    Assert::true(strpos($css, 'prefers-reduced-motion') !== false, 'reduced motion is honoured');
+    Assert::true(strpos($js, 'prefers-reduced-motion') !== false, 'in both the styles and the script');
+});
+
+Assert::test('the reveal repeats in both directions', function (): void {
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/landing.js');
+    $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+    // Requested: not a one-time animation. The observer must keep watching and
+    // toggle both ways, so scrolling back up replays the entrance.
+    Assert::true(strpos($js, "classList.toggle('is-in', entry.isIntersecting)") !== false, 'the class is toggled, not just added');
+    $revealBlock = substr($js, (int) strpos($js, 'var io = new IntersectionObserver'));
+    $revealBlock = substr($revealBlock, 0, (int) strpos($revealBlock, 'Array.prototype.forEach'));
+    Assert::true(strpos($revealBlock, 'unobserve') === false, 'the reveal observer never stops watching');
+    // The exit needs its own transition, or it would snap instead of fading.
+    Assert::true(
+        preg_match('~\.lp-reveal-ready\s+\[data-reveal\]\s*\{[^}]*transition:~s', $css) === 1,
+        'the hidden state carries a transition too'
+    );
+});
+
+Assert::test('the homepage staleness claim matches the poller', function () use ($landingCopy): void {
+    // The ledger promises "marks itself stale after 30 seconds without data".
+    // That is a number, so it has to come from the code rather than from copy
+    // someone liked the sound of. The poller owns the truth.
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+    Assert::true(preg_match('~Date\.now\(\)\s*-\s*lastOk\s*>\s*(\d+)~', $js, $m) === 1, 'the stale threshold is readable from the poller');
+    $seconds = (int) round(((int) ($m[1] ?? 0)) / 1000);
+    Assert::true($seconds > 0, 'a real threshold was found');
+    Assert::true(
+        strpos($landingCopy(), 'stale after ' . $seconds . ' seconds') !== false,
+        'the ledger quotes the poller exactly (' . $seconds . 's)'
+    );
+});
+
+Assert::test('the rebuilt sections use shared primitives, not one-offs', function (): void {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/landing.php');
+    $css  = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+    foreach (['lp-caprail', 'lp-duet', 'lp-mark', 'lp-decision'] as $cls) {
+        Assert::true(strpos($view, $cls) !== false, $cls . ' is used by the view');
+        Assert::true(strpos($css, '.' . $cls) !== false, $cls . ' is defined once in the stylesheet');
+    }
+    // The quote carousel was replaced by annotated evidence: no hidden content,
+    // no unattributed quotation, and no JS needed to read the section.
+    Assert::true(strpos($view, 'data-lp-carousel') === false, 'the carousel markup is gone');
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/landing.js');
+    Assert::true(strpos($js, 'lp-carousel') === false, 'and its dead script went with it');
+    // Every marker on the dashboard must have a decision to point at.
+    // Count inside the evidence band, and by class prefix: the tiles carry
+    // modifier utilities alongside lp-mark, so an exact class="lp-mark" match
+    // would silently miss them.
+    $ev = substr($view, (int) strpos($view, 'lp-band lp-band--dark'));
+    $ev = substr($ev, 0, (int) strpos($ev, '</section>'));
+    // Two source occurrences: one inside the tile loop (emitted twice, for the
+    // count and the average) and one on the doctor-list heading. The rendered
+    // total of three is asserted against the DOM in rhythm_verify.mjs.
+    Assert::same(2, substr_count($ev, 'class="lp-mark'), 'markers sit on the tiles and the doctor list');
+    Assert::true(strpos($view, '$decisions') !== false, 'keyed to a decision list');
+    // The capability strip was restored on request; the ledger it replaced must
+    // not linger as dead markup or dead CSS.
+    Assert::true(strpos($view, 'lp-ledger') === false, 'the ledger markup is gone');
+    Assert::true(strpos($css, '.lp-ledger') === false, 'and so are its rules');
+});
+
+Assert::test('sparklines keep their viewBox ratio so they cannot be letterboxed', function (): void {
+    $css  = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/landing.php');
+    // A fixed height on a 260x70 viewBox makes the browser fit-to-height and
+    // centre the plot, so it floated inset instead of filling the card on mobile.
+    Assert::true(preg_match('~\.lp-spark\s*\{[^}]*aspect-ratio:\s*260\s*/\s*70~s', $css) === 1, 'the ratio is pinned in CSS');
+    Assert::same(2, substr_count($view, 'class="lp-spark'), 'both charts use it');
+    Assert::true(
+        preg_match('~<svg viewBox="0 0 260 70"[^>]*class="[^"]*h-\[~', $view) === 0,
+        'neither chart carries a fixed height that would override it'
+    );
+});
+
+
+Assert::test('the brand type is self-hosted and licensed', function (): void {
+    $dir = QP_ROOT . '/public/assets/fonts/';
+    foreach (['fraunces-var.woff2', 'jetbrains-mono-var.woff2'] as $font) {
+        Assert::true(is_file($dir . $font), $font . ' is present');
+    }
+    foreach (['LICENSE.txt', 'LICENSE-fraunces.txt', 'LICENSE-jetbrains-mono.txt'] as $lic) {
+        Assert::true(is_file($dir . $lic), $lic . ' ships with the fonts');
+    }
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/landing.php');
+    Assert::true(strpos($view, 'fonts.googleapis') === false, 'no third-party font request');
+});
+
 /* ------------------------------------------------------------------ */
 
 $code = Assert::summary();

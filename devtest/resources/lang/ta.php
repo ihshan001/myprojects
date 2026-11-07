@@ -1,0 +1,27 @@
+<?php
+/** தமிழ் (Tamil). */
+return [
+    'nav.live_board' => 'நேரடி பலகை',
+    'nav.new_patient' => 'புதிய நோயாளர்',
+    'nav.appointments' => 'சந்திப்புகள்',
+    'nav.patients' => 'நோயாளர்கள்',
+    'nav.doctors' => 'மருத்துவர்கள் & அறைகள்',
+    'nav.reports' => 'அறிக்கைகள்',
+    'nav.settings' => 'அமைப்புகள்',
+    'queue.waiting' => 'காத்திருக்கிறது',
+    'queue.called' => 'அழைக்கப்பட்டது',
+    'queue.in_consultation' => 'பரிசோதனையில்',
+    'queue.completed' => 'நிறைவு',
+    'queue.skipped' => 'தவிர்க்கப்பட்டது',
+    'queue.no_show' => 'வரவில்லை',
+    'queue.cancelled' => 'ரத்து',
+    'queue.transferred' => 'மாற்றப்பட்டது',
+    'action.call' => 'அழை',
+    'action.start' => 'தொடங்கு',
+    'action.complete' => 'நிறைவு செய்',
+    'action.skip' => 'தவிர்',
+    'action.cancel' => 'ரத்து செய்',
+    'token.issued' => 'டோக்கன் வழங்கப்பட்டது',
+    'patient.position' => 'உங்கள் இடம்',
+    'patient.estimate' => 'மதிப்பிடப்பட்ட காத்திருப்பு',
+];

@@ -1,0 +1,755 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =====================================================================
+   ClinicQueue design system  (shared by every role and every page)
+   ---------------------------------------------------------------------
+   Values are sampled from the approved reference boards, not guessed:
+     primary action   #0D7459      active nav pill   #DFF4EE
+     canvas           #F7F8FA      hairline border   #E8ECF1
+   Type is Inter, self-hosted (public/assets/fonts) so the board renders
+   identically offline and in the waiting-room kiosk.
+   ===================================================================== */
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/assets/fonts/inter-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/assets/fonts/inter-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/assets/fonts/inter-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/assets/fonts/inter-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('/assets/fonts/inter-800.woff2') format('woff2');
+}
+
+@layer base {
+  :root {
+    --brand: #0d7459;
+    --brand-ink: #065f46;
+    --brand-soft: #dff4ee;
+    --ink: #0f172a;
+    --muted: #64748b;
+    --line: #e8ecf1;
+    --surface: #ffffff;
+    --canvas: #f7f8fa;
+    --sidebar-w: 246px;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  /* Nothing may make the page wider than the phone. A single wide table used
+     to drag the whole layout sideways, which also moved the fixed top bar. */
+  html, body {
+    max-width: 100%;
+    overflow-x: clip;
+  }
+
+  /* iOS Safari zooms in when a focused input is under 16px, then never zooms
+     back out — the page stays mis-scaled for the rest of the session. */
+  @media (max-width: 640px) {
+    input, select, textarea {
+      font-size: 16px !important;
+    }
+  }
+
+  /* Grid and flex children default to min-width:auto, which lets one long
+     input or nowrap label stretch the whole page past a phone's width.
+     Content columns in this app never want min-content sizing. */
+  main .grid > *,
+  main .flex > * {
+    min-width: 0;
+  }
+  /* Only controls with an intrinsic size keep it. Text inputs and selects
+     must still shrink, or a search field plus its button overflow the card. */
+  main :is(button, svg, input[type=checkbox], input[type=radio]) {
+    flex-shrink: 0;
+  }
+
+  /* Body scroll is locked while the drawer is open, so the page behind it
+     does not slide around under the user's thumb. */
+  body.qp-nav-open {
+    overflow: hidden;
+  }
+
+  body {
+    @apply bg-[var(--canvas)] text-slate-800 antialiased;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+      "Noto Sans Sinhala", "Noto Sans Tamil", sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    letter-spacing: -0.011em;
+  }
+
+  .emoji {
+    font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+    font-style: normal;
+  }
+
+  /* Numbers in a queue must never jitter between polls. */
+  .tabular,
+  .font-mono,
+  td.numeric,
+  th.numeric {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  ::selection {
+    background: #a7f3d0;
+    color: #064e3b;
+  }
+
+  /* Sinhala/Tamil need more line height to stay legible */
+  html[lang="si"] body,
+  html[lang="ta"] body {
+    line-height: 1.75;
+  }
+}
+
+@layer components {
+  /* ---------------------------------------------------------- surfaces */
+  .card {
+    @apply rounded-xl border border-hairline bg-white shadow-card;
+  }
+  .card-pad {
+    @apply p-4 sm:p-5;
+  }
+  .card-hover {
+    @apply transition hover:border-slate-300 hover:shadow-md;
+  }
+  .panel {
+    @apply rounded-xl border border-hairline bg-white;
+  }
+  .divider {
+    @apply border-t border-slate-200;
+  }
+
+  /* ----------------------------------------------------------- buttons */
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-lg px-4 py-2.5
+           text-sm font-semibold transition active:scale-[0.99] disabled:pointer-events-none
+           disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn text-white shadow-sm;
+    background-image: linear-gradient(100deg, #128055, #0F6E48);
+  }
+  .btn-primary:hover { background-image: linear-gradient(100deg, #0F6E48, #0B5A3B); }
+  .btn-secondary {
+    @apply btn border border-hairline bg-white text-ink-700 shadow-card hover:bg-slate-50;
+  }
+  /* Destructive or irreversible actions (close the day, cancel a visit).
+     Distinct from btn-secondary so it cannot be clicked by muscle memory. */
+  .btn-stop {
+    @apply btn bg-rose-600 text-white hover:bg-rose-700 focus-visible:ring-rose-500;
+  }
+  .btn-ghost {
+    @apply btn text-ink-500 hover:bg-slate-100;
+  }
+  .btn-danger {
+    @apply btn bg-rose-600 text-white hover:bg-rose-700;
+  }
+  .btn-warn {
+    @apply btn bg-amber-500 text-white hover:bg-amber-600;
+  }
+  .btn-sm {
+    @apply px-2.5 py-1.5 text-xs;
+  }
+  .btn-lg {
+    @apply px-6 py-3.5 text-base;
+  }
+  .btn-dark {
+    @apply btn bg-slate-900 text-white hover:bg-slate-800;
+  }
+
+  /* Queue action buttons: big enough to hit fast, colour-coded by intent */
+  .act {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md border px-2.5 py-1
+           text-[11px] font-semibold leading-5 transition active:scale-[0.98] disabled:opacity-40;
+  }
+  .act-call {
+    @apply act border-brand-200 bg-white text-brand-700 hover:bg-brand-50;
+  }
+  .act-start {
+    @apply act border-brand-200 bg-white text-brand-700 hover:bg-brand-50;
+  }
+  .act-done {
+    @apply act border-brand-200 bg-white text-brand-700 hover:bg-brand-50;
+  }
+  .act-skip {
+    @apply act border-hairline bg-white text-ink-700 hover:bg-slate-50;
+  }
+  .act-stop {
+    @apply act border-hairline bg-white text-rose-600 hover:bg-rose-50;
+  }
+  .act-mute {
+    @apply act border-hairline bg-white text-ink-700 hover:bg-slate-50;
+  }
+
+  /* ------------------------------------------------------------ inputs */
+  .label {
+    @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+  .input {
+    @apply w-full rounded-lg border border-hairline bg-white px-3 py-2.5 text-sm text-ink-900
+           placeholder:text-slate-400 focus:border-brand-600 focus:ring-2 focus:ring-brand-600/15;
+  }
+  .input-lg {
+    @apply input px-4 py-3 text-base;
+  }
+  .select {
+    @apply input appearance-none bg-[length:16px] bg-[right_0.6rem_center] bg-no-repeat pr-9;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%2364748b'%3E%3Cpath d='M5.2 7.5 10 12.3l4.8-4.8' stroke='%2364748b' stroke-width='1.7' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  }
+  .textarea {
+    @apply input min-h-[80px] resize-y;
+  }
+  .checkbox {
+    @apply h-4 w-4 shrink-0 rounded border-slate-300 text-brand-700 focus:ring-brand-600;
+  }
+  .help {
+    @apply mt-1 text-xs text-slate-500;
+  }
+  .error-text {
+    @apply mt-1 text-xs font-medium text-rose-600;
+  }
+  .input-error {
+    @apply border-rose-400 focus:border-rose-500 focus:ring-rose-500/15;
+  }
+
+  /* ------------------------------------------------------------- chips */
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold;
+  }
+  .badge-slate { @apply badge bg-slate-100 text-slate-600; }
+  .badge-teal { @apply badge bg-teal-50 text-teal-700 ring-1 ring-teal-200; }
+  .badge-amber { @apply badge bg-amber-50 text-amber-700 ring-1 ring-amber-200; }
+  .badge-sky { @apply badge bg-sky-50 text-sky-700 ring-1 ring-sky-200; }
+  .badge-emerald { @apply badge bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200; }
+  .badge-rose { @apply badge bg-rose-50 text-rose-700 ring-1 ring-rose-200; }
+  .badge-violet { @apply badge bg-violet-50 text-violet-700 ring-1 ring-violet-200; }
+  .badge-orange { @apply badge bg-orange-50 text-orange-700 ring-1 ring-orange-200; }
+  .badge-priority {
+    @apply badge bg-red-600 text-white shadow-sm;
+  }
+
+  /* ------------------------------------------------------------ tables */
+  .table {
+    @apply w-full border-collapse text-sm;
+  }
+  .table thead th {
+    @apply border-b border-hairline px-3 py-2.5 text-left text-[11px] font-semibold
+           uppercase tracking-wide text-ink-500;
+  }
+  .table tbody td {
+    @apply border-b border-slate-100 px-3 py-2.5 align-middle text-slate-700;
+  }
+  .table tbody tr:hover {
+    @apply bg-slate-50/70;
+  }
+
+  /* --------------------------------------------------------------- nav */
+  .nav-item {
+    @apply flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium text-ink-700
+           transition hover:bg-slate-50 hover:text-ink-900;
+  }
+  .nav-item-active {
+    @apply bg-mint-100 font-semibold text-brand-700 hover:bg-mint-100 hover:text-brand-700;
+  }
+  .nav-badge {
+    @apply ml-auto rounded-md bg-brand-50 px-1.5 py-0.5 text-[11px] font-bold text-brand-700;
+  }
+
+  /* ---------------------------------------------------------- tokens */
+  .token-chip {
+    @apply inline-flex items-center justify-center rounded-md bg-brand-50 px-2.5 py-1
+           text-[13px] font-bold tracking-tight text-brand-700;
+  }
+  .token-hero {
+    @apply font-mono text-6xl font-black leading-none tracking-tight;
+  }
+
+  /* -------------------------------------------------- live indicators */
+  .pulse-dot {
+    @apply relative inline-flex h-2 w-2;
+  }
+  .pulse-dot::after {
+    content: "";
+    @apply absolute inset-0 animate-ping rounded-full bg-emerald-400 opacity-75;
+  }
+  .live-pill {
+    @apply inline-flex items-center gap-2 rounded-full bg-emerald-50 px-2.5 py-1
+           text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200;
+  }
+  .stale-pill {
+    @apply inline-flex items-center gap-2 rounded-full bg-amber-100 px-2.5 py-1
+           text-[11px] font-semibold text-amber-800 ring-1 ring-amber-300;
+  }
+
+  /* =================================================== live board =====
+     Geometry taken from the reference: 246px sidebar, 20px panel padding,
+     a 716/352 two-column split with a 29px gutter at 1484px wide.        */
+
+  .board-panel {
+    @apply rounded-2xl border border-hairline bg-white p-4 shadow-card sm:p-5;
+  }
+
+  /* ================================================ shared page kit ====
+     Every authenticated page is wrapped in .board-panel by the layout, so
+     these headers/sections are the same objects the Live board uses.     */
+
+  /* Page title block: a card on a phone, bare inside the desktop panel. */
+  .page-head {
+    @apply flex flex-wrap items-start justify-between gap-3 rounded-xl border
+           border-hairline bg-white p-4 shadow-card
+           lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none;
+  }
+  .page-title {
+    @apply text-[17px] font-bold leading-snug tracking-tight text-ink-900 sm:text-[22px];
+  }
+  .page-sub {
+    @apply mt-1.5 text-[11px] leading-snug text-ink-500 sm:text-[12px];
+  }
+
+  /* Card section header: white with a hairline, never the old grey strip. */
+  .section-head {
+    @apply flex flex-wrap items-center justify-between gap-2 border-b border-hairline
+           px-3 py-2.5 sm:px-4;
+  }
+  .section-title {
+    @apply text-[13px] font-bold tracking-tight text-ink-900 sm:text-[15px];
+  }
+  .section-link {
+    @apply text-[11px] font-semibold text-brand-700 hover:underline sm:text-[12px];
+  }
+
+  /* Filter / search rows above a list. */
+  .filter-bar {
+    @apply mt-3 flex flex-wrap items-end gap-2 sm:mt-5;
+  }
+
+  /* Body copy inside a card. */
+  .field-help { @apply mt-1 text-[11px] leading-relaxed text-ink-500; }
+  .kbd {
+    @apply rounded bg-slate-100 px-1 font-mono text-[11px] text-ink-700;
+  }
+
+  /* Top search bar: its own floating card, not a full-bleed strip. */
+  .topbar-card {
+    @apply flex h-12 items-center gap-3 rounded-xl border border-hairline bg-white
+           px-4 shadow-bar;
+  }
+  .topbar-search {
+    @apply h-9 w-full border-0 bg-transparent p-0 text-[13px] text-ink-900
+           placeholder:text-slate-400 focus:outline-none focus:ring-0;
+  }
+
+  /* Stat tiles: icon square + label/value/hint, five across on desktop. */
+  .stat-tile {
+    @apply flex items-center gap-3 rounded-xl border border-hairline bg-white
+           px-4 py-4 shadow-card;
+  }
+  .stat-ico {
+    @apply flex h-11 w-11 shrink-0 items-center justify-center rounded-xl;
+  }
+  .stat-label {
+    @apply text-[10px] font-semibold uppercase tracking-[0.06em] text-ink-500;
+    overflow-wrap: anywhere;
+  }
+  .stat-value {
+    @apply truncate text-[22px] font-bold leading-tight tracking-tight text-ink-900 tabular;
+  }
+  .stat-hint { @apply text-[11px] text-ink-500; }
+
+  /* Doctor tabs inside the live-queue card. */
+  .qtab {
+    @apply relative shrink-0 whitespace-nowrap px-1 pb-2.5 pt-1 text-[13px] font-medium
+           text-ink-500 transition hover:text-ink-900;
+  }
+  .qtab-active {
+    @apply font-semibold text-brand-700;
+  }
+  .qtab-active::after {
+    content: "";
+    @apply absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-brand-600;
+  }
+
+  /* The two spotlight cards: in consultation (blue) and next in line (amber). */
+  .spot {
+    @apply rounded-xl border p-3;
+  }
+  .spot-now { @apply border-sky-300 bg-sky-50/50; }
+  .spot-next { @apply border-amber-200 bg-amber-50/40; }
+  .spot-tag {
+    @apply inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-semibold;
+  }
+  .spot-token {
+    @apply inline-flex items-center justify-center rounded-lg bg-white/80 px-3 py-1.5
+           text-[17px] font-bold tracking-tight text-ink-900 ring-1 ring-black/5;
+  }
+
+  /* One waiting patient. Columns collapse rather than scroll on a phone. */
+  .prow {
+    @apply flex items-center gap-2.5 border-b border-slate-100 px-2.5 py-1.5 last:border-0;
+  }
+  .prow-name { @apply truncate text-[13px] font-semibold text-ink-900; }
+  .prow-meta { @apply truncate text-[11px] text-ink-500; }
+
+  /* Right rail rows: label left, value right, hairline between. */
+  .glance-row {
+    @apply flex items-center justify-between border-b border-slate-100 py-2
+           text-[12px] last:border-0;
+  }
+
+  /* Bottom tab bar (mobile only). */
+  .bottom-tabs {
+    @apply fixed inset-x-0 bottom-0 z-30 flex border-t border-hairline bg-white/95
+           backdrop-blur lg:hidden;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .btab {
+    @apply flex min-h-[52px] flex-1 flex-col items-center justify-center gap-0.5
+           text-[10px] font-medium text-ink-500 transition;
+  }
+  .btab-active { @apply font-semibold text-brand-700; }
+
+  /* Role switcher popover on the sidebar user card. */
+  .role-pop {
+    @apply absolute bottom-full left-0 z-50 mb-2 w-[calc(100%+0px)] overflow-hidden
+           rounded-xl border border-hairline bg-white shadow-pop;
+  }
+
+  /* --------------------------------------------------- mobile drawer */
+  /* The old mobile menu was an inline list that pushed the page down and had
+     no sections, no active state and no way to close it. This is a real
+     off-canvas drawer: overlay, scroll lock, Escape, and the same grouped
+     navigation the desktop sidebar shows. */
+  .nav-overlay {
+    @apply fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-[2px] lg:hidden;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s ease;
+  }
+  .nav-overlay.is-open {
+    opacity: 1;
+    pointer-events: auto;
+    touch-action: none;
+  }
+
+  .nav-drawer {
+    @apply fixed inset-y-0 left-0 z-50 flex w-[86vw] max-w-[20rem] flex-col
+           border-r border-hairline bg-white shadow-pop lg:hidden;
+    transform: translateX(-100%);
+    /* visibility keeps the off-screen links out of the tab order; a drawer
+       that is merely translated away is still keyboard-reachable. */
+    visibility: hidden;
+    transition: transform .24s cubic-bezier(.4, 0, .2, 1), visibility .24s;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .nav-drawer.is-open {
+    transform: translateX(0);
+    visibility: visible;
+  }
+  /* The drawer's own list must still pan when the page behind it is locked. */
+  .nav-drawer nav {
+    touch-action: pan-y;
+  }
+
+  /* Comfortable thumb targets: 44px minimum, per the platform guidelines. */
+  .nav-drawer .nav-item {
+    @apply min-h-[44px] py-2.5 text-[15px];
+  }
+
+  .nav-section-label {
+    @apply mb-1.5 mt-5 px-3 text-[10px] font-semibold uppercase tracking-[0.09em]
+           text-ink-400 first:mt-0;
+  }
+
+  .icon-btn {
+    @apply inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg
+           text-slate-600 transition hover:bg-slate-100 active:bg-slate-200;
+  }
+
+  /* ------------------------------------------------------ table scroll */
+  /* A table wider than the phone scrolls inside its own card instead of
+     stretching the page. The fade hints that there is more to the right. */
+  .table-scroll {
+    @apply w-full overflow-x-auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+  .table-scroll > table {
+    @apply min-w-full;
+  }
+  @media (max-width: 640px) {
+    /* Selects were rendering at 13px next to 10px labels and pushing their
+       row wider than the card. Keep them legible but proportional. */
+    .qtab { @apply min-h-[38px] text-[11.5px]; }
+    /* The "All doctors" jump list was 13px in a 24px box beside 11px tabs. */
+    .qselect { @apply h-8 max-w-[7.5rem] text-[11px]; }
+    .stat-ico { @apply h-6 w-6; }
+    .stat-label { @apply text-[9px]; }
+    .stat-hint { @apply text-[10px]; }
+    .glance-row { @apply py-1.5 text-[11.5px]; }
+    .select, select.select { @apply py-2 pr-8 text-[13px]; }
+    .section-head { @apply gap-1.5; }
+    .btn { @apply px-3 py-2 text-[13px]; }
+    .btn-lg { @apply px-4 py-3 text-[14px]; }
+    .label { @apply text-[10px]; }
+    .card-pad { @apply p-3; }
+    .stat-tile { @apply gap-1.5 px-2 py-2.5; }
+    .stat-ico { @apply rounded-lg; }
+    .stat-ico svg { @apply h-3.5 w-3.5; }
+    .stat-value { @apply text-[16px]; }
+    .stat-label { @apply leading-[1.25]; }
+    .stat-hint { @apply leading-tight; }
+    /* Tap targets on phones: a 24px icon button is a miss most of the time. */
+    .btn-sm { @apply min-h-[36px] px-3; }
+    .act { @apply min-h-[44px] min-w-[44px]; }
+    .checkbox { @apply h-5 w-5; }
+    /* Long headings must wrap, not force the card wider than the screen. */
+    h1, h2, h3 { overflow-wrap: anywhere; }
+    .table thead th,
+    .table tbody td {
+      @apply px-2.5 py-2 text-[13px];
+    }
+    /* Anything explicitly marked desktop-only collapses away rather than
+       squeezing the columns that actually matter on a phone. */
+    .hide-sm { display: none !important; }
+  }
+
+  /* ----------------------------------------------------------- layout */
+  .shell {
+    @apply flex min-h-screen;
+  }
+  .sidebar {
+    @apply fixed inset-y-0 left-0 z-30 hidden w-[var(--sidebar-w)] flex-col
+           border-r border-hairline bg-white lg:flex;
+  }
+  .main-col {
+    /* min-w-0: a flex item defaults to min-width:auto, so one wide scroller
+       inside would stretch the whole column past the phone's width. */
+    @apply flex min-h-screen w-full min-w-0 flex-col lg:pl-[var(--sidebar-w)];
+  }
+  .page {
+    @apply mx-auto w-full max-w-[1400px] flex-1 px-3 py-4 sm:px-6 sm:py-6 lg:px-8;
+  }
+  .page-narrow {
+    @apply mx-auto w-full max-w-3xl px-4 py-8 sm:px-6;
+  }
+
+  /* ------------------------------------------------- patient surface */
+  .patient-card {
+    @apply rounded-2xl border border-slate-200 bg-white p-6 shadow-sm;
+  }
+  .patient-token {
+    @apply rounded-2xl bg-gradient-to-br from-teal-700 to-teal-900 p-6 text-white shadow-lg;
+  }
+
+  /* ------------------------------------------------------ display mode */
+  /* ---------------------------------------------------------------------
+     Shared page furniture. Generic across every list screen, so a section
+     is recognisable at a glance and the heads all read the same.
+     --------------------------------------------------------------------- */
+
+  /* Leading icon in a page head, so a section is recognisable at a glance. */
+  .page-icon {
+    @apply flex h-7 w-7 shrink-0 items-center justify-center text-brand-600 sm:h-8 sm:w-8;
+  }
+  .page-icon svg { @apply h-6 w-6 sm:h-7 sm:w-7; }
+
+  /* ---------------------------------------------------------------------
+     Waiting-room board. Light and calm for a lit room, readable from across
+     it. Shares the console's type and brand colour but is deliberately NOT
+     the console shell: no sidebar, no nav, nothing a patient can wander into.
+     --------------------------------------------------------------------- */
+  .wr { @apply bg-white text-ink-900; }
+  .wr-shell {
+    @apply mx-auto flex min-h-screen w-full max-w-[110rem] flex-col px-5 py-5 sm:px-8 sm:py-7;
+  }
+  .wr-head {
+    @apply flex flex-wrap items-center justify-between gap-4 border-b border-hairline pb-5;
+  }
+  .wr-mark { @apply flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-white sm:h-12 sm:w-12; }
+  .wr-title { @apply truncate text-lg font-bold leading-tight sm:text-[22px]; }
+  .wr-tagline { @apply mt-0.5 truncate text-[12px] text-ink-500 sm:text-[13px]; }
+  .wr-clock { @apply text-[28px] font-extrabold leading-none tracking-tight tabular sm:text-[40px]; }
+  .wr-eyebrow { @apply text-[11px] font-bold uppercase tracking-[0.18em] text-ink-500 sm:text-[12px]; }
+
+  /* Now serving: the one thing a patient is scanning the wall for. */
+  .wr-hero {
+    @apply flex flex-col items-center justify-center overflow-hidden rounded-3xl
+           px-6 py-8 text-center text-white sm:px-10 sm:py-10;
+    min-height: 15rem;
+  }
+  .wr-hero-room { @apply text-[12px] font-bold uppercase tracking-[0.22em] text-white/75 sm:text-[14px]; }
+  .wr-hero-token {
+    @apply mt-2 font-extrabold leading-[0.95] tracking-tight tabular;
+    font-size: clamp(3.25rem, 8.5vw, 6.75rem);
+  }
+  .wr-hero-doc { @apply mt-4 text-lg font-bold sm:text-2xl; }
+  .wr-hero-spec { @apply mt-1.5 flex items-center justify-center gap-2 text-[13px] text-white/85 sm:text-base; }
+
+  .wr-aside {
+    @apply flex flex-col items-center justify-center rounded-3xl border border-hairline
+           bg-white px-6 py-7 text-center;
+  }
+  .wr-aside img { @apply w-full max-w-[19rem] select-none; }
+  .wr-aside-text { @apply mt-4 max-w-xs text-[15px] leading-relaxed text-ink-600 sm:text-[18px]; }
+
+  /* One card per open session, so a patient finds their own column. */
+  .wr-cards {
+    @apply grid grid-cols-1 gap-4 sm:grid-cols-2;
+    /* Auto-fit, not a fixed four: a clinic with five open sessions should get
+       five columns rather than four plus an orphan on a second row. */
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  }
+  .wr-card { @apply flex flex-col rounded-2xl border border-hairline bg-white p-4 sm:p-5; }
+  .wr-card-room { color: var(--wr); @apply text-[12px] font-bold uppercase tracking-[0.12em] sm:text-[13px]; }
+  .wr-card-doc { @apply mt-2 truncate text-[15px] font-bold text-ink-900 sm:text-[17px]; }
+  .wr-card-spec { @apply mt-0.5 truncate text-[12px] text-ink-500 sm:text-[13px]; }
+  .wr-card-label { color: var(--wr); @apply text-[10.5px] font-bold uppercase tracking-[0.14em]; }
+  /* Every room's token is the same size and big enough to read across the
+     room. Demoting the other doctors to small print was the whole problem. */
+  .wr-card-token {
+    color: var(--wr);
+    @apply mt-1 font-extrabold leading-none tracking-tight tabular;
+    font-size: clamp(2.25rem, 3.4vw, 3.25rem);
+  }
+  .wr-card-idle { @apply mt-1 text-[26px] font-bold leading-none text-ink-300 sm:text-[32px]; }
+  .wr-chips { @apply mt-2 flex flex-wrap gap-1.5; }
+  /* Up-next tokens are read from a seat, not from the desk: 12px was too small
+     for the one list a waiting patient actually scans for their number. */
+  .wr-chip {
+    background: var(--wr-bg);
+    color: var(--wr);
+    @apply rounded-lg px-2.5 py-1 text-[16px] font-extrabold tabular sm:text-[18px];
+  }
+  .wr-chip-lg { @apply rounded-lg px-3.5 py-1.5 text-[22px] sm:text-[26px]; }
+  /* A called room is ringed, never enlarged: attention without demoting the
+     other rooms to a smaller type size. */
+  .wr-card-called {
+    border-color: var(--wr);
+    box-shadow: 0 0 0 2px var(--wr), 0 8px 24px -12px color-mix(in srgb, var(--wr) 45%, transparent);
+  }
+  .wr-call-pill {
+    background: var(--wr);
+    @apply inline-flex items-center rounded-full px-2.5 py-1 text-[10.5px] font-bold
+           uppercase tracking-wide text-white;
+  }
+  .wr-cta {
+    @apply inline-flex shrink-0 items-center gap-2 rounded-xl border border-brand-200
+           bg-brand-50 px-3 py-2 text-[12px] font-bold text-brand-700 transition
+           hover:bg-brand-100 sm:px-4 sm:text-[13px];
+  }
+  .wr-rule { @apply my-3 border-t border-hairline; }
+  .wr-card-foot { @apply mt-auto border-t border-hairline pt-2.5 text-[12px] text-ink-600 sm:text-[13px]; }
+
+  /* Room accents, as variables so the children inherit and Tailwind cannot
+     purge a colour it never sees written as a class. */
+  .wr-green  { --wr: #0E8A62; --wr-bg: #E9F7F1; }
+  .wr-blue   { --wr: #2563EB; --wr-bg: #EAF1FE; }
+  .wr-violet { --wr: #7C3AED; --wr-bg: #F2EDFE; }
+  .wr-orange { --wr: #EA7317; --wr-bg: #FDF0E6; }
+  .wr-slate  { --wr: #475569; --wr-bg: #F1F5F9; }
+
+  .wr-empty {
+    @apply flex flex-col items-center justify-center rounded-3xl border border-dashed
+           border-hairline bg-canvas px-6 py-12 text-center;
+    min-height: 15rem;
+  }
+  .wr-foot {
+    @apply mt-6 flex flex-wrap items-center justify-between gap-4 border-t
+           border-hairline pt-5 text-[13px] text-ink-600 sm:text-[14px];
+  }
+  .wr-foot-note {
+    @apply inline-flex items-center gap-2 rounded-xl bg-brand-50 px-4 py-2.5
+           font-medium text-brand-700;
+  }
+  .wr-btn {
+    @apply rounded-lg border border-hairline px-2.5 py-1.5 text-[11px] font-medium
+           text-ink-500 transition hover:border-ink-300 hover:text-ink-900;
+  }
+
+  /* The console is a dense staff tool and its 9px stat labels match the
+     reference. A patient reading their own position on a phone is a different
+     reader — give those labels back their legibility. */
+  .patient-view .stat-label { font-size: 11px; letter-spacing: 0.04em; }
+  .patient-view .stat-hint  { font-size: 11px; }
+}
+
+@layer utilities {
+  .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { @apply rounded-full bg-slate-300; }
+  .scrollbar-thin::-webkit-scrollbar-track { @apply bg-transparent; }
+  .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .text-balance { text-wrap: balance; }
+}
+
+/* ---------------------------------------------------------- animations */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes qp-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.rise { animation: qp-rise 0.22s ease-out both; }
+
+@keyframes qp-call-flash {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0); }
+  50% { box-shadow: 0 0 0 8px rgba(45, 212, 191, 0.22); }
+}
+.call-flash { animation: qp-call-flash 1.8s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .call-flash { animation: none; box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.35); }
+}
+
+/* Print: reports should print clean, without chrome */
+@media print {
+  .sidebar, .nav-drawer, .nav-overlay, .bottom-tabs, .no-print, .btn, .act { display: none !important; }
+  .main-col { padding-left: 0 !important; }
+  .card { box-shadow: none !important; border-color: #cbd5e1 !important; }
+  body { background: #fff; }
+}

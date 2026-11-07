@@ -1,0 +1,40 @@
+{
+  "name": "devtest",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DEVTEST \u2014 QueuePilot rebuilt without sign-in, authentication or landing page. One role per port. Never deploy.",
+  "type": "module",
+  "scripts": {
+    "dev": "node tools/serve-role.mjs --port 8080",
+    "fleet": "node tools/fleet.mjs",
+    "p8080": "node tools/serve-role.mjs --port 8080",
+    "p8081": "node tools/serve-role.mjs --port 8081",
+    "p8082": "node tools/serve-role.mjs --port 8082",
+    "p8083": "node tools/serve-role.mjs --port 8083",
+    "p8084": "node tools/serve-role.mjs --port 8084",
+    "css": "tailwindcss -c resources/tailwind/tailwind.config.js -i resources/css/app.css -o public/assets/build/app.css --minify",
+    "css:watch": "tailwindcss -c resources/tailwind/tailwind.config.js -i resources/css/app.css -o public/assets/build/app.css --watch",
+    "migrate": "node tools/php.mjs tools/migrate.php",
+    "seed": "node tools/php.mjs tools/seed.php",
+    "fresh": "rm -f storage/db/queuepilot.sqlite* && npm run migrate && npm run seed",
+    "worker": "node tools/php.mjs tools/queue-worker.php",
+    "test": "node tools/php.mjs tests/run.php",
+    "build": "npm run css && node tools/php.mjs tools/healthcheck.php",
+    "health": "node tools/php.mjs tools/healthcheck.php",
+    "lint": "node tools/lint.mjs",
+    "icons": "node tools/gen-icons.mjs",
+    "worker:loop": "node tools/php.mjs tools/queue-worker.php --loop 30",
+    "security": "node tools/security-check.mjs",
+    "security:strict": "node tools/security-check.mjs --strict"
+  },
+  "devDependencies": {
+    "qrcode-generator": "^1.4.4",
+    "sharp": "^0.35.5",
+    "tailwindcss": "3.4.17"
+  },
+  "dependencies": {
+    "@php-wasm/node": "3.1.62",
+    "@php-wasm/node-8-3": "3.1.62",
+    "@php-wasm/universal": "3.1.62"
+  }
+}

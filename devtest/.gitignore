@@ -1,0 +1,30 @@
+# runtime state — never commit a database, log or session file
+storage/db/*.sqlite
+storage/db/*.sqlite-wal
+storage/db/*.sqlite-shm
+storage/logs/*.log
+storage/sessions/sess_*
+# Generated backups and the restore-drill record. The tool and the procedure
+# are versioned; the dumps themselves are runtime artifacts and may contain
+# patient data, so they never belong in Git.
+storage/backups/
+
+# dependencies and build tooling
+node_modules/
+.arena/
+
+# local environment
+.env
+.env.local
+
+# ---------------------------------------------------------------------------
+# DEVTEST only
+# ---------------------------------------------------------------------------
+# Per-port session directories (one cookie + path per port; cookies are scoped
+# by host, not by port, so five ports cannot share one session).
+storage/sessions/[0-9]*/
+storage/sessions/cli/
+# node_modules may be a symlink to ../queuepilot/node_modules. The inherited
+# `node_modules/` rule matches directories only and would let the symlink be
+# committed as a dangling link on a fresh clone. No trailing slash catches both.
+node_modules

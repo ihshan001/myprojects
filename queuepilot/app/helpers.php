@@ -30,7 +30,17 @@ if (!function_exists('url')) {
 }
 
 if (!function_exists('asset')) {
-    function asset(string $path): string { return '/assets/' . ltrim($path, '/'); }
+    function asset(string $path): string
+    {
+        $path = ltrim($path, '/');
+        $url = '/assets/' . $path;
+        static $hashes = [];
+        if (!array_key_exists($path, $hashes)) {
+            $file = QP_ROOT . '/public/assets/' . $path;
+            $hashes[$path] = is_file($file) ? substr(md5_file($file), 0, 10) : null;
+        }
+        return $hashes[$path] !== null ? $url . '?v=' . $hashes[$path] : $url;
+    }
 }
 
 if (!function_exists('redirect')) {
@@ -74,9 +84,13 @@ if (!function_exists('t')) {
 }
 
 if (!function_exists('view')) {
-    function view(string $template, array $data = []): void
+    function view(string $template, array $data = [], bool $asLayout = true): void
     {
-        echo View::render($template, $data);
+        // The third argument must reach View::render. Nine callers pass `false`
+        // because their view is already a complete document; dropping it wrapped
+        // them in the console layout anyway, producing two <html> tags. Browsers
+        // keep the first, so the page's own <html>/<body> classes were discarded.
+        echo View::render($template, $data, $asLayout);
     }
 }
 

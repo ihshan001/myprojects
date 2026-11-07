@@ -310,3 +310,346 @@
   .card { box-shadow: none !important; border-color: #cbd5e1 !important; }
   body { background: #fff; }
 }
+
+/* ===================================================================
+   QueuePilot brand surface — the public homepage only.
+
+   Brand idea: THE TOKEN. A clinic runs on a little numbered ticket, so the
+   ticket is the identity: perforated cards, mono numerals, a dotted queue
+   rail between sections. Warm paper instead of clinical white, deep teal
+   ink, and one gold signal colour used sparingly so it still means something.
+
+   Type: Fraunces (display, with its SOFT/WONK axes on) over Inter (UI), with
+   JetBrains Mono for anything that is a number. All self-hosted.
+
+   SCALE KNOB: .lp-root sets the root to 90%, and every size below is in rem,
+   so the whole page renders at the proportions of a browser at 90% zoom while
+   the browser itself stays at 100%. Change one number to retune the page.
+   Breakpoints stay in px, so responsive behaviour is unaffected.
+   =================================================================== */
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 400; font-display: swap; src: url('/assets/fonts/inter-400.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 500; font-display: swap; src: url('/assets/fonts/inter-500.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 600; font-display: swap; src: url('/assets/fonts/inter-600.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 700; font-display: swap; src: url('/assets/fonts/inter-700.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 800; font-display: swap; src: url('/assets/fonts/inter-800.woff2') format('woff2'); }
+@font-face {
+  font-family: 'Fraunces'; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url('/assets/fonts/fraunces-var.woff2') format('woff2-variations');
+}
+@font-face {
+  font-family: 'JetBrains Mono'; font-style: normal; font-weight: 100 800; font-display: swap;
+  src: url('/assets/fonts/jetbrains-mono-var.woff2') format('woff2-variations');
+}
+
+.lp-root { font-size: 90%; }
+
+@layer components {
+  .lp {
+    --lp-ink:      #08211E;
+    --lp-body:     #46605B;
+    --lp-muted:    #7A908B;
+    --lp-teal:     #0F766E;
+    --lp-deep:     #0B4F49;
+    --lp-deeper:   #06322E;
+    --lp-sand:     #C98A1E;
+    --lp-sand-lit: #F6E7C8;
+    --lp-paper:    #FBFAF7;
+    --lp-mist:     #EFF5F2;
+    --lp-line:     #E2E9E5;
+
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'Noto Sans Sinhala', 'Noto Sans Tamil', sans-serif;
+    background-color: var(--lp-paper);
+    color: var(--lp-body);
+    @apply antialiased;
+  }
+  .lp-wrap { @apply mx-auto w-full px-5 sm:px-7; max-width: 73.75rem; }
+
+  .lp-display {
+    font-family: 'Fraunces', ui-serif, Georgia, serif;
+    font-variation-settings: 'SOFT' 40, 'WONK' 1, 'opsz' 96;
+    letter-spacing: -0.02em;
+  }
+  .lp-mono {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variation-settings: 'wght' 600;
+    font-feature-settings: 'tnum' 1;
+  }
+
+  .lp-panel {
+    @apply rounded-[1.75rem] border bg-white;
+    border-color: var(--lp-line);
+    box-shadow: 0 1px 2px rgba(8,33,30,.03), 0 1.5rem 3rem -1.75rem rgba(8,33,30,.14);
+  }
+  .lp-wash { background-image: linear-gradient(180deg, #EAF3F0 0%, var(--lp-paper) 46%, var(--lp-paper) 100%); }
+
+  .lp-h1 { @apply lp-display text-[2.15rem] font-semibold leading-[1.03] sm:text-[2.9rem] lg:text-[3.35rem]; color: var(--lp-ink); }
+  .lp-h2 { @apply lp-display text-[1.7rem] font-semibold leading-[1.12] sm:text-[2.15rem]; color: var(--lp-ink); }
+  .lp-h3 { @apply text-[1.05rem] font-bold leading-snug tracking-[-0.015em] sm:text-[1.2rem]; color: var(--lp-ink); }
+  .lp-lead { @apply text-[0.9375rem] leading-relaxed sm:text-[1rem]; color: var(--lp-body); }
+  .lp-teal { color: var(--lp-teal); }
+
+  /* Section eyebrow: a mono index and a rule, like a docket header. */
+  .lp-eyebrow {
+    @apply lp-mono inline-flex items-center gap-2.5 text-[0.6875rem] uppercase;
+    letter-spacing: .2em; color: var(--lp-teal);
+  }
+  .lp-eyebrow::before {
+    content: ""; @apply h-px w-8; background-color: var(--lp-sand);
+  }
+
+  .lp-badge {
+    @apply inline-flex items-center gap-2 rounded-full border bg-white px-3 py-1.5 text-[0.71875rem] font-semibold;
+    border-color: var(--lp-line); color: var(--lp-deep);
+  }
+  .lp-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-[0.84375rem] font-bold text-white;
+    background-image: linear-gradient(100deg, #0F766E, #06322E);
+    box-shadow: 0 .5rem 1.25rem -.625rem rgba(11,79,73,.7);
+    transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
+  }
+  .lp-btn:hover { transform: translateY(-1px); filter: saturate(1.1); box-shadow: 0 .75rem 1.5rem -.625rem rgba(11,79,73,.75); }
+  .lp-btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border bg-white px-5 py-3 text-[0.84375rem] font-bold;
+    border-color: var(--lp-line); color: var(--lp-ink);
+    transition: transform .18s ease, background-color .18s ease;
+  }
+  .lp-btn-ghost:hover { transform: translateY(-1px); background-color: var(--lp-mist); }
+  .lp-ico { @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-xl; background-color: var(--lp-mist); color: var(--lp-teal); }
+  .lp-check { @apply flex items-start gap-2.5 text-[0.8125rem]; color: var(--lp-body); }
+  .lp-stat { @apply rounded-2xl border bg-white px-4 py-3.5; border-color: var(--lp-line); }
+  .lp-num { @apply lp-mono font-bold tabular; color: var(--lp-ink); letter-spacing: -0.02em; }
+
+  /* The queue rail: the product's own motif, used to separate sections. */
+  .lp-rail { @apply relative h-px w-full; background-image: repeating-linear-gradient(90deg, var(--lp-line) 0 .375rem, transparent .375rem .75rem); }
+  .lp-rail::after {
+    content: ""; @apply absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full;
+    background-color: var(--lp-sand);
+  }
+
+  .lp-hero-photo {
+    @apply pointer-events-none absolute inset-y-0 right-0 hidden w-[62%] bg-cover bg-right bg-no-repeat lg:block;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0%, rgba(0,0,0,.3) 28%, #000 64%);
+    mask-image: linear-gradient(90deg, transparent 0%, rgba(0,0,0,.3) 28%, #000 64%);
+  }
+  .lp-float {
+    @apply rounded-2xl border;
+    border-color: var(--lp-line);
+    background-color: rgba(255,255,255,.94);
+    backdrop-filter: blur(8px);
+    box-shadow: 0 1px 2px rgba(8,33,30,.04), 0 1.25rem 2.5rem -1.25rem rgba(8,33,30,.22);
+  }
+
+  /* The signature object: a real clinic token, perforated and torn. */
+  .lp-ticket { @apply relative rounded-xl border bg-white; border-color: var(--lp-line); }
+  .lp-ticket-tear { @apply relative; border-top: 1px dashed var(--lp-line); }
+  .lp-ticket-tear::before, .lp-ticket-tear::after {
+    content: ""; @apply absolute top-0 h-2.5 w-2.5 -translate-y-1/2 rounded-full;
+    background-color: #fff; border: 1px solid var(--lp-line);
+  }
+  .lp-ticket-tear::before { left: -0.3125rem; }
+  .lp-ticket-tear::after  { right: -0.3125rem; }
+
+  .lp-step-num {
+    @apply lp-mono absolute -top-3 left-4 flex h-8 w-8 items-center justify-center rounded-full text-[0.6875rem] font-bold text-white;
+    background-image: linear-gradient(140deg, #0F766E, #06322E);
+    box-shadow: 0 0 0 .25rem var(--lp-paper);
+  }
+  .lp-plan { @apply relative flex flex-col rounded-2xl border bg-white p-5; border-color: var(--lp-line); transition: transform .2s ease, box-shadow .2s ease; }
+  .lp-plan:hover { transform: translateY(-2px); box-shadow: 0 1.25rem 2.5rem -1.5rem rgba(8,33,30,.25); }
+  .lp-plan-featured { border-color: var(--lp-teal); box-shadow: 0 0 0 1px var(--lp-teal), 0 1.5rem 3rem -1.75rem rgba(11,79,73,.35); }
+  .lp-quote {
+    @apply relative overflow-hidden rounded-[1.375rem] p-6 text-white;
+    background-image: linear-gradient(155deg, #0B4F49, #06322E);
+  }
+  /* A faint token grid, so the dark card is branded rather than merely dark. */
+  .lp-quote::before {
+    content: ""; @apply pointer-events-none absolute inset-0 opacity-[0.07];
+    background-image: radial-gradient(circle at 1px 1px, #fff 1px, transparent 0);
+    background-size: 1.125rem 1.125rem;
+  }
+  .lp-nav-link { @apply relative text-[0.8125rem] font-semibold; color: var(--lp-body); transition: color .18s ease; }
+  .lp-nav-link::after {
+    content: ""; @apply absolute -bottom-1.5 left-0 h-px w-full origin-left scale-x-0;
+    background-color: var(--lp-sand); transition: transform .22s ease;
+  }
+  .lp-nav-link:hover { color: var(--lp-ink); }
+  .lp-nav-link:hover::after { @apply scale-x-100; }
+
+  .lp-phone {
+    @apply relative mx-auto w-[10.5rem] rounded-[1.625rem] border-[0.375rem] bg-white;
+    border-color: var(--lp-ink);
+    box-shadow: 0 1.125rem 2.5rem -1.125rem rgba(8,33,30,.5);
+  }
+  .lp-phone::before { content: ""; @apply absolute left-1/2 top-1.5 h-1.5 w-14 -translate-x-1/2 rounded-full; background-color: var(--lp-ink); }
+
+  .lp-header { @apply sticky top-0 z-40 border-b; border-color: transparent; background-color: rgba(251,250,247,.8); backdrop-filter: blur(10px); transition: box-shadow .25s ease, border-color .25s ease, background-color .25s ease; }
+  .lp-header.is-stuck { border-color: var(--lp-line); background-color: rgba(251,250,247,.94); box-shadow: 0 .5rem 1.5rem -1rem rgba(8,33,30,.3); }
+  .lp-progress { @apply absolute inset-x-0 bottom-0 h-0.5 origin-left; background-image: linear-gradient(90deg, var(--lp-teal), var(--lp-sand)); transform: scaleX(var(--lp-progress, 0)); }
+
+  .lp-wordmark { @apply lp-display font-semibold; color: var(--lp-ink); letter-spacing: -0.03em; }
+
+  /* A gold stroke under the promise — painted as a background so it sits
+     behind the glyphs without a z-index fight. */
+  .lp-underline {
+    background-image: linear-gradient(90deg, rgba(224,166,60,.35), rgba(224,166,60,.85));
+    background-repeat: no-repeat;
+    background-size: 100% .09em;
+    background-position: 0 96%;
+  }
+  /* --- section rhythm -------------------------------------------------
+     Six identical white cards gave every section the same volume. These are
+     the shared primitives that let a section be a band, an open editorial
+     column, or a card — so the page has loud and quiet moments. */
+  .lp-band { @apply w-full py-14 sm:py-20; }
+  .lp-band--paper { background-color: var(--lp-paper); }
+  .lp-band--mist  { background-color: var(--lp-mist); }
+  .lp-band--dark  { background-color: var(--lp-deeper); color: #C6DBD5; }
+  .lp-band--dark .lp-h2, .lp-band--dark .lp-h3 { color: #fff; }
+  .lp-band--dark .lp-eyebrow { color: #7FD8C7; }
+  .lp-band--dark .lp-lead { color: #A9C6BF; }
+
+  .lp-hair { border-top: 1px solid var(--lp-line); }
+  .lp-divide > * + * { border-top: 1px solid var(--lp-line); }
+  .lp-divide-dark > * + * { border-top: 1px solid rgba(255,255,255,.12); }
+
+  /* --- capability rail -------------------------------------------------
+     One instrument panel, not five floating cards: a single hairline frame
+     with the cells divided inside it. Vertical dividers only where there is
+     room for them (lg); below that the cells sit in a two-up grid. */
+  .lp-caprail {
+    @apply grid grid-cols-2 overflow-hidden rounded-2xl border bg-white;
+    border-color: var(--lp-line);
+    box-shadow: 0 1px 2px rgba(8,33,30,.03), 0 1.25rem 2.5rem -1.75rem rgba(8,33,30,.16);
+  }
+  @screen lg { .lp-caprail { @apply grid-cols-5; } }
+  .lp-cap {
+    @apply relative flex flex-col items-center px-4 py-6 text-center;
+    transition: background-color .2s ease;
+  }
+  .lp-cap:hover { background-color: var(--lp-mist); }
+  /* Hairline grid. The row rule is full-bleed inside the frame so adjacent
+     cells join into one continuous line; an inset would leave a gap between
+     the two columns. At lg the rules turn vertical and are trimmed short. */
+  .lp-cap::after {
+    content: ""; @apply absolute bottom-0 left-0 right-0 h-px;
+    background-color: var(--lp-line);
+  }
+  .lp-cap:last-child::after { display: none; }
+  @screen lg {
+    .lp-cap::after { @apply bottom-4 left-auto right-0 top-4 h-auto w-px; }
+    .lp-cap:last-child::after { display: none; }
+  }
+  .lp-cap-ico {
+    @apply mb-3 flex h-11 w-11 items-center justify-center rounded-full;
+    background-image: linear-gradient(150deg, #FFFFFF, var(--lp-mist));
+    border: 1px solid var(--lp-line);
+    color: var(--lp-teal);
+    box-shadow: 0 .25rem .625rem -.375rem rgba(11,79,73,.4);
+  }
+  .lp-cap-label { @apply text-[0.8125rem] font-bold; color: var(--lp-ink); }
+  .lp-cap-note { @apply mt-1.5 text-[0.6875rem] leading-snug; color: var(--lp-muted); }
+
+  /* A centred rule either side of the strip heading. */
+  .lp-kicker { @apply flex items-center justify-center gap-3; }
+  .lp-kicker::before, .lp-kicker::after {
+    content: ""; @apply h-px w-8 shrink-0; background-color: var(--lp-sand);
+  }
+
+  /* Sparklines must keep the viewBox ratio, or the browser letterboxes the
+     plot and it floats inset instead of filling the card. */
+  .lp-spark { @apply block w-full; aspect-ratio: 260 / 70; }
+
+  /* Doctor rows: one hairline between rows, never after the last. */
+  .lp-doclist > li + li { border-top: 1px solid #F1F5F4; }
+
+  /* --- one visit, two sides of the counter ---------------------------
+     A swimlane. The point is simultaneity: the same token, kept in step on
+     the desk and in the patient's hand. The rail between them is the token. */
+  .lp-duet { @apply relative; }
+  .lp-duet-row { @apply relative grid gap-4 pb-9; }
+  .lp-duet-row:last-child { @apply pb-0; }
+  .lp-duet-node { @apply flex items-center gap-2.5; }
+  .lp-duet-dot {
+    @apply lp-mono flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[0.625rem] font-bold text-white;
+    background-image: linear-gradient(140deg, #0F766E, #06322E);
+  }
+  .lp-duet-moment { @apply text-[0.8125rem] font-bold; color: var(--lp-ink); }
+  .lp-duet-side { @apply rounded-xl px-4 py-3.5; }
+  .lp-duet-side--desk { @apply bg-white; border: 1px solid var(--lp-line); }
+  .lp-duet-side--hand { background-color: rgba(255,255,255,.7); border: 1px dashed #C9D8D3; }
+  .lp-duet-label {
+    @apply lp-mono mb-1.5 block text-[0.5625rem] uppercase; letter-spacing: .16em; color: var(--lp-muted);
+  }
+  .lp-duet-text { @apply text-[0.8125rem] leading-relaxed; }
+  @screen md {
+    .lp-duet-row { grid-template-columns: minmax(0,1fr) 8.5rem minmax(0,1fr); @apply items-start gap-5; }
+    .lp-duet-node { @apply flex-col justify-start gap-2 pt-3.5 text-center; }
+    /* The dotted token rail runs down the centre column, behind the nodes. */
+    .lp-duet-row::before {
+      content: ""; @apply absolute w-px; left: 50%; top: 2.75rem; bottom: -.25rem;
+      background-image: repeating-linear-gradient(180deg, var(--lp-line) 0 .25rem, transparent .25rem .5rem);
+    }
+    .lp-duet-row:last-child::before { display: none; }
+    .lp-duet-head { @apply grid gap-5 pb-4; grid-template-columns: minmax(0,1fr) 8.5rem minmax(0,1fr); }
+  }
+
+  /* --- annotated evidence --------------------------------------------
+     Numbers on the real dashboard, keyed to the decisions behind them. */
+  .lp-mark {
+    @apply lp-mono ml-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[0.5625rem] font-bold text-white align-middle;
+    background-color: var(--lp-teal);
+  }
+  .lp-decision { @apply flex gap-3.5 py-4; }
+  .lp-decision-num {
+    @apply lp-mono flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[0.625rem] font-bold;
+    background-color: rgba(255,255,255,.12); color: #7FD8C7;
+  }
+
+  /* Tap targets: 44px is the floor on a touch screen, not a suggestion. */
+  /* 44 physical px at the 90% root: 44 / 0.9 / 16 = 3.0556rem. A plain
+     2.75rem would render 39.6px and quietly miss the touch-target floor. */
+  .lp-tap { @apply inline-flex items-center; min-height: 3.0556rem; }
+  .lp-tap-btn { @apply flex items-center justify-center; height: 3.0556rem; width: 3.0556rem; }
+
+  .lp-footer { background-color: var(--lp-deeper); color: #CFE0DB; }
+  .lp-footer-link { @apply text-[0.75rem] font-medium; color: #9FBDB6; transition: color .18s ease; }
+  .lp-footer-link:hover { color: #fff; }
+}
+
+/* ---- scroll reveal -------------------------------------------------
+   Armed by JS only. With scripting off, or before the observer runs, every
+   section is fully visible — the animation is an enhancement, never a gate. */
+.lp-reveal-ready [data-reveal] {
+  opacity: 0; transform: translateY(1.5rem);
+  transition: opacity .55s cubic-bezier(.22,1,.36,1), transform .55s cubic-bezier(.22,1,.36,1);
+}
+.lp-reveal-ready [data-reveal].is-in {
+  opacity: 1; transform: none;
+  transition: opacity .75s cubic-bezier(.22,1,.36,1), transform .75s cubic-bezier(.22,1,.36,1);
+  transition-delay: var(--reveal-delay, 0ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  .lp-reveal-ready [data-reveal],
+  .lp-reveal-ready [data-reveal].is-in { opacity: 1 !important; transform: none !important; transition: none !important; }
+  .lp-btn:hover, .lp-btn-ghost:hover, .lp-plan:hover { transform: none; }
+  html { scroll-behavior: auto; }
+}
+
+/* Staggered children: one observer entry animates a whole row in sequence. */
+.lp-reveal-ready [data-reveal-group] > * {
+  opacity: 0; transform: translateY(1rem);
+  transition: opacity .45s cubic-bezier(.22,1,.36,1), transform .45s cubic-bezier(.22,1,.36,1);
+}
+.lp-reveal-ready [data-reveal-group].is-in > * {
+  opacity: 1; transform: none;
+  transition: opacity .6s cubic-bezier(.22,1,.36,1), transform .6s cubic-bezier(.22,1,.36,1);
+}
+.lp-reveal-ready [data-reveal-group].is-in > *:nth-child(1) { transition-delay: 40ms; }
+.lp-reveal-ready [data-reveal-group].is-in > *:nth-child(2) { transition-delay: 110ms; }
+.lp-reveal-ready [data-reveal-group].is-in > *:nth-child(3) { transition-delay: 180ms; }
+.lp-reveal-ready [data-reveal-group].is-in > *:nth-child(4) { transition-delay: 250ms; }
+.lp-reveal-ready [data-reveal-group].is-in > *:nth-child(5) { transition-delay: 320ms; }
+@media (prefers-reduced-motion: reduce) {
+  .lp-reveal-ready [data-reveal-group] > *,
+  .lp-reveal-ready [data-reveal-group].is-in > * { opacity: 1 !important; transform: none !important; transition: none !important; }
+}

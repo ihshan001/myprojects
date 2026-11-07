@@ -1,0 +1,60 @@
+{
+  "_comment": [
+    "DEVTEST role map. One port = one role = one signed-in identity.",
+    "There is no sign-in screen anywhere in this build: the port decides who you are.",
+    "Edit a row and restart that port to change identity.",
+    "Each port has its own live preview process; the in-app role switcher links between them."
+  ],
+  "ports": [
+    {
+      "port": 8080,
+      "role": "clinic_admin",
+      "label": "Clinic Owner",
+      "short": "Owner",
+      "email": "admin@serenity.lk",
+      "clinic": "Serenity OPD & Family Clinic",
+      "home": "/app",
+      "sees": "Everything in the clinic: staff, settings, billing, audit, all doctors' queues"
+    },
+    {
+      "port": 8081,
+      "role": "receptionist",
+      "label": "Receptionist",
+      "short": "Reception",
+      "email": "reception@serenity.lk",
+      "clinic": "Serenity OPD & Family Clinic",
+      "home": "/app",
+      "sees": "Front desk: issue tokens, call, complete, patients, appointments, reports. Cannot set clinical priority"
+    },
+    {
+      "port": 8082,
+      "role": "doctor",
+      "label": "Doctor",
+      "short": "Doctor",
+      "email": "amara@serenity.lk",
+      "clinic": "Serenity OPD & Family Clinic",
+      "home": "/app",
+      "sees": "Own queue only: start session, call, complete, set priority with a reason. No token issuing, no other doctors' patients"
+    },
+    {
+      "port": 8083,
+      "role": "super_admin",
+      "label": "Platform Admin",
+      "short": "Platform",
+      "email": "owner@queuepilot.app",
+      "clinic": null,
+      "home": "/admin",
+      "sees": "All tenants: clinics, plans, feature gates, payment verification, groups, support queue"
+    },
+    {
+      "port": 8084,
+      "role": "clinic_admin",
+      "label": "Clinic Owner (2nd clinic)",
+      "short": "Owner · clinic 2",
+      "email": "admin@lakeview.lk",
+      "clinic": "Lakeview Medical Centre",
+      "home": "/app",
+      "sees": "Same role as 8080 but a different tenant — proves isolation: never sees Serenity's patients"
+    }
+  ]
+}
