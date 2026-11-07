@@ -512,27 +512,61 @@
   .lp-divide > * + * { border-top: 1px solid var(--lp-line); }
   .lp-divide-dark > * + * { border-top: 1px solid rgba(255,255,255,.12); }
 
-  /* The queue rail as a layout: a connected flow, vertical on small screens
-     and horizontal from lg. No boxes — the line does the structuring. */
-  .lp-flow { @apply relative; }
-  .lp-flow-item { @apply relative pb-8 pl-12; }
-  .lp-flow-item:last-child { @apply pb-0; }
-  .lp-flow-item::before {
-    content: ""; @apply absolute w-px; left: .9375rem; top: 2.25rem; bottom: .25rem;
-    background-image: repeating-linear-gradient(180deg, var(--lp-line) 0 .25rem, transparent .25rem .5rem);
+  /* --- constraint ledger ---------------------------------------------
+     A specification docket, not a row of feature chips. Left: the condition a
+     clinic actually works under. Right: what the software does about it. */
+  .lp-ledger { @apply w-full; border-top: 1px solid var(--lp-line); }
+  .lp-ledger-row {
+    @apply grid gap-1.5 py-5; border-bottom: 1px solid var(--lp-line);
   }
-  .lp-flow-item:last-child::before { display: none; }
-  .lp-flow-node {
-    @apply lp-mono absolute left-0 top-0 flex h-8 w-8 items-center justify-center rounded-full text-[0.6875rem] font-bold text-white;
+  @screen md {
+    .lp-ledger-row { grid-template-columns: 2rem minmax(0,.9fr) minmax(0,1.35fr); @apply gap-6 py-6; }
+  }
+  .lp-ledger-idx { @apply lp-mono text-[0.6875rem]; color: var(--lp-sand); }
+  .lp-ledger-cond { @apply text-[0.9375rem] font-bold; color: var(--lp-ink); }
+  .lp-ledger-ans { @apply text-[0.84375rem] leading-relaxed; }
+
+  /* --- one visit, two sides of the counter ---------------------------
+     A swimlane. The point is simultaneity: the same token, kept in step on
+     the desk and in the patient's hand. The rail between them is the token. */
+  .lp-duet { @apply relative; }
+  .lp-duet-row { @apply relative grid gap-4 pb-9; }
+  .lp-duet-row:last-child { @apply pb-0; }
+  .lp-duet-node { @apply flex items-center gap-2.5; }
+  .lp-duet-dot {
+    @apply lp-mono flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[0.625rem] font-bold text-white;
     background-image: linear-gradient(140deg, #0F766E, #06322E);
   }
-  @screen lg {
-    .lp-flow { @apply grid grid-cols-5 gap-5; }
-    .lp-flow-item { @apply pb-0 pl-0 pt-12; }
-    .lp-flow-item::before {
-    left: 2.5rem; right: -.75rem; top: .9375rem; bottom: auto; width: auto; height: 1px;
-      background-image: repeating-linear-gradient(90deg, var(--lp-line) 0 .25rem, transparent .25rem .5rem);
+  .lp-duet-moment { @apply text-[0.8125rem] font-bold; color: var(--lp-ink); }
+  .lp-duet-side { @apply rounded-xl px-4 py-3.5; }
+  .lp-duet-side--desk { @apply bg-white; border: 1px solid var(--lp-line); }
+  .lp-duet-side--hand { background-color: rgba(255,255,255,.7); border: 1px dashed #C9D8D3; }
+  .lp-duet-label {
+    @apply lp-mono mb-1.5 block text-[0.5625rem] uppercase; letter-spacing: .16em; color: var(--lp-muted);
+  }
+  .lp-duet-text { @apply text-[0.8125rem] leading-relaxed; }
+  @screen md {
+    .lp-duet-row { grid-template-columns: minmax(0,1fr) 8.5rem minmax(0,1fr); @apply items-start gap-5; }
+    .lp-duet-node { @apply flex-col justify-start gap-2 pt-3.5 text-center; }
+    /* The dotted token rail runs down the centre column, behind the nodes. */
+    .lp-duet-row::before {
+      content: ""; @apply absolute w-px; left: 50%; top: 2.75rem; bottom: -.25rem;
+      background-image: repeating-linear-gradient(180deg, var(--lp-line) 0 .25rem, transparent .25rem .5rem);
     }
+    .lp-duet-row:last-child::before { display: none; }
+    .lp-duet-head { @apply grid gap-5 pb-4; grid-template-columns: minmax(0,1fr) 8.5rem minmax(0,1fr); }
+  }
+
+  /* --- annotated evidence --------------------------------------------
+     Numbers on the real dashboard, keyed to the decisions behind them. */
+  .lp-mark {
+    @apply lp-mono ml-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[0.5625rem] font-bold text-white align-middle;
+    background-color: var(--lp-teal);
+  }
+  .lp-decision { @apply flex gap-3.5 py-4; }
+  .lp-decision-num {
+    @apply lp-mono flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[0.625rem] font-bold;
+    background-color: rgba(255,255,255,.12); color: #7FD8C7;
   }
 
   /* Tap targets: 44px is the floor on a touch screen, not a suggestion. */

@@ -119,12 +119,25 @@ $sparkline = static function (array $values, int $w = 260, int $h = 70): array {
 $series = array_values($daily);
 $chart = $sparkline($series);
 
-$capabilities = [
-    ['shield', 'Tokens, not names'],
-    ['card', 'Priced in LKR'],
-    ['megaphone', 'SMS & WhatsApp'],
-    ['wifi', 'Built for a 3G line'],
-    ['phone', 'No patient app'],
+// The conditions a Sri Lankan OPD actually works under, and the answer to
+// each. Every answer maps to behaviour verified in the code: the 30s stale
+// threshold in app.js, the token-only public surfaces, LKR plan rows, the
+// en/si/ta lang files, and the plan-gated notification channels.
+$conditions = [
+    ['The line drops mid-session', 'Every live surface marks itself stale after 30 seconds without data, rather than showing a queue that quietly stopped moving.'],
+    ['Nobody is installing an app', 'The token opens as a link in any browser. Nothing to download, nothing to keep updated.'],
+    ['The board is read across a room', 'Tokens and rooms only. No patient name reaches a public screen or a shared link.'],
+    ['The budget is in rupees', 'Plans are priced in LKR. No conversion, and no exchange rate appearing on an invoice.'],
+    ['The counter speaks three languages', 'The interface ships in Sinhala, Tamil and English.'],
+    ['A reminder has to reach a basic phone', 'SMS and WhatsApp notifications, with channel access following the plan.'],
+];
+// One visit, seen from both sides of the counter at the same moment.
+$visit = [
+    ['01', 'Arrive', 'Find the patient by phone number and issue the next token.', 'A link carrying the token. No app, no account.'],
+    ['02', 'Wait', 'The room’s queue, in order, on one board.', 'Their position, and a wait range instead of a false exact time.'],
+    ['03', 'Call', 'One tap calls the next token into a room.', 'The status changes and the room name appears.'],
+    ['04', 'Consult', 'Start, then finish. Priority applied where it is earned.', 'The same status, with no clinical detail on the link.'],
+    ['05', 'After', 'Wait and consult minutes land in the day’s report.', 'A reminder before the next appointment.'],
 ];
 $pains = [
     ['users', 'Crowded waiting rooms', 'Patients uncomfortable, staff overwhelmed.'],
@@ -137,19 +150,13 @@ $answers = [
     ['Honest ranges', 'Measured from your own consultation times, never a guess.'],
     ['Tokens, not names', 'No patient name on any public screen or link.'],
 ];
-$steps = [
-    ['01', 'qr', 'Check in', 'A phone number is enough. Token in seconds.'],
-    ['02', 'queue', 'Live queue', 'Right patient, right room, right order.'],
-    ['03', 'stethoscope', 'Consult', 'Call, start, finish. Priority where it is earned.'],
-    ['04', 'chart', 'Measure', 'Every visit records its wait and consult time.'],
-    ['05', 'bell', 'Follow up', 'Appointment reminders and next-day reports.'],
-];
-// Product principles, not a customer quote. There is no customer to quote yet,
-// so this carousel says what the software actually does instead.
-$principles = [
-    ['“We show a range, not a made-up number.”', 'How waits are estimated', 'Until there are enough of your own finished visits to measure, an estimate is labelled a rough guide.'],
-    ['“A public screen shows tokens and rooms. Never a name.”', 'Privacy by default', 'The board, the patient link and this page carry no patient name, phone number or diagnosis.'],
-    ['“The board keeps working when the line drops.”', 'Built for a real clinic', 'It shows last-known state and says so, instead of silently freezing or inventing a queue.'],
+// The decisions behind the marked numbers on the dashboard. This replaces a
+// carousel of unattributed "principles", which read like a testimonial and hid
+// two thirds of its content behind a click.
+$decisions = [
+    ['A count, not a forecast', 'Waiting is the number of entries actually in the queue right now. It is never smoothed, rounded up, or predicted.'],
+    ['Measured, or a dash', 'The average comes only from finished visits. Below five samples the tile shows a dash rather than a guess dressed as a number.'],
+    ['Rooms and tokens, never names', 'Nothing on a public surface identifies a patient. The names in this list are the clinicians, not the people waiting.'],
 ];
 $navLinks = [['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pricing'], ['#patient', 'Patient view']];
 
@@ -325,20 +332,28 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
   <!-- ============================================ what it is built for -->
   <?php /* Not a customer logo wall: there are no customers to name yet, so this
        row states capabilities the software actually has. */ ?>
-  <section data-reveal class="lp-band lp-band--paper !py-9">
-  <div class="lp-wrap">
-    <p class="text-center text-[0.75rem] font-bold text-slate-700">Built for the way Sri Lankan OPDs actually run</p>
-    <ul data-reveal-group class="mt-6 grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-3 lg:grid-cols-5">
-      <?php foreach ($capabilities as [$icon, $label]): ?>
-        <li class="flex items-center gap-2.5 last:col-span-2 last:justify-center sm:last:col-span-1 lg:justify-center">
-          <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-700">
-            <svg class="h-3.5 w-3.5" aria-hidden="true"><use href="#i-<?= e($icon) ?>"/></svg>
-          </span>
-          <span class="text-[0.75rem] font-bold text-slate-700"><?= e($label) ?></span>
-        </li>
-      <?php endforeach; ?>
-    </ul>
-  </div>
+  <section data-reveal class="lp-band lp-band--paper !py-12">
+    <div class="lp-wrap">
+      <div class="grid gap-8 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.6fr)] md:gap-12">
+        <div>
+          <span class="lp-eyebrow">Working conditions</span>
+          <h2 class="lp-h2 mt-3 !text-[1.6rem] sm:!text-[1.9rem]">Built for the room you actually have.</h2>
+          <p class="lp-lead mt-3">
+            Not the demo room. The one with a shared line, a full waiting area, and a
+            counter that has to keep moving.
+          </p>
+        </div>
+        <dl class="lp-ledger" data-reveal-group>
+          <?php foreach ($conditions as $i => [$cond, $ans]): ?>
+            <div class="lp-ledger-row">
+              <span class="lp-ledger-idx hidden md:block"><?= e(str_pad((string) ($i + 1), 2, '0', STR_PAD_LEFT)) ?></span>
+              <dt class="lp-ledger-cond"><?= e($cond) ?></dt>
+              <dd class="lp-ledger-ans"><?= e($ans) ?></dd>
+            </div>
+          <?php endforeach; ?>
+        </dl>
+      </div>
+    </div>
   </section>
 
   <!-- ================================================== the challenge -->
@@ -386,27 +401,39 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
   <!-- ==================================================== how it works -->
   <section id="how" data-reveal class="lp-band lp-band--mist scroll-mt-20">
     <div class="lp-wrap">
-     <div class="md:grid md:grid-cols-[minmax(0,0.85fr)_minmax(0,1fr)] md:gap-12 lg:block">
-      <div class="max-w-2xl md:sticky md:top-24 lg:static">
+      <div class="max-w-2xl">
         <span class="lp-eyebrow">03 &mdash; How it works</span>
-        <h2 class="lp-h2 mt-3">One queue. Every step. No shouting.</h2>
+        <h2 class="lp-h2 mt-3">One visit. Two sides of the counter.</h2>
         <p class="lp-lead mt-3">
-          From the first token to the end-of-day report &mdash; the same record follows the patient.
+          The same token, kept in step: what reception does, and what the patient
+          sees at that moment.
         </p>
       </div>
-      <ol data-reveal-group class="lp-flow mt-10 md:mt-0 lg:mt-10">
-        <?php foreach ($steps as [$n, $icon, $title, $body]): ?>
-          <li class="lp-flow-item">
-            <span class="lp-flow-node"><?= e($n) ?></span>
-            <div class="flex h-8 items-center gap-2.5">
-              <span class="lp-ico !h-8 !w-8"><svg class="h-4 w-4" aria-hidden="true"><use href="#i-<?= e($icon) ?>"/></svg></span>
-              <p class="text-[0.875rem] font-bold" style="color:var(--lp-ink)"><?= e($title) ?></p>
+
+      <div class="lp-duet-head mt-10 hidden md:grid">
+        <p class="lp-duet-label !mb-0">At the desk</p>
+        <span aria-hidden="true"></span>
+        <p class="lp-duet-label !mb-0">In their hand</p>
+      </div>
+
+      <ol class="lp-duet mt-6 md:mt-0" data-reveal-group>
+        <?php foreach ($visit as [$n, $moment, $desk, $hand]): ?>
+          <li class="lp-duet-row">
+            <div class="lp-duet-node order-1 md:order-2">
+              <span class="lp-duet-dot"><?= e($n) ?></span>
+              <span class="lp-duet-moment"><?= e($moment) ?></span>
             </div>
-            <p class="mt-2.5 text-[0.78125rem] leading-relaxed"><?= e($body) ?></p>
+            <div class="lp-duet-side lp-duet-side--desk order-2 md:order-1">
+              <span class="lp-duet-label md:hidden">At the desk</span>
+              <p class="lp-duet-text"><?= e($desk) ?></p>
+            </div>
+            <div class="lp-duet-side lp-duet-side--hand order-3">
+              <span class="lp-duet-label md:hidden">In their hand</span>
+              <p class="lp-duet-text"><?= e($hand) ?></p>
+            </div>
           </li>
         <?php endforeach; ?>
       </ol>
-     </div>
     </div>
   </section>
 
@@ -485,50 +512,16 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
   <!-- ============================================ principles + product -->
   <section data-reveal class="lp-band lp-band--dark">
     <div class="lp-wrap">
-      <div class="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] lg:gap-14">
-        <div>
-          <span class="lp-eyebrow">04 &mdash; Why it holds up</span>
-          <?php /* Principles, not a customer quote: there is no customer to quote
-               yet, so this says what the software actually does. */ ?>
-          <div class="mt-6" data-lp-carousel>
-            <?php foreach ($principles as $i => [$quote, $label, $body]): ?>
-              <div data-lp-slide="<?= $i ?>" <?= $i === 0 ? '' : 'hidden' ?>>
-                <p class="lp-display text-[1.6rem] font-semibold leading-[1.2] text-white sm:text-[1.95rem]"><?= e($quote) ?></p>
-                <p class="mt-5 text-[0.8125rem] font-bold" style="color:#7FD8C7"><?= e($label) ?></p>
-                <p class="mt-1.5 max-w-md text-[0.8125rem] leading-relaxed" style="color:#A9C6BF"><?= e($body) ?></p>
-              </div>
-            <?php endforeach; ?>
-            <div class="mt-7 flex items-center gap-3">
-              <button type="button" data-lp-prev aria-label="Previous principle"
-                      class="lp-tap-btn rounded-full bg-white/10 text-white transition hover:bg-white/20">
-                <svg class="h-4 w-4" aria-hidden="true"><use href="#i-arrow-left"/></svg>
-              </button>
-              <button type="button" data-lp-next aria-label="Next principle"
-                      class="lp-tap-btn rounded-full bg-white/10 text-white transition hover:bg-white/20">
-                <svg class="h-4 w-4" aria-hidden="true"><use href="#i-arrow-right"/></svg>
-              </button>
-            </div>
-          </div>
+      <div class="max-w-2xl">
+        <span class="lp-eyebrow">04 &mdash; Why it holds up</span>
+        <h2 class="lp-h2 mt-3">Nothing on this screen is decoration.</h2>
+        <p class="lp-lead mt-3">
+          Every figure is either measured or absent. These are the decisions behind
+          the three marked numbers.
+        </p>
+      </div>
 
-          <ul class="lp-divide-dark mt-9">
-            <?php foreach ([
-                ['monitor', 'Live dashboard', 'See your day as it happens.'],
-                ['megaphone', 'SMS, WhatsApp, email', 'Channel access follows your plan.'],
-                ['chart', 'Reports and exports', 'Waits, consults and no-shows, per doctor.'],
-            ] as [$icon, $title, $body]): ?>
-              <li class="flex items-start gap-3.5 py-4">
-                <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/10" style="color:#7FD8C7">
-                  <svg class="h-4 w-4" aria-hidden="true"><use href="#i-<?= e($icon) ?>"/></svg>
-                </span>
-                <div class="min-w-0">
-                  <p class="text-[0.84375rem] font-bold text-white"><?= e($title) ?></p>
-                  <p class="mt-0.5 text-[0.78125rem]" style="color:#A9C6BF"><?= e($body) ?></p>
-                </div>
-              </li>
-            <?php endforeach; ?>
-          </ul>
-        </div>
-
+      <div class="mt-10 grid gap-10 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:gap-14">
     <div class="lp-panel self-start px-5 py-6">
       <div class="flex items-center gap-2">
         <span class="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 text-[0.65625rem] font-bold text-brand-700">
@@ -537,9 +530,15 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
         <span class="text-[0.75rem] font-bold text-slate-800"><?= e($demoClinic['name'] ?? 'Demo clinic') ?></span>
       </div>
       <div class="mt-4 grid grid-cols-3 gap-3">
-        <?php foreach ([['Waiting', (string) $waitingNow], ['Avg wait', $avgWait !== null ? $avgWait . ' min' : '—'], ['Rooms open', (string) $roomsOpen]] as [$k, $v]): ?>
+        <?php foreach ([
+            ['Waiting', (string) $waitingNow, '1'],
+            ['Avg wait', $avgWait !== null ? $avgWait . ' min' : '—', '2'],
+            ['Rooms open', (string) $roomsOpen, ''],
+        ] as [$k, $v, $mk]): ?>
           <div class="rounded-xl bg-slate-50/80 px-3 py-2.5">
-            <p class="text-[0.625rem] font-semibold text-slate-500"><?= e($k) ?></p>
+            <p class="flex items-center text-[0.625rem] font-semibold text-slate-500">
+              <?= e($k) ?><?php if ($mk !== ''): ?><span class="lp-mark" aria-hidden="true"><?= e($mk) ?></span><?php endif; ?>
+            </p>
             <p class="lp-num mt-0.5 text-[1.125rem]"><?= e($v) ?></p>
           </div>
         <?php endforeach; ?>
@@ -572,7 +571,7 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
           </p>
         </div>
         <div>
-          <p class="text-[0.71875rem] font-bold text-slate-700">Waiting by doctor</p>
+          <p class="flex items-center text-[0.71875rem] font-bold text-slate-700">Waiting by doctor<span class="lp-mark" aria-hidden="true">3</span></p>
           <ul class="mt-2 space-y-2">
             <?php if ($byDoctor === []): ?>
               <li class="text-[0.71875rem] text-slate-400">No session open.</li>
@@ -587,6 +586,18 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
         </div>
       </div>
     </div>
+
+        <ol class="lp-divide-dark self-start">
+          <?php foreach ($decisions as $i => [$title, $body]): ?>
+            <li class="lp-decision">
+              <span class="lp-decision-num"><?= e((string) ($i + 1)) ?></span>
+              <div class="min-w-0">
+                <p class="text-[0.9375rem] font-bold text-white"><?= e($title) ?></p>
+                <p class="mt-1.5 text-[0.8125rem] leading-relaxed" style="color:#A9C6BF"><?= e($body) ?></p>
+              </div>
+            </li>
+          <?php endforeach; ?>
+        </ol>
       </div>
     </div>
   </section>

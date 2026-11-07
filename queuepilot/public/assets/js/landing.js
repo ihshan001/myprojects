@@ -85,28 +85,4 @@
     }, { threshold: 0.5 });
     Array.prototype.forEach.call(counters, function (el) { co.observe(el); });
   }
-
-  /* ---- principles carousel ------------------------------------------ */
-  var root = document.querySelector('[data-lp-carousel]');
-  if (!root) return;
-  var slides = Array.prototype.slice.call(root.querySelectorAll('[data-lp-slide]'));
-  if (slides.length < 2) return;
-
-  var index = 0;
-  function show(next) {
-    index = (next + slides.length) % slides.length;
-    slides.forEach(function (slide, i) {
-      if (i === index) slide.removeAttribute('hidden');
-      else slide.setAttribute('hidden', '');
-    });
-  }
-  var prev = root.querySelector('[data-lp-prev]');
-  var next = root.querySelector('[data-lp-next]');
-  if (prev) prev.addEventListener('click', function () { show(index - 1); });
-  if (next) next.addEventListener('click', function () { show(index + 1); });
-  root.addEventListener('keydown', function (e) {
-    if (e.key === 'ArrowLeft') show(index - 1);
-    else if (e.key === 'ArrowRight') show(index + 1);
-  });
-  show(0);
 })();

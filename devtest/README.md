@@ -150,6 +150,27 @@ grid. Tap targets are `3.0556rem`, which is **44 physical px at the 90% root** �
 a naive `2.75rem` renders 39.6px and silently misses the floor. Verified at 375,
 426 and 768: no horizontal overflow, 44px minimum target.
 
+### Three sections, rethought
+
+The capability chip-row, the five-step process and the quote carousel were the
+three weakest patterns on the page. Each was replaced with a different idea
+rather than a restyle.
+
+| Was | Now | Why |
+| --- | --- | --- |
+| Five icon chips ("Priced in LKR") | **Constraint ledger** — `.lp-ledger` | A chip asserts a feature. A ledger names the condition a clinic works under and the answer to it, set as a specification docket: mono index, hairline rules, condition left, response right. It matches the token/docket identity and says more. |
+| Five step boxes | **Swimlane** — `.lp-duet` | The old flow described our internal process. The product's actual value is *simultaneity*, so each row now shows one moment from both sides: "At the desk" (solid) and "In their hand" (dashed), with the token rail down the centre. |
+| Quote carousel + three feature rows | **Annotated evidence** — `.lp-mark` / `.lp-decision` | An unattributed quotation reads like a fake testimonial and hid two thirds of itself behind a click. Now the real dashboard carries three numbered markers keyed to the decisions behind them. Nothing is hidden and no JS is needed to read it. |
+
+The carousel's markup, its JS block and the unused `$steps` array were deleted
+rather than left dormant.
+
+Every ledger answer is traceable to code: the 30-second staleness rule, the
+token-only public surfaces, LKR plan rows, the `en`/`si`/`ta` lang files, and
+plan-gated channels. A test extracts the threshold from `app.js`
+(`Date.now() - lastOk > 30000`) and fails if the copy quotes a different number —
+verified by changing the copy to "45 seconds" and watching it fail.
+
 Captures: `docs/design/landing-page.png` (desktop), `docs/design/landing-mobile.png`
 (426px). Both are shot with reduced motion so every section is visible at once.
 

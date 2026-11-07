@@ -4840,7 +4840,7 @@ Assert::test('the homepage keeps its script external for the CSP', function (): 
         preg_match('~<script(?![^>]*\bsrc=)[^>]*>~i', $view) === 0,
         'no inline script: script-src is self, so inline would silently not run'
     );
-    Assert::true(strpos($view, "js/landing.js") !== false, 'the carousel ships as its own file');
+    Assert::true(strpos($view, "js/landing.js") !== false, 'the page behaviour ships as its own file');
 });
 
 /* ---- a rebuild must actually reach a returning browser -------------- */
@@ -4929,6 +4929,38 @@ Assert::test('the reveal repeats in both directions', function (): void {
         'the hidden state carries a transition too'
     );
 });
+
+Assert::test('the homepage staleness claim matches the poller', function () use ($landingCopy): void {
+    // The ledger promises "marks itself stale after 30 seconds without data".
+    // That is a number, so it has to come from the code rather than from copy
+    // someone liked the sound of. The poller owns the truth.
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+    Assert::true(preg_match('~Date\.now\(\)\s*-\s*lastOk\s*>\s*(\d+)~', $js, $m) === 1, 'the stale threshold is readable from the poller');
+    $seconds = (int) round(((int) ($m[1] ?? 0)) / 1000);
+    Assert::true($seconds > 0, 'a real threshold was found');
+    Assert::true(
+        strpos($landingCopy(), 'stale after ' . $seconds . ' seconds') !== false,
+        'the ledger quotes the poller exactly (' . $seconds . 's)'
+    );
+});
+
+Assert::test('the three rebuilt sections use shared primitives, not one-offs', function (): void {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/landing.php');
+    $css  = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+    foreach (['lp-ledger', 'lp-duet', 'lp-mark', 'lp-decision'] as $cls) {
+        Assert::true(strpos($view, $cls) !== false, $cls . ' is used by the view');
+        Assert::true(strpos($css, '.' . $cls) !== false, $cls . ' is defined once in the stylesheet');
+    }
+    // The quote carousel was replaced by annotated evidence: no hidden content,
+    // no unattributed quotation, and no JS needed to read the section.
+    Assert::true(strpos($view, 'data-lp-carousel') === false, 'the carousel markup is gone');
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/landing.js');
+    Assert::true(strpos($js, 'lp-carousel') === false, 'and its dead script went with it');
+    // Every marker on the dashboard must have a decision to point at.
+    Assert::true(substr_count($view, 'class="lp-mark"') >= 2, 'the dashboard carries annotation markers');
+    Assert::true(strpos($view, '$decisions') !== false, 'keyed to a decision list');
+});
+
 
 Assert::test('the brand type is self-hosted and licensed', function (): void {
     $dir = QP_ROOT . '/public/assets/fonts/';
