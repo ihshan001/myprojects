@@ -106,30 +106,35 @@ $sparkline = static function (array $values, int $w = 260, int $h = 70): array {
     $n = count($values);
     if ($n < 2) { return ['line' => '', 'area' => '', 'dots' => [], 'max' => 0]; }
     $max = max(1, max($values));
+    // Inset by the dot radius so the first and last markers are not sliced in
+    // half by the viewBox edge.
+    $pad = 3;
+    $span = $w - $pad * 2;
     $pts = [];
     $dots = [];
     foreach (array_values($values) as $i => $v) {
-        $x = round($i * ($w / ($n - 1)), 1);
+        $x = round($pad + $i * ($span / ($n - 1)), 1);
         $y = round($h - ($v / $max) * ($h - 8) - 4, 1);
         $pts[] = $x . ',' . $y;
         $dots[] = ['x' => $x, 'y' => $y];
     }
-    return ['line' => implode(' ', $pts), 'area' => implode(' ', $pts) . ' ' . $w . ',' . $h . ' 0,' . $h, 'dots' => $dots, 'max' => $max];
+    $area = implode(' ', $pts) . ' ' . ($w - $pad) . ',' . $h . ' ' . $pad . ',' . $h;
+
+    return ['line' => implode(' ', $pts), 'area' => $area, 'dots' => $dots, 'max' => $max];
 };
 $series = array_values($daily);
 $chart = $sparkline($series);
 
-// The conditions a Sri Lankan OPD actually works under, and the answer to
-// each. Every answer maps to behaviour verified in the code: the 30s stale
-// threshold in app.js, the token-only public surfaces, LKR plan rows, the
-// en/si/ta lang files, and the plan-gated notification channels.
-$conditions = [
-    ['The line drops mid-session', 'Every live surface marks itself stale after 30 seconds without data, rather than showing a queue that quietly stopped moving.'],
-    ['Nobody is installing an app', 'The token opens as a link in any browser. Nothing to download, nothing to keep updated.'],
-    ['The board is read across a room', 'Tokens and rooms only. No patient name reaches a public screen or a shared link.'],
-    ['The budget is in rupees', 'Plans are priced in LKR. No conversion, and no exchange rate appearing on an invoice.'],
-    ['The counter speaks three languages', 'The interface ships in Sinhala, Tamil and English.'],
-    ['A reminder has to reach a basic phone', 'SMS and WhatsApp notifications, with channel access following the plan.'],
+// Not a customer logo wall: there are no customers to name yet, so this row
+// states capabilities the software actually has. Each note is traceable — the
+// 30s stale threshold in app.js, token-only public surfaces, LKR plan rows,
+// plan-gated channels, and the app-free tracking link.
+$capabilities = [
+    ['shield', 'Tokens, not names', 'No patient name on a public screen'],
+    ['card', 'Priced in LKR', 'No exchange rate on an invoice'],
+    ['megaphone', 'SMS & WhatsApp', 'Channels follow your plan'],
+    ['wifi', 'Built for a 3G line', 'Marks itself stale after 30 seconds'],
+    ['phone', 'No patient app', 'A link opens in any browser'],
 ];
 // One visit, seen from both sides of the counter at the same moment.
 $visit = [
@@ -288,7 +293,7 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
             <p class="lp-num text-[1.1875rem]"><?= array_sum($series) ?></p>
           </div>
           <?php if ($chart['line'] !== ''): ?>
-            <svg viewBox="0 0 260 70" class="mt-2 h-[4.375rem] w-full" role="img" aria-label="Daily patient visits over the last 14 days">
+            <svg viewBox="0 0 260 70" class="lp-spark mt-2" role="img" aria-label="Daily patient visits over the last 14 days">
               <defs>
                 <linearGradient id="lpChart1" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0" stop-color="#0F766E" stop-opacity=".22"/>
@@ -334,25 +339,22 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
        row states capabilities the software actually has. */ ?>
   <section data-reveal class="lp-band lp-band--paper !py-12">
     <div class="lp-wrap">
-      <div class="grid gap-8 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.6fr)] md:gap-12">
-        <div>
-          <span class="lp-eyebrow">Working conditions</span>
-          <h2 class="lp-h2 mt-3 !text-[1.6rem] sm:!text-[1.9rem]">Built for the room you actually have.</h2>
-          <p class="lp-lead mt-3">
-            Not the demo room. The one with a shared line, a full waiting area, and a
-            counter that has to keep moving.
-          </p>
-        </div>
-        <dl class="lp-ledger" data-reveal-group>
-          <?php foreach ($conditions as $i => [$cond, $ans]): ?>
-            <div class="lp-ledger-row">
-              <span class="lp-ledger-idx hidden md:block"><?= e(str_pad((string) ($i + 1), 2, '0', STR_PAD_LEFT)) ?></span>
-              <dt class="lp-ledger-cond"><?= e($cond) ?></dt>
-              <dd class="lp-ledger-ans"><?= e($ans) ?></dd>
-            </div>
-          <?php endforeach; ?>
-        </dl>
+      <div class="lp-kicker">
+        <p class="lp-display text-center text-[1.0625rem] font-semibold sm:text-[1.1875rem]" style="color:var(--lp-ink)">
+          Built for the way Sri Lankan OPDs actually run
+        </p>
       </div>
+      <ul class="lp-caprail mt-7" data-reveal-group>
+        <?php foreach ($capabilities as [$icon, $label, $note]): ?>
+          <li class="lp-cap last:col-span-2 lg:last:col-span-1">
+            <span class="lp-cap-ico">
+              <svg class="h-[1.125rem] w-[1.125rem]" aria-hidden="true"><use href="#i-<?= e($icon) ?>"/></svg>
+            </span>
+            <span class="lp-cap-label"><?= e($label) ?></span>
+            <span class="lp-cap-note"><?= e($note) ?></span>
+          </li>
+        <?php endforeach; ?>
+      </ul>
     </div>
   </section>
 
@@ -535,19 +537,25 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
             ['Avg wait', $avgWait !== null ? $avgWait . ' min' : '—', '2'],
             ['Rooms open', (string) $roomsOpen, ''],
         ] as [$k, $v, $mk]): ?>
-          <div class="rounded-xl bg-slate-50/80 px-3 py-2.5">
-            <p class="flex items-center text-[0.625rem] font-semibold text-slate-500">
-              <?= e($k) ?><?php if ($mk !== ''): ?><span class="lp-mark" aria-hidden="true"><?= e($mk) ?></span><?php endif; ?>
+          <div class="min-w-0 rounded-xl bg-slate-50/80 px-2.5 py-3 sm:px-3">
+            <p class="flex items-start gap-1 text-[0.625rem] font-semibold leading-tight text-slate-500">
+              <span class="min-w-0"><?= e($k) ?></span>
+              <?php if ($mk !== ''): ?><span class="lp-mark !ml-0 mt-px" aria-hidden="true"><?= e($mk) ?></span><?php endif; ?>
             </p>
-            <p class="lp-num mt-0.5 text-[1.125rem]"><?= e($v) ?></p>
+            <p class="lp-num mt-1.5 truncate text-[1.0625rem] sm:text-[1.125rem]"><?= e($v) ?></p>
           </div>
         <?php endforeach; ?>
       </div>
-      <div class="mt-4 grid gap-4 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+      <p class="mt-2.5 text-[0.625rem] leading-snug text-slate-400">
+        <?= $avgWait !== null
+            ? 'Average wait measured from ' . $waitSample . ' finished visits.'
+            : 'Not enough finished visits yet to publish an average wait.' ?>
+      </p>
+      <div class="mt-5 grid gap-5 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] sm:gap-4">
         <div>
           <p class="text-[0.71875rem] font-bold text-slate-700">Visits · last 14 days</p>
           <?php if ($chart['line'] !== ''): ?>
-            <svg viewBox="0 0 260 70" class="mt-2 h-[4.625rem] w-full" role="img" aria-label="Daily visits over the last 14 days">
+            <svg viewBox="0 0 260 70" class="lp-spark mt-2" role="img" aria-label="Daily visits over the last 14 days">
               <defs>
                 <linearGradient id="lpChart2" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0" stop-color="#0F766E" stop-opacity=".22"/>
@@ -564,20 +572,15 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
           <?php else: ?>
             <p class="mt-3 text-[0.71875rem] text-slate-400">No trend to show yet.</p>
           <?php endif; ?>
-          <p class="mt-1 text-[0.625rem] text-slate-400">
-            <?= $avgWait !== null
-                ? 'Average wait measured from ' . $waitSample . ' finished visits.'
-                : 'Not enough finished visits yet to publish an average wait.' ?>
-          </p>
         </div>
         <div>
           <p class="flex items-center text-[0.71875rem] font-bold text-slate-700">Waiting by doctor<span class="lp-mark" aria-hidden="true">3</span></p>
-          <ul class="mt-2 space-y-2">
+          <ul class="lp-doclist mt-2.5">
             <?php if ($byDoctor === []): ?>
               <li class="text-[0.71875rem] text-slate-400">No session open.</li>
             <?php endif; ?>
             <?php foreach ($byDoctor as $d): ?>
-              <li class="flex items-center justify-between gap-2 border-b border-slate-100 pb-1.5">
+              <li class="flex items-center justify-between gap-2 py-2">
                 <span class="truncate text-[0.6875rem] font-medium text-slate-600"><?= e($d['name']) ?></span>
                 <span class="shrink-0 text-[0.6875rem] font-bold tabular text-slate-800"><?= (int) $d['waiting'] ?></span>
               </li>

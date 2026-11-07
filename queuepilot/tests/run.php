@@ -4944,10 +4944,10 @@ Assert::test('the homepage staleness claim matches the poller', function () use 
     );
 });
 
-Assert::test('the three rebuilt sections use shared primitives, not one-offs', function (): void {
+Assert::test('the rebuilt sections use shared primitives, not one-offs', function (): void {
     $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/landing.php');
     $css  = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
-    foreach (['lp-ledger', 'lp-duet', 'lp-mark', 'lp-decision'] as $cls) {
+    foreach (['lp-caprail', 'lp-duet', 'lp-mark', 'lp-decision'] as $cls) {
         Assert::true(strpos($view, $cls) !== false, $cls . ' is used by the view');
         Assert::true(strpos($css, '.' . $cls) !== false, $cls . ' is defined once in the stylesheet');
     }
@@ -4957,8 +4957,33 @@ Assert::test('the three rebuilt sections use shared primitives, not one-offs', f
     $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/landing.js');
     Assert::true(strpos($js, 'lp-carousel') === false, 'and its dead script went with it');
     // Every marker on the dashboard must have a decision to point at.
-    Assert::true(substr_count($view, 'class="lp-mark"') >= 2, 'the dashboard carries annotation markers');
+    // Count inside the evidence band, and by class prefix: the tiles carry
+    // modifier utilities alongside lp-mark, so an exact class="lp-mark" match
+    // would silently miss them.
+    $ev = substr($view, (int) strpos($view, 'lp-band lp-band--dark'));
+    $ev = substr($ev, 0, (int) strpos($ev, '</section>'));
+    // Two source occurrences: one inside the tile loop (emitted twice, for the
+    // count and the average) and one on the doctor-list heading. The rendered
+    // total of three is asserted against the DOM in rhythm_verify.mjs.
+    Assert::same(2, substr_count($ev, 'class="lp-mark'), 'markers sit on the tiles and the doctor list');
     Assert::true(strpos($view, '$decisions') !== false, 'keyed to a decision list');
+    // The capability strip was restored on request; the ledger it replaced must
+    // not linger as dead markup or dead CSS.
+    Assert::true(strpos($view, 'lp-ledger') === false, 'the ledger markup is gone');
+    Assert::true(strpos($css, '.lp-ledger') === false, 'and so are its rules');
+});
+
+Assert::test('sparklines keep their viewBox ratio so they cannot be letterboxed', function (): void {
+    $css  = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/landing.php');
+    // A fixed height on a 260x70 viewBox makes the browser fit-to-height and
+    // centre the plot, so it floated inset instead of filling the card on mobile.
+    Assert::true(preg_match('~\.lp-spark\s*\{[^}]*aspect-ratio:\s*260\s*/\s*70~s', $css) === 1, 'the ratio is pinned in CSS');
+    Assert::same(2, substr_count($view, 'class="lp-spark'), 'both charts use it');
+    Assert::true(
+        preg_match('~<svg viewBox="0 0 260 70"[^>]*class="[^"]*h-\[~', $view) === 0,
+        'neither chart carries a fixed height that would override it'
+    );
 });
 
 

@@ -53,7 +53,7 @@ registration by design, so the homepage only exists in the reference app. `tools
   page as escaped source. devtest's `serve-role.mjs` already carried this fix.
 
 The shim itself modifies no file under `queuepilot/`. The reference app's
-homepage has been changed three times, each on explicit request:
+homepage has been changed repeatedly, each time on explicit request:
 
 - **Privacy fix.** Its demo panel selected `p.full_name` and printed real patient
   names on an unauthenticated marketing page, while the page's own FAQ promised
@@ -154,22 +154,59 @@ a naive `2.75rem` renders 39.6px and silently misses the floor. Verified at 375,
 
 The capability chip-row, the five-step process and the quote carousel were the
 three weakest patterns on the page. Each was replaced with a different idea
-rather than a restyle.
+rather than a restyle. The capability strip was then **restored on request** —
+the ledger below is kept in the table only to record what it replaced; see the
+next section for what shipped.
 
 | Was | Now | Why |
 | --- | --- | --- |
-| Five icon chips ("Priced in LKR") | **Constraint ledger** — `.lp-ledger` | A chip asserts a feature. A ledger names the condition a clinic works under and the answer to it, set as a specification docket: mono index, hairline rules, condition left, response right. It matches the token/docket identity and says more. |
+| Five icon chips ("Priced in LKR") | ~~Constraint ledger~~ → **capability rail** — `.lp-caprail` | The ledger was tried and reverted on request. The original five items are back, but as one instrument panel instead of five floating chips. |
 | Five step boxes | **Swimlane** — `.lp-duet` | The old flow described our internal process. The product's actual value is *simultaneity*, so each row now shows one moment from both sides: "At the desk" (solid) and "In their hand" (dashed), with the token rail down the centre. |
 | Quote carousel + three feature rows | **Annotated evidence** — `.lp-mark` / `.lp-decision` | An unattributed quotation reads like a fake testimonial and hid two thirds of itself behind a click. Now the real dashboard carries three numbered markers keyed to the decisions behind them. Nothing is hidden and no JS is needed to read it. |
 
 The carousel's markup, its JS block and the unused `$steps` array were deleted
 rather than left dormant.
 
-Every ledger answer is traceable to code: the 30-second staleness rule, the
+Every claim on the page is traceable to code: the 30-second staleness rule, the
 token-only public surfaces, LKR plan rows, the `en`/`si`/`ta` lang files, and
 plan-gated channels. A test extracts the threshold from `app.js`
 (`Date.now() - lastOk > 30000`) and fails if the copy quotes a different number —
-verified by changing the copy to "45 seconds" and watching it fail.
+verified by changing the copy to "45 seconds" and watching it fail. The restored
+rail keeps that wording: *"Marks itself stale after 30 seconds."*
+
+### The restored rail, and the dashboard on a phone
+
+**The rail.** Same five items and the same heading as the original strip, but
+built as a single bordered frame (`.lp-caprail`) with the cells divided *inside*
+it rather than five separate cards. Each icon sits in a 44px gradient medallion
+with a ring and a soft shadow; each label now carries a one-line note under it.
+The heading is flanked by two short gold rules (`.lp-kicker`).
+
+The divider rules switch direction with the layout, which is the part worth
+copying elsewhere:
+
+- **Below `lg`** the cells are two-up and the rule is a full-bleed `bottom` line,
+  so adjacent cells join into one continuous row rule. An inset (`left-4 right-4`)
+  leaves a visible gap between the columns and reads as two stray underlines.
+- **At `lg`** the cells are five-up and the same `::after` becomes a `right` rule
+  inset from the top and bottom, so it reads as a hairline between columns.
+- The last cell drops its rule in both layouts, and the fifth item spans both
+  columns below `lg` so it centres instead of leaving a hole.
+
+**The dashboard card.** It read well on desktop and badly on a phone. Four fixes:
+
+| Problem | Cause | Fix |
+| --- | --- | --- |
+| Chart floated inset, ~53px of dead space each side | A fixed height on a `260×70` viewBox makes the browser fit-to-height and centre the plot — SVG letterboxing | `.lp-spark { aspect-ratio: 260 / 70 }`, no fixed height. `preserveAspectRatio="none"` was rejected: it distorts strokes and turns the dots into ellipses. |
+| First and last dots sliced in half | `x` mapped `0 → width`, so a `r=2.2` dot sat on the viewBox edge | Inset `x` by the dot radius and match the area polygon's bottom corners to it |
+| Markers jammed against the tile labels; values tight | No `min-w-0`, uniform padding, marker inline with the text | `min-w-0`, `px-2.5 py-3 sm:px-3`, marker as its own flex item with `gap-1`, value `truncate` |
+| "Average wait measured from 40 finished visits" sat under the *visits* chart | Caption was placed after the wrong figure | Moved directly under the stat tiles, next to the number it describes |
+
+The doctor list became `.lp-doclist` — even rows, one hairline *between* rows
+(`li + li`), never a trailing rule.
+
+Both charts share `.lp-spark`; a test asserts the ratio is pinned in CSS and that
+neither SVG carries a fixed height that would override it.
 
 Captures: `docs/design/landing-page.png` (desktop), `docs/design/landing-mobile.png`
 (426px). Both are shot with reduced motion so every section is visible at once.

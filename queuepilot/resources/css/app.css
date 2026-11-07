@@ -512,19 +512,55 @@
   .lp-divide > * + * { border-top: 1px solid var(--lp-line); }
   .lp-divide-dark > * + * { border-top: 1px solid rgba(255,255,255,.12); }
 
-  /* --- constraint ledger ---------------------------------------------
-     A specification docket, not a row of feature chips. Left: the condition a
-     clinic actually works under. Right: what the software does about it. */
-  .lp-ledger { @apply w-full; border-top: 1px solid var(--lp-line); }
-  .lp-ledger-row {
-    @apply grid gap-1.5 py-5; border-bottom: 1px solid var(--lp-line);
+  /* --- capability rail -------------------------------------------------
+     One instrument panel, not five floating cards: a single hairline frame
+     with the cells divided inside it. Vertical dividers only where there is
+     room for them (lg); below that the cells sit in a two-up grid. */
+  .lp-caprail {
+    @apply grid grid-cols-2 overflow-hidden rounded-2xl border bg-white;
+    border-color: var(--lp-line);
+    box-shadow: 0 1px 2px rgba(8,33,30,.03), 0 1.25rem 2.5rem -1.75rem rgba(8,33,30,.16);
   }
-  @screen md {
-    .lp-ledger-row { grid-template-columns: 2rem minmax(0,.9fr) minmax(0,1.35fr); @apply gap-6 py-6; }
+  @screen lg { .lp-caprail { @apply grid-cols-5; } }
+  .lp-cap {
+    @apply relative flex flex-col items-center px-4 py-6 text-center;
+    transition: background-color .2s ease;
   }
-  .lp-ledger-idx { @apply lp-mono text-[0.6875rem]; color: var(--lp-sand); }
-  .lp-ledger-cond { @apply text-[0.9375rem] font-bold; color: var(--lp-ink); }
-  .lp-ledger-ans { @apply text-[0.84375rem] leading-relaxed; }
+  .lp-cap:hover { background-color: var(--lp-mist); }
+  /* Hairline grid. The row rule is full-bleed inside the frame so adjacent
+     cells join into one continuous line; an inset would leave a gap between
+     the two columns. At lg the rules turn vertical and are trimmed short. */
+  .lp-cap::after {
+    content: ""; @apply absolute bottom-0 left-0 right-0 h-px;
+    background-color: var(--lp-line);
+  }
+  .lp-cap:last-child::after { display: none; }
+  @screen lg {
+    .lp-cap::after { @apply bottom-4 left-auto right-0 top-4 h-auto w-px; }
+    .lp-cap:last-child::after { display: none; }
+  }
+  .lp-cap-ico {
+    @apply mb-3 flex h-11 w-11 items-center justify-center rounded-full;
+    background-image: linear-gradient(150deg, #FFFFFF, var(--lp-mist));
+    border: 1px solid var(--lp-line);
+    color: var(--lp-teal);
+    box-shadow: 0 .25rem .625rem -.375rem rgba(11,79,73,.4);
+  }
+  .lp-cap-label { @apply text-[0.8125rem] font-bold; color: var(--lp-ink); }
+  .lp-cap-note { @apply mt-1.5 text-[0.6875rem] leading-snug; color: var(--lp-muted); }
+
+  /* A centred rule either side of the strip heading. */
+  .lp-kicker { @apply flex items-center justify-center gap-3; }
+  .lp-kicker::before, .lp-kicker::after {
+    content: ""; @apply h-px w-8 shrink-0; background-color: var(--lp-sand);
+  }
+
+  /* Sparklines must keep the viewBox ratio, or the browser letterboxes the
+     plot and it floats inset instead of filling the card. */
+  .lp-spark { @apply block w-full; aspect-ratio: 260 / 70; }
+
+  /* Doctor rows: one hairline between rows, never after the last. */
+  .lp-doclist > li + li { border-top: 1px solid #F1F5F4; }
 
   /* --- one visit, two sides of the counter ---------------------------
      A swimlane. The point is simultaneity: the same token, kept in step on
