@@ -676,6 +676,9 @@
         ${r.specialty ? `<p class="wr-hero-spec">
           <svg class="h-4 w-4 shrink-0 sm:h-5 sm:w-5" aria-hidden="true"><use href="#i-stethoscope"/></svg>
           ${esc(r.specialty)}</p>` : ''}
+        <p class="mt-3 text-[12px] font-semibold uppercase tracking-[0.14em] text-white/70 sm:text-[13px]">
+          ${r.status === 'called' ? 'Please proceed to the room' : 'In consultation'}
+        </p>
       </div>`;
     const heroEmpty = `<div class="wr-empty">
       <svg class="h-9 w-9 text-ink-300" aria-hidden="true"><use href="#i-clock"/></svg>
@@ -685,29 +688,48 @@
       </p>
     </div>`;
 
-    const cardHtml = (r, i) => `
-      <div class="wr-card ${ACCENTS[i % ACCENTS.length]}" data-room="${esc(r.room)}">
+    const cardHtml = (r, i) => {
+      const called = r.status === 'called';
+      return `
+      <div class="wr-card ${ACCENTS[i % ACCENTS.length]} ${called ? 'wr-card-called' : ''}" data-room="${esc(r.room)}">
         <div class="flex items-start justify-between gap-2">
           <p class="wr-card-room min-w-0 truncate">${esc(r.room)}</p>
           ${r.paused
             ? '<span class="stale-pill shrink-0">Paused</span>'
-            : '<span class="live-pill shrink-0"><span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>LIVE</span>'}
+            : (called
+              ? '<span class="wr-call-pill shrink-0">CALLED</span>'
+              : '<span class="live-pill shrink-0"><span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>LIVE</span>')}
         </div>
         <p class="wr-card-doc">${esc(r.doctor || r.queue || '')}</p>
         ${r.specialty ? `<p class="wr-card-spec">${esc(r.specialty)}</p>` : ''}
         <div class="wr-rule"></div>
         <p class="wr-card-label">Now serving</p>
         ${r.token
-          ? `<p class="wr-card-token" data-token="${esc(r.token)}">${esc(r.token)}</p>`
-          : '<p class="wr-card-idle">&mdash;</p>'}
+          ? `<p class="wr-card-token" data-token="${esc(r.token)}">${esc(r.token)}</p>
+             <p class="mt-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-400">${called ? 'Please proceed' : 'In consultation'}</p>`
+          : `<p class="wr-card-idle">&mdash;</p>
+             <p class="mt-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-400">Not yet called</p>`}
         <p class="wr-card-label mt-4">Up next</p>
         ${(r.up_next && r.up_next.length)
           ? `<div class="wr-chips">${r.up_next.slice(0, 6).map((u) => `<span class="wr-chip">${esc(u.token)}</span>`).join('')}</div>`
           : '<p class="mt-1.5 text-[12px] text-ink-400">No one waiting</p>'}
         <p class="wr-card-foot mt-4">${Number(r.waiting || 0)} waiting</p>
       </div>`;
+    };
 
     const apply = (data) => {
+      const rooms = data.rooms || [];
+      // Solo and multi are different layouts, not different data. When a second
+      // session opens (or the last one closes) let the server render the right
+      // one rather than trying to rebuild a whole layout here.
+      const layout = $('[data-tv-layout]');
+      if (layout) {
+        const renderedSolo = layout.getAttribute('data-solo') === '1';
+        if (renderedSolo !== (rooms.length === 1)) {
+          location.reload();
+          return;
+        }
+      }
       const serving = data.serving || (data.now_serving ? [data.now_serving] : []);
       // Promote a call the patient must act on over a consultation already
       // behind the door. Every room still keeps its own card below.
@@ -720,10 +742,27 @@
 
       const cards = $('[data-tv-cards]');
       if (cards) {
-        const rooms = data.rooms || [];
         cards.innerHTML = rooms.length
           ? rooms.map(cardHtml).join('')
           : '<p class="col-span-full rounded-2xl border border-dashed border-hairline bg-canvas px-5 py-8 text-center text-[13px] text-ink-500">No session is open right now. Please ask reception when the next one starts.</p>';
+      }
+
+      const soloNext = $('[data-tv-solo-next]');
+      if (soloNext && rooms.length === 1) {
+        const r = rooms[0];
+        const count = soloNext.querySelector('[data-tv-solo-count]');
+        if (count) count.textContent = `${Number(r.waiting || 0)} waiting`;
+        const chips = soloNext.querySelector('[data-tv-solo-chips]');
+        const html = (r.up_next || []).slice(0, 6)
+          .map((u) => `<span class="wr-chip wr-chip-lg">${esc(u.token)}</span>`).join('');
+        if (chips) chips.innerHTML = html;
+        else if (html) {
+          const box = document.createElement('div');
+          box.className = 'wr-chips mt-2';
+          box.setAttribute('data-tv-solo-chips', '');
+          box.innerHTML = html;
+          soloNext.appendChild(box);
+        }
       }
 
       serving.forEach((r) => {
@@ -830,6 +869,16 @@
     setInterval(() => {
       if (!document.hidden && navigator.onLine) window.location.reload();
     }, Number(autoRefresh) * 1000);
+  }
+
+  /* ------------------------------------------- my queue position (patient) */
+  /* Someone who stepped outside wants this to keep itself current. One timer,
+     re-armed by the next load, and only rendered while the visit is waiting or
+     called - a completed visit should not poll forever. */
+  const posAuto = $('[data-position-auto]');
+  if (posAuto) {
+    const secs = Math.max(10, Number(posAuto.getAttribute('data-position-auto')) || 30);
+    setTimeout(() => window.location.reload(), secs * 1000);
   }
 
   /* ------------------------------------------------------------- PWA */

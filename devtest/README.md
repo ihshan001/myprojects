@@ -105,16 +105,15 @@ sidebar, and one of them is not even signed in.
 
 Rebuilt to `docs/design/waiting-room-reference.png`: a **light** board rather
 than the old dark one, because a waiting room is lit and a black wall reads as
-switched off. Hero token on a brand gradient, a "please be seated" panel, then
-one card per open session with its own accent colour.
+switched off. Two layouts, chosen by how many sessions are open.
 
 - **One card per room, not one token per clinic.** The old screen collapsed
   five consulting rooms into a single headline token, so a patient whose room
   was called never saw it. `DisplayService::payload()` returns `rooms[]` (card
   per session, with its own up-next list and waiting count), plus `serving[]`
   and `now_serving` for older consumers.
-- The hero promotes a `called` token over an `in_consultation` one, because a
-  call is the thing a patient must act on. Every room still keeps its own card.
+- A `called` token is promoted over an `in_consultation` one, because a call is
+  the thing a patient must act on.
 - Tokens are disambiguated by room **and** doctor: every queue restarts its own
   A-series, so three rooms can all be waiting on "A002".
 - The card grid is `auto-fit`, not a fixed four: five open sessions get five
@@ -122,6 +121,50 @@ one card per open session with its own accent colour.
 - Voice announcements fire once per room per token, not on every poll.
 - First paint is server-rendered from the **same** service the poller reads, so
   the wall is never blank for four seconds and the two cannot drift.
+
+#### Solo practice vs several doctors
+
+Most clinics are one doctor. Treating that as a group practice with the numbers
+turned down produced a grid of one card, an "All doctors" control with a single
+doctor behind it, and a lookup form asking which doctor you meant. `payload()`
+now returns a `solo` flag and the board branches on it:
+
+| | one session | several sessions |
+|---|---|---|
+| Wall | `waiting-room-solo.png` — the room takes the whole wall: huge token, then a full-width up-next strip | `waiting-room-desktop.png` — every room an equal card |
+| Console | one "today's session" label | doctor tabs + "All doctors" picker |
+| Position lookup | doctor preselected, not asked | asks which doctor |
+
+- **No room is visually privileged.** The old board made one doctor's token a
+  108px hero and everyone else's 44px, so most of the room was reading small
+  print. Every card now renders the same `clamp(2.25rem, 3.4vw, 3.25rem)` token;
+  a called room gets a coloured ring and a `CALLED` pill, never a bigger size.
+- The layout is re-chosen when the room count changes shape: a solo clinic that
+  opens a second session (or closes one) reloads into the other layout rather
+  than trying to rebuild it in the poller. Verified live in both directions.
+
+#### "Where do I stand?" — one patient, one queue
+
+`/board/{key}/position` is a read-only lookup for someone who has stepped
+outside. They enter the token on their slip and see how many are ahead, the
+estimate range, and which token is being seen **in their own queue** — so they
+can tell whether it is moving. No other doctor's queue is rendered.
+
+Reachable from a button in the board header, a QR code on the wall, and the
+console's *Patient tracking* panel (which used to hand out the whole board while
+claiming to show one room's position).
+
+- **A token label is not a credential.** It is printed on paper and shouted
+  across a room, so this endpoint deliberately does **not** redirect to
+  `/t/{track_token}`: that page carries cancel, reschedule and rate actions, and
+  handing it over for a guessable label would let anyone cancel a stranger's
+  visit. `myPosition()` returns a whitelisted read-only payload with no name, no
+  arrival time and no track token. The page has no POST form.
+- Lookup is scoped to the clinic **and**, for a department key, that department;
+  the queue must be open today. Token labels repeat across sessions, so the
+  queue id is required rather than optional (a solo clinic supplies it itself).
+- A waiting or called visit refreshes itself every 30s; a finished one does not
+  poll forever.
 
 #### One board, three routes
 
@@ -136,8 +179,9 @@ all three share the partial and none carries an inline script.
 - **No patient names.** The reference lists "A-033 Priya Nair" under each
   doctor. This board is on an unauthenticated URL that anyone in the room can
   photograph, so "up next" is **tokens only**. `DisplayService` never puts a
-  name or phone number in the payload at all. Verified: 12 names and 12 phone
-  numbers, zero occurrences in the board HTML, the API JSON, or `/live`.
+  name or phone number in the payload at all. Verified across both clinics:
+  34 names/phone numbers and all 76 track tokens, zero occurrences in either
+  board's HTML, the API JSON, `/live`, or either position page.
 - **The doctor's specialty is shown** ("General Medicine", "Cardiology"). It is
   the doctor's own public attribute, not a patient field — but note that next
   to a token it lets someone infer why a neighbour is there. Say the word and

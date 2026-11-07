@@ -49,6 +49,16 @@ $verbsFor = static function (string $status) use ($canPriority): array {
       </div>
 
       <?php if ($queues !== []): ?>
+      <?php if (count($queues) === 1): ?>
+        <!-- A solo practice has nothing to switch between. An "All doctors"
+             control beside a tab for the only doctor is noise. -->
+        <p class="mt-4 inline-flex items-center gap-2 rounded-xl border border-brand-200 bg-brand-50
+                  px-3 py-2 text-[12.5px] font-semibold text-brand-700">
+          <svg class="h-4 w-4 shrink-0" aria-hidden="true"><use href="#i-stethoscope"/></svg>
+          <?= e($queues[0]['name']) ?>
+          <span class="text-brand-600/70">&middot; today's session</span>
+        </p>
+      <?php else: ?>
         <!-- Doctor tabs. Real navigation, so the board works without JS. -->
         <div class="mt-2 flex items-center gap-4 overflow-x-auto border-b border-hairline pb-px sm:gap-5">
           <?php foreach (array_slice($queues, 0, 3) as $q): $on = (int) $q['id'] === (int) $activeId; ?>
@@ -76,6 +86,7 @@ $verbsFor = static function (string $status) use ($canPriority): array {
           <span class="h-1.5 w-1.5 rounded-full <?= $open ? 'bg-brand-500' : 'bg-slate-300' ?>"></span>
           Token auto-call is <?= $open ? 'ON' : 'OFF' ?>
         </p>
+      <?php endif; ?>
       <?php endif; ?>
 
       <?php if (!$activeQueue): ?>

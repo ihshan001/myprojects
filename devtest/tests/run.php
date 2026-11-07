@@ -4494,6 +4494,120 @@ Assert::test('revenue is billed at each doctor\'s fee, and says so', function ()
     Assert::same(0.0, round($empty['total'], 2), 'an empty range reports zero');
     Assert::same([], $empty['rows'], 'with no rows rather than a zero-filled fake');
 });
+/* ---- solo doctor + own-position lookup ---------------------------- */
+
+// A dedicated tenant: seedTenant makes exactly one session, which is what most
+// real clinics look like. Clinic 2 is closed by an earlier closure test, so it
+// cannot stand in for a working solo practice here.
+seedTenant(200, 'solo-practice', 'Solo Practice');
+$soloQueueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 200');
+$soloPatient = (new App\Services\PatientService())->findOrCreate(200, ['full_name' => 'Solo Patient', 'phone' => '0771112222']);
+$soloEntry = (new App\Domain\Queue\QueueService())->issueToken(200, $soloQueueId, (int) $soloPatient['id'], []);
+
+Assert::test('a one-doctor board reports solo, a many-doctor board does not', function () use ($soloQueueId): void {
+    $clinicId = 1;
+    $display = new App\Services\DisplayService();
+    $many = $display->payload($clinicId, null);
+    Assert::true(count($many['rooms']) > 1, 'fixture has several open sessions');
+    Assert::false($many['solo'], 'several rooms is not solo');
+
+    // One room only: the board must say so, so the view can give that room the
+    // whole wall instead of rendering a grid of one.
+    $one = $display->payload(200, null);
+    Assert::same(1, count($one['rooms']), 'the solo clinic has exactly one session');
+    Assert::true($one['solo'], 'one room is solo');
+    Assert::same($soloQueueId, (int) $one['rooms'][0]['queue_id'], 'room cards carry the queue id for the lookup');
+});
+
+Assert::test('own-position lookup answers for the asked queue only', function (): void {
+    $display = new App\Services\DisplayService();
+    // Seed token labels repeat across sessions, so the same label in two queues
+    // must resolve to two different visits, not whichever the DB returns first.
+    $queues = App\Core\Db::all(
+        'SELECT id FROM queues WHERE clinic_id = ? AND session_date = ? ORDER BY id',
+        [1, App\Core\Db::today()]
+    );
+    Assert::true(count($queues) >= 2, 'need two sessions to prove scoping');
+    $qid = (int) $queues[0]['id'];
+    $label = App\Core\Db::scalar(
+        "SELECT token_label FROM queue_entries WHERE queue_id = ? AND status = 'waiting' ORDER BY id LIMIT 1",
+        [$qid]
+    );
+    Assert::true($label !== null, 'the queue has someone waiting');
+
+    $res = $display->myPosition(1, null, $qid, (string) $label);
+    Assert::true($res['ok'], 'a real token resolves');
+    Assert::same(strtoupper((string) $label), strtoupper((string) $res['position']['token']));
+    Assert::true($res['position']['position'] >= 1, 'position is 1-based');
+    Assert::true(array_key_exists('now_serving', $res['position']), 'answers whether the queue is moving');
+
+    // Case and surrounding space should not defeat someone reading a slip.
+    $loose = $display->myPosition(1, null, $qid, '  ' . strtolower((string) $label) . '  ');
+    Assert::true($loose['ok'], 'lookup is case- and whitespace-tolerant');
+    Assert::same($res['position']['token'], $loose['position']['token']);
+});
+
+Assert::test('own-position lookup refuses another tenant and unknown tokens', function (): void {
+    $display = new App\Services\DisplayService();
+    $foreignQueue = (int) App\Core\Db::scalar('SELECT id FROM queues WHERE clinic_id = 200 LIMIT 1');
+    Assert::true($foreignQueue > 0, 'the foreign queue really exists, so this is not a vacuous pass');
+    $res = $display->myPosition(1, null, $foreignQueue, 'A001');
+    Assert::false($res['ok'], 'clinic 1 key cannot read the solo clinic queue');
+
+    $mine = (int) App\Core\Db::scalar('SELECT id FROM queues WHERE clinic_id = 1 LIMIT 1');
+    $nope = $display->myPosition(1, null, $mine, 'ZZ999');
+    Assert::false($nope['ok'], 'an unknown token is refused');
+    Assert::true(!empty($nope['error']), 'and says why');
+
+    Assert::false($display->myPosition(1, null, $mine, '')['ok'], 'an empty token is refused');
+    Assert::false($display->myPosition(1, null, $mine, str_repeat('X', 40))['ok'], 'an over-long token is refused');
+});
+
+Assert::test('own-position payload never carries a name or a capability token', function (): void {
+    $display = new App\Services\DisplayService();
+    $qid = (int) App\Core\Db::scalar('SELECT id FROM queues WHERE clinic_id = 1 ORDER BY id LIMIT 1');
+    $row = App\Core\Db::one(
+        "SELECT e.token_label, e.track_token, p.full_name FROM queue_entries e
+           JOIN patients p ON p.id = e.patient_id
+          WHERE e.queue_id = ? AND e.status = 'waiting' ORDER BY e.id LIMIT 1",
+        [$qid]
+    );
+    $res = $display->myPosition(1, null, $qid, (string) $row['token_label']);
+    Assert::true($res['ok']);
+    $json = json_encode($res['position']);
+    // The label is printed on paper and shouted aloud. Exchanging it for the
+    // track link would let anyone cancel or reschedule someone else's visit.
+    Assert::true(strpos($json, (string) $row['track_token']) === false, 'no track token in the payload');
+    Assert::true(strpos($json, (string) $row['full_name']) === false, 'no patient name in the payload');
+    Assert::false(isset($res['position']['track_token']), 'no track_token key');
+    Assert::false(isset($res['position']['joined_at']), 'no arrival time either');
+});
+
+Assert::test('the waiting board renders equal cards or one solo panel, never both', function (): void {
+    $screen = file_get_contents(QP_ROOT . '/resources/views/pages/display/screen.php');
+    $board = file_get_contents(QP_ROOT . '/resources/views/partials/waiting-board.php');
+    $src = $screen . $board;
+    Assert::true(strpos($board, 'data-tv-cards') !== false, 'multi layout has the equal-card grid');
+    Assert::true(strpos($board, 'data-tv-solo-next') !== false, 'solo layout has its own up-next list');
+    Assert::true(strpos($board, '$solo = count($rooms) === 1') !== false, 'layout is chosen by room count');
+    Assert::true(strpos($board, 'wr-card-called') !== false, 'a called room is ringed rather than enlarged');
+    Assert::true(strpos($board, '/position') !== false, 'the board offers the own-position lookup');
+    Assert::same(0, preg_match_all('/<script(?![^>]*\bsrc=)[^>]*>/i', $src), 'no inline scripts (CSP)');
+});
+
+Assert::test('the position page is read-only', function (): void {
+    $view = file_get_contents(QP_ROOT . '/resources/views/pages/display/position.php');
+    Assert::same(0, preg_match_all('/method=["\']post["\']/i', $view), 'no POST forms on the lookup page');
+    Assert::true(strpos($view, '/cancel') === false, 'no cancel action');
+    Assert::true(strpos($view, '/reschedule') === false, 'no reschedule action');
+    // Strip comments first: the docblock explains WHY there is no track link,
+    // and grepping the raw file would match that explanation.
+    $codeOnly = preg_replace('~/\*.*?\*/~s', '', $view);
+    $codeOnly = preg_replace('~^\s*//.*$~m', '', (string) $codeOnly);
+    Assert::true(strpos((string) $codeOnly, 'track_token') === false, 'never builds a private track link');
+    Assert::true(strpos($view, 'data-position-auto') !== false, 'a live visit keeps itself current');
+});
+
 /* ------------------------------------------------------------------ */
 
 $code = Assert::summary();

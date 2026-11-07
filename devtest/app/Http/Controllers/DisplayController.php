@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Core\Request;
 use App\Core\Session;
 use App\Core\Str;
 use App\Services\AuditService;
@@ -56,18 +57,23 @@ final class DisplayController
      * log in, and it must never see patient names — the board payload is
      * tokens and rooms only. Anything else about the clinic is public anyway.
      */
-    public function publicScreen(string $key): void
+    /**
+     * Resolve a display key to its clinic and (optionally) its waiting area.
+     *
+     * Both a whole-clinic key and a department key are valid. This lived in
+     * three copies; a department link 404'd from one of them because that copy
+     * only looked at `display_token`.
+     *
+     * @return array{0:int,1:int|null,2:string|null,3:array<string,mixed>}
+     */
+    private function resolveKey(string $key): array
     {
-        // A department display key is its own token, so this screen has to
-        // recognise both kinds. Looking only at `display_token` made department
-        // links 404 even though they had just been issued.
         $clinicId = Db::scalar(
             "SELECT owner_id FROM settings WHERE scope='clinic' AND key_name='display_token' AND value = ?",
             [$key]
         );
-
-        $departmentName = null;
         $scopeId = null;
+        $departmentName = null;
         if (!$clinicId) {
             $row = Db::one(
                 "SELECT owner_id, key_name FROM settings
@@ -76,23 +82,66 @@ final class DisplayController
             );
             if ($row) {
                 $clinicId = (int) $row['owner_id'];
-                $departmentId = (int) substr((string) $row['key_name'], strlen('display.department.'));
-                $scopeId = $departmentId;
+                $scopeId = (int) substr((string) $row['key_name'], strlen('display.department.'));
                 $departmentName = Db::scalar(
                     'SELECT name FROM departments WHERE id = ? AND clinic_id = ?',
-                    [$departmentId, $clinicId]
+                    [$scopeId, $clinicId]
                 );
             }
         }
-
         if (!$clinicId) {
             abort(404, 'This screen link is not valid. Ask the clinic for a new one.');
         }
-
         $clinic = Db::one('SELECT * FROM clinics WHERE id = ?', [(int) $clinicId]);
         if (!$clinic) {
             abort(404, 'This screen link is not valid.');
         }
+        return [(int) $clinicId, $scopeId, $departmentName, $clinic];
+    }
+
+    /**
+     * "Where do I stand?" — one patient, one queue, read-only.
+     *
+     * For someone who has stepped outside: they want to know whether their
+     * queue is moving and how far down it they are, not every doctor's list.
+     */
+    public function position(string $key): void
+    {
+        [$clinicId, $scopeId, $departmentName, $clinic] = $this->resolveKey($key);
+        $board = (new \App\Services\DisplayService())->payload($clinicId, $scopeId);
+        $rooms = $board['rooms'] ?? [];
+
+        $queueId = (int) Request::int('queue');
+        $token = trim(Request::string('token'));
+        // A solo practice has one queue, so asking which doctor would be a
+        // question with a single answer.
+        if ($queueId === 0 && count($rooms) === 1) {
+            $queueId = (int) ($rooms[0]['queue_id'] ?? 0);
+        }
+
+        $result = null;
+        if ($token !== '' && $queueId > 0) {
+            $result = (new \App\Services\DisplayService())->myPosition($clinicId, $scopeId, $queueId, $token);
+        } elseif ($token !== '' && $queueId === 0) {
+            $result = ['ok' => false, 'error' => 'Choose which doctor you are seeing.'];
+        }
+
+        view('display/position', [
+            'title' => 'Where do I stand?',
+            'key' => $key,
+            'clinicRecord' => $clinic,
+            'departmentName' => $departmentName,
+            'rooms' => $rooms,
+            'solo' => count($rooms) === 1,
+            'queueId' => $queueId,
+            'token' => $token,
+            'result' => $result,
+        ], false);
+    }
+
+    public function publicScreen(string $key): void
+    {
+        [$clinicId, $scopeId, $departmentName, $clinic] = $this->resolveKey($key);
 
         view('display/screen', [
             'title' => $departmentName !== null ? $departmentName . ' — waiting room' : 'Waiting room',
@@ -102,7 +151,7 @@ final class DisplayController
             'canRotate' => false,
             'publicScreen' => true,
             'departmentName' => $departmentName,
-        ] + $this->initialBoard((int) $clinicId, $scopeId), false);
+        ] + $this->initialBoard($clinicId, $scopeId), false);
     }
 
     /**
@@ -167,39 +216,7 @@ final class DisplayController
      */
     public function live(string $key): void
     {
-        $clinicId = Db::scalar(
-            "SELECT owner_id FROM settings WHERE scope='clinic' AND key_name='display_token' AND value = ?",
-            [$key]
-        );
-
-        $departmentName = null;
-        // A department key must stay scoped to its own waiting area, or a
-        // screen in one wing would announce another wing's tokens.
-        $scopeId = null;
-        if (!$clinicId) {
-            $row = Db::one(
-                "SELECT owner_id, key_name FROM settings
-                  WHERE scope='clinic' AND key_name LIKE 'display.department.%' AND value = ?",
-                [$key]
-            );
-            if ($row) {
-                $clinicId = (int) $row['owner_id'];
-                $scopeId = (int) substr((string) $row['key_name'], strlen('display.department.'));
-                $departmentName = Db::scalar(
-                    'SELECT name FROM departments WHERE id = ? AND clinic_id = ?',
-                    [$scopeId, $clinicId]
-                );
-            }
-        }
-
-        if (!$clinicId) {
-            abort(404, 'This queue link is not valid. Ask the clinic for a new one.');
-        }
-
-        $clinic = Db::one('SELECT * FROM clinics WHERE id = ?', [(int) $clinicId]);
-        if (!$clinic) {
-            abort(404, 'This queue link is not valid.');
-        }
+        [$clinicId, $scopeId, $departmentName, $clinic] = $this->resolveKey($key);
 
         view('display/live', [
             'title' => $departmentName !== null ? $departmentName . ' — queue' : 'Queue',
@@ -208,7 +225,7 @@ final class DisplayController
             'departmentName' => $departmentName,
             'canRotate' => false,
             'publicScreen' => true,
-        ] + $this->initialBoard((int) $clinicId, $scopeId), false);
+        ] + $this->initialBoard($clinicId, $scopeId), false);
     }
 
     public function rotate(): void

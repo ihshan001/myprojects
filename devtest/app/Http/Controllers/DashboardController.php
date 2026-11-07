@@ -154,16 +154,24 @@ final class DashboardController
             }
         }
 
-        // Patient tracking: the clinic's public waiting-room board is what a
-        // patient can open on their own phone without an account.
+        // Patient tracking: a read-only "where do I stand?" page, scoped to the
+        // session the receptionist is looking at. This used to hand out the
+        // whole waiting-room board, which showed every other doctor's queue to
+        // a patient who only wanted their own - and the panel is labelled with
+        // one room, so the link never matched what it claimed to be.
         $trackUrl = null; $trackQr = null;
         if ($displayToken !== '') {
-            $trackUrl = rtrim((string) \App\Core\Env::get('app.url', ''), '/') . '/board/' . $displayToken;
-            if ($trackUrl === '/board/' . $displayToken) {
+            $path = '/board/' . $displayToken . '/position';
+            if (!empty($activeQueue['id'])) {
+                $path .= '?queue=' . (int) $activeQueue['id'];
+            }
+            $base = rtrim((string) \App\Core\Env::get('app.url', ''), '/');
+            if ($base === '') {
                 $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
                     || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https') ? 'https' : 'http';
-                $trackUrl = $scheme . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . '/board/' . $displayToken;
+                $base = $scheme . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost');
             }
+            $trackUrl = $base . $path;
             $trackQr = \App\Support\QrCode::svg($trackUrl, 3, 2);
         }
 

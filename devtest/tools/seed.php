@@ -252,12 +252,53 @@ Db::transaction(function () use ($planIds, $today) {
          VALUES (?,?,?,?,?,?,1,?)',
         [$c2, $spec2, $room2, 'Dr. Malini Dias', 1500, 10, Db::now()]
     );
-    Db::insert(
+    $q2 = Db::insert(
         "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
          VALUES (?,?,?,?, 'open', ?, 'L', 0, 3, ?)",
         [$c2, $doc2, 'Evening OPD', 'consultation', $today, Db::now()]
     );
-    addUser($c2, 'receptionist', 'Nadeesha Kumari', 'reception@lakeview.lk', 'Reception#2026');
+    $recep2 = addUser($c2, 'receptionist', 'Nadeesha Kumari', 'reception@lakeview.lk', 'Reception#2026');
+
+    // A solo practice is the common case, not an edge case: most clinics are one
+    // doctor. Give Lakeview a real session so the single-doctor board, the
+    // one-doctor console and "where do I stand?" are exercised by the demo
+    // rather than only ever rendering their empty states.
+    $soloDefs = [
+        ['Sunil Bandara', '+94 71 204 3388', 'male', 1968],
+        ['Nimali Ekanayake', '+94 77 512 6644', 'female', 1984],
+        ['Jeevan Rasiah', '+94 76 330 9021', 'male', 1957],
+        ['Fathima Nazeera', '+94 70 887 1245', 'female', 1992],
+        ['Kamal Gunathilake', '+94 75 661 7730', 'male', 1975],
+    ];
+    $soloPatients = [];
+    foreach ($soloDefs as $i => [$name, $phone, $gender, $year]) {
+        $soloPatients[] = Db::insert(
+            'INSERT INTO patients (clinic_id, code, full_name, phone, gender, birth_year, created_at, updated_at)
+             VALUES (?,?,?,?,?,?,?,?)',
+            [$c2, 'P-' . Str::pad($i + 1, 5), $name, $phone, $gender, $year, Db::now(), Db::now()]
+        );
+    }
+    // One being seen, four waiting: enough to show a real position and estimate.
+    $soloLive = [['called', 14], ['waiting', 11], ['waiting', 8], ['waiting', 5], ['waiting', 2]];
+    foreach ($soloLive as $i => [$status, $minsAgo]) {
+        $n = $i + 1;
+        $joined = date('Y-m-d H:i:s', time() - $minsAgo * 60);
+        Db::insert(
+            'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status, priority,
+                sort_weight, source, joined_at, called_at, call_count, track_token, version, created_by)
+             VALUES (?,?,?,?,?,?,0,0,?,?,?,?,?,0,?)',
+            [
+                $c2, $q2, $soloPatients[$i], $n, 'L' . Str::pad($n, 3), $status, 'walkin', $joined,
+                $status === 'called' ? date('Y-m-d H:i:s', strtotime($joined) + 5 * 60) : null,
+                $status === 'called' ? 1 : 0, Str::urlToken(24), $recep2,
+            ]
+        );
+    }
+    Db::run('UPDATE queues SET last_token_no = ? WHERE id = ?', [count($soloLive), $q2]);
+    Db::insert(
+        "INSERT INTO settings (scope, owner_id, key_name, value) VALUES ('clinic', ?, 'display_token', ?)",
+        [$c2, Str::urlToken(20)]
+    );
 
     /* ---------- tenant 3: suspended (billing gate demo) ---------- */
     $c3 = makeClinic([

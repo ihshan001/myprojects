@@ -139,6 +139,35 @@ final class QueueRepository
     }
 
     /** Public tracking: token + clinic scope, no tenant information in the URL. */
+    /**
+     * Find today's visit by the token printed on the slip.
+     *
+     * Deliberately NOT a way to reach the private track link: knowing "A005"
+     * must not hand over a capability URL that can cancel or reschedule the
+     * visit. Callers use this for a read-only position, scoped to one clinic
+     * and one session, and token labels repeat across sessions so the queue
+     * id is required rather than optional.
+     */
+    public function entryByLabel(int $clinicId, int $queueId, string $label): ?array
+    {
+        return Db::one(
+            "SELECT e.*, q.name AS queue_name, q.status AS queue_status, q.doctor_id,
+                    d.name AS doctor_name, d.avg_consult_minutes, s.name AS specialty,
+                    r.name AS room_name, c.name AS clinic_name, c.phone AS clinic_phone,
+                    c.brand_color, c.locale
+               FROM queue_entries e
+               JOIN queues q ON q.id = e.queue_id
+               JOIN clinics c ON c.id = e.clinic_id
+               LEFT JOIN doctors d ON d.id = q.doctor_id
+               LEFT JOIN specialties s ON s.id = d.specialty_id
+               LEFT JOIN rooms r ON r.id = d.room_id
+              WHERE e.clinic_id = ? AND e.queue_id = ? AND q.session_date = ?
+                AND UPPER(e.token_label) = UPPER(?)
+              ORDER BY e.id DESC LIMIT 1",
+            [$clinicId, $queueId, Db::today(), trim($label)]
+        );
+    }
+
     public function entryByToken(string $token): ?array
     {
         return Db::one(

@@ -102,7 +102,8 @@ $glance = [
           <span class="shrink-0 rounded-full bg-brand-50 px-1.5 py-0.5 text-[9.5px] font-semibold text-brand-700 sm:px-2 sm:text-[10px]">No app needed</span>
         </div>
         <p class="mt-1.5 text-[11.5px] leading-snug text-ink-500">
-          Share this QR or link with patients to check their position in queue.
+          Patients scan this, enter the token on their slip, and see their own position
+          &mdash; only for this doctor, not the whole waiting room.
         </p>
         <?php if ($trackUrl): ?>
           <div class="mt-2.5 flex items-center gap-2 rounded-xl bg-slate-50 p-2 sm:gap-2.5 sm:p-2.5">

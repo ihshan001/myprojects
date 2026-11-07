@@ -21,6 +21,78 @@ use App\Core\Db;
 final class DisplayService
 {
     /**
+     * "Where do I stand?" for one patient, from the token on their slip.
+     *
+     * Read-only and deliberately narrow. It answers for ONE session only, so
+     * someone standing outside learns whether their queue is moving without
+     * being shown every other doctor's list. It returns no patient name and
+     * no track token: a token label is printed on paper and shouted across a
+     * room, so it must never be exchangeable for the private link that can
+     * cancel or reschedule the visit.
+     *
+     * @return array{ok:bool,error?:string,position?:array<string,mixed>}
+     */
+    public function myPosition(int $clinicId, ?int $departmentId, int $queueId, string $label): array
+    {
+        $label = trim($label);
+        if ($label === '' || mb_strlen($label) > 16) {
+            return ['ok' => false, 'error' => 'Enter the token number printed on your slip.'];
+        }
+
+        // The session must belong to this clinic, and to this waiting area if
+        // the screen is department-scoped. Otherwise a key for one wing could
+        // read another wing's queue.
+        $queue = Db::one(
+            "SELECT q.id, q.name, q.status, d.name AS doctor_name, r.name AS room_name,
+                    s.name AS specialty
+               FROM queues q
+               LEFT JOIN doctors d ON d.id = q.doctor_id
+               LEFT JOIN rooms r ON r.id = d.room_id
+               LEFT JOIN specialties s ON s.id = d.specialty_id
+              WHERE q.id = ? AND q.clinic_id = ? AND q.session_date = ?"
+            . ($departmentId !== null ? ' AND q.department_id = ?' : ''),
+            $departmentId !== null
+                ? [$queueId, $clinicId, Db::today(), (int) $departmentId]
+                : [$queueId, $clinicId, Db::today()]
+        );
+        if (!$queue) {
+            return ['ok' => false, 'error' => 'That queue is not open today. Please ask reception.'];
+        }
+
+        $entry = (new \App\Domain\Queue\QueueRepository())->entryByLabel($clinicId, $queueId, $label);
+        if (!$entry) {
+            return ['ok' => false, 'error' => 'No token ' . $label . ' in this queue today. Check the number and the doctor.'];
+        }
+
+        $snap = (new \App\Domain\Queue\QueueService())->publicSnapshot($entry);
+        // Now serving in THIS queue, so "is it moving?" is answerable.
+        $now = Db::scalar(
+            "SELECT token_label FROM queue_entries
+              WHERE queue_id = ? AND status IN ('called','in_consultation')
+              ORDER BY CASE status WHEN 'called' THEN 0 ELSE 1 END, id DESC LIMIT 1",
+            [$queueId]
+        );
+
+        return [
+            'ok' => true,
+            'position' => [
+                'token'        => $snap['token'],
+                'status'       => $snap['status'],
+                'status_label' => $snap['status_label'],
+                'position'     => (int) $snap['position'],
+                'estimate'     => $snap['estimate'],
+                'doctor'       => $snap['doctor'],
+                'specialty'    => $snap['specialty'],
+                'room'         => $snap['room'],
+                'queue'        => $snap['queue'],
+                'now_serving'  => $now !== null ? (string) $now : null,
+                'paused'       => ($queue['status'] ?? '') === 'paused',
+                'clinic_phone' => $snap['clinic_phone'],
+            ],
+        ];
+    }
+
+    /**
      * @param int|null $departmentId restricts the board to one waiting area
      */
     public function payload(int $clinicId, ?int $departmentId = null): array
@@ -103,6 +175,7 @@ final class DisplayService
                 [$q['id']]
             );
             $roomCards[] = [
+                'queue_id'  => (int) $q['id'],
                 'room'      => $now['room_name'] ?? ($q['room_name'] ?? (string) $q['name']),
                 'doctor'    => $now['doctor_name'] ?? ($q['doctor_name'] ?? null),
                 'specialty' => $now['specialty'] ?? ($q['specialty'] ?? null),
@@ -138,6 +211,9 @@ final class DisplayService
             'now_serving' => $serving,
             'serving' => $servingAll,
             'rooms' => $roomCards,
+            // A solo practice is not a scaled-down group practice: one room
+            // gets the whole wall instead of one card in a grid of one.
+            'solo' => count($roomCards) === 1,
             'upcoming' => array_slice($upcoming, 0, 8),
             'delays' => $delays,
             'paused' => array_values(array_map(
