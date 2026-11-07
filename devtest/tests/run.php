@@ -2277,6 +2277,28 @@ Assert::test('the display board marks itself stale, and the pill is driven by th
     }
 });
 
+Assert::test('a rebuilt asset is a new url, and the worker cannot pin the old one', function (): void {
+    // This is the bug that made a redesigned board render unstyled: asset()
+    // returned a fixed path and the worker served the shell cache-first under
+    // a VERSION nobody bumped, so a returning browser kept the old CSS forever.
+    $css = asset('build/app.css');
+    Assert::contains('?v=', $css, 'the stylesheet url carries a content fingerprint');
+
+    $file = QP_ROOT . '/public/assets/build/app.css';
+    $before = (string) file_get_contents($file);
+    $urlBefore = asset('build/app.css');
+    // asset() memoises per request, so ask a fresh process-equivalent: compare
+    // the fingerprint helper against the file's own digest instead.
+    Assert::contains(substr(md5_file($file), 0, 10), $urlBefore, 'the fingerprint is the file digest');
+    Assert::same($before, (string) file_get_contents($file), 'and reading it changed nothing');
+
+    $sw = (string) file_get_contents(QP_ROOT . '/public/sw.js');
+    Assert::true(strpos($sw, 'hit || fetch(req)') === false, 'the shell is no longer cache-first');
+    Assert::contains('SHELL_ASSETS.includes(url.pathname)', $sw, 'the shell branch still exists');
+    // The api must still bypass the cache entirely.
+    Assert::contains("url.pathname.startsWith('/api/')", $sw, 'data is never served from cache');
+});
+
 Assert::test('the service worker never serves a cached api response', function (): void {
     $sw = (string) file_get_contents(QP_ROOT . '/public/sw.js');
 

@@ -30,7 +30,26 @@ if (!function_exists('url')) {
 }
 
 if (!function_exists('asset')) {
-    function asset(string $path): string { return '/assets/' . ltrim($path, '/'); }
+    /**
+     * Fingerprint an asset by its contents.
+     *
+     * The service worker keeps the shell on the device so an offline lobby
+     * screen still renders. With a fixed URL that cache never expires, so a
+     * rebuilt stylesheet was invisible to any browser that had visited
+     * before: new markup, old CSS, page renders unstyled. A changed file must
+     * be a changed URL. Memoised because a page asks for several.
+     */
+    function asset(string $path): string
+    {
+        $path = ltrim($path, '/');
+        $url = '/assets/' . $path;
+        static $hashes = [];
+        if (!array_key_exists($path, $hashes)) {
+            $file = QP_ROOT . '/public/assets/' . $path;
+            $hashes[$path] = is_file($file) ? substr(md5_file($file), 0, 10) : null;
+        }
+        return $hashes[$path] !== null ? $url . '?v=' . $hashes[$path] : $url;
+    }
 }
 
 if (!function_exists('redirect')) {

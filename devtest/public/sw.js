@@ -16,9 +16,16 @@
  * HTML pages are network-first with a short-lived cache fallback, so a stale
  * page is possible but the staleness signalling on the page itself (the amber
  * banner and the Live pill) tells the truth about it.
+ *
+ * Shell assets are network-first too, NOT cache-first. Cache-first plus a
+ * VERSION nobody bumps meant a rebuilt stylesheet never reached a browser
+ * that had visited before: the server sent new markup, the worker answered
+ * with old CSS, and the board rendered unstyled. asset() now fingerprints
+ * every asset by content, and this ordering means a new build wins immediately
+ * while an offline screen still falls back to the last copy it actually saw.
  */
 
-const VERSION = 'qp-v2';
+const VERSION = 'qp-v3';
 const SHELL = 'qp-shell-' + VERSION;
 const PAGES = 'qp-pages-' + VERSION;
 
@@ -59,14 +66,26 @@ self.addEventListener('fetch', (event) => {
     return; // no respondWith = straight to the network, no cache read
   }
 
-  // Shell assets: cache-first. They change only when we bump VERSION.
+  // Shell assets: network-first. A rebuild must win the moment it lands.
+  // Offline, fall back to this exact version if we have it, otherwise to any
+  // copy of the same path — a stale stylesheet beats an unstyled board, and
+  // the page's own offline banner is already telling the truth about it.
   if (SHELL_ASSETS.includes(url.pathname)) {
     event.respondWith(
-      caches.match(req).then((hit) => hit || fetch(req).then((res) => {
-        const copy = res.clone();
-        caches.open(SHELL).then((c) => c.put(req, copy));
-        return res;
-      }))
+      fetch(req)
+        .then((res) => {
+          if (res && res.ok) {
+            const copy = res.clone();
+            caches.open(SHELL).then((c) => c.put(req, copy));
+          }
+          return res;
+        })
+        .catch(async () => {
+          const exact = await caches.match(req);
+          if (exact) return exact;
+          const anyVersion = await caches.match(url.pathname);
+          return anyVersion || Response.error();
+        })
     );
     return;
   }
