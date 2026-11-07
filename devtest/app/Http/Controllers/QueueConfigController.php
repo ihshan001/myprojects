@@ -224,6 +224,64 @@ final class QueueConfigController
         redirect('/queues/config');
     }
 
+    /**
+     * Change a session's token series letter.
+     *
+     * Owner-only, and only before the first token: once "A005" is on paper in
+     * someone's hand, re-lettering the queue makes their slip disagree with the
+     * wall. The letter must also be free among today's other sessions, or two
+     * rooms would both be calling "B002".
+     */
+    public function prefix(string $id): void
+    {
+        $clinicId = $this->clinicId();
+        if (!Auth::can('clinic.manage')) {
+            abort(403, 'Only a clinic owner can change a token series.');
+        }
+
+        $queue = Db::one('SELECT * FROM queues WHERE id = ? AND clinic_id = ?', [(int) $id, $clinicId]);
+        if (!$queue) {
+            abort(404, 'That queue does not exist in this clinic.');
+            return;
+        }
+
+        if ((int) $queue['last_token_no'] > 0) {
+            flash('error', sprintf(
+                '%s has already issued %d token%s, so its letter is fixed for today — changing it would make the slips patients are holding disagree with the screen. Set the letter before the first token, or change it on tomorrow\'s session.',
+                $queue['name'],
+                (int) $queue['last_token_no'],
+                (int) $queue['last_token_no'] === 1 ? '' : 's'
+            ));
+            redirect('/queues/config');
+            return;
+        }
+
+        $prefix = strtoupper(trim(Request::string('prefix')));
+        if (!preg_match('/^[A-Z]{1,2}$/', $prefix)) {
+            flash('error', 'Use one or two letters for the series, for example A or OP.');
+            redirect('/queues/config');
+            return;
+        }
+
+        $taken = Db::scalar(
+            'SELECT COUNT(*) FROM queues WHERE clinic_id = ? AND session_date = ? AND id <> ? AND UPPER(token_prefix) = ?',
+            [$clinicId, $queue['session_date'], (int) $id, $prefix]
+        );
+        if ((int) $taken > 0) {
+            flash('error', 'Another of today\'s sessions already uses ' . $prefix . '. Give each room its own letter so patients can tell their token apart.');
+            redirect('/queues/config');
+            return;
+        }
+
+        Db::run('UPDATE queues SET token_prefix = ? WHERE id = ? AND clinic_id = ?', [$prefix, (int) $id, $clinicId]);
+        (new AuditService())->log($clinicId, 'queue.prefix_changed', 'queue', (int) $id, [
+            'from' => $queue['token_prefix'], 'to' => $prefix,
+        ]);
+
+        flash('success', 'Series set to ' . $prefix . '. The next token issued will be ' . $prefix . str_pad('1', (int) $queue['token_padding'], '0', STR_PAD_LEFT) . '.');
+        redirect('/queues/config');
+    }
+
     private function put(int $clinicId, string $key, string $value): void
     {
         Db::run(

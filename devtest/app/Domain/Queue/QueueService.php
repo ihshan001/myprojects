@@ -38,6 +38,71 @@ final class QueueService
     /* Token issuing                                                       */
     /* ------------------------------------------------------------------ */
 
+    /**
+     * Pick the token series letter for a new session.
+     *
+     * Every room needs its OWN letter, or the board shows "A001" under three
+     * different doctors and nobody can tell which A001 is theirs. Room 1 gets A,
+     * Room 2 B, and so on; if that letter is already taken by another of today's
+     * sessions we walk forward to the first free one. The owner can override the
+     * result before the first token is issued.
+     *
+     * $preferred honours an explicit clinic default from Queue settings, but
+     * only while that letter is still free — a default must not reintroduce the
+     * collisions this method exists to prevent.
+     *
+     * All three session-opening paths used to derive this from the clinic
+     * default or the doctor's initial, which collided constantly.
+     */
+    public function suggestPrefix(int $clinicId, ?int $roomId = null, ?string $preferred = null): string
+    {
+        $used = array_map('strtoupper', array_column(
+            Db::all(
+                'SELECT token_prefix FROM queues WHERE clinic_id = ? AND session_date = ?',
+                [$clinicId, Db::today()]
+            ),
+            'token_prefix'
+        ));
+
+        $explicit = strtoupper(trim((string) $preferred));
+        if ($explicit !== '' && preg_match('/^[A-Z]{1,2}$/', $explicit) && !in_array($explicit, $used, true)) {
+            return $explicit;
+        }
+
+        $preferred = 'A';
+        if ($roomId !== null) {
+            $room = Db::one('SELECT name FROM rooms WHERE id = ? AND clinic_id = ?', [$roomId, $clinicId]);
+            if ($room) {
+                // "Room 2" / "Consult 2" -> B. Fall back to the room's position
+                // in the clinic's list when the name carries no number.
+                if (preg_match('/(\d+)/', (string) $room['name'], $m) && (int) $m[1] >= 1) {
+                    $idx = (int) $m[1] - 1;
+                } else {
+                    $names = array_column(
+                        Db::all('SELECT id FROM rooms WHERE clinic_id = ? ORDER BY id', [$clinicId]),
+                        'id'
+                    );
+                    $idx = array_search($roomId, array_map('intval', $names), true);
+                    $idx = $idx === false ? 0 : (int) $idx;
+                }
+                $preferred = chr(65 + ($idx % 26));
+            }
+        }
+
+        if (!in_array($preferred, $used, true)) {
+            return $preferred;
+        }
+        for ($i = 0; $i < 26; $i++) {
+            $letter = chr(65 + $i);
+            if (!in_array($letter, $used, true)) {
+                return $letter;
+            }
+        }
+        // 26 concurrent sessions is past any plan limit; keep the room's letter
+        // rather than issuing an empty prefix.
+        return $preferred;
+    }
+
     public function issueToken(int $clinicId, int $queueId, int $patientId, array $opts = []): array
     {
         return Db::transaction(function () use ($clinicId, $queueId, $patientId, $opts) {
@@ -714,7 +779,8 @@ final class QueueService
             (int) $entry['queue_id'],
             (int) $entry['id'],
             (int) $entry['priority'],
-            (int) $entry['sort_weight']
+            (int) $entry['sort_weight'],
+            (int) $entry['token_no']
         );
     }
 

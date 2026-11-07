@@ -36,6 +36,19 @@
   }
   window.qpToast = toast;
 
+  // A message set by the controller on the request we just redirected from.
+  // Errors linger and stay dismissible: they usually explain why something was
+  // refused, which is useless if it vanishes before it is read.
+  const noticeRoot = $('#toast-root');
+  if (noticeRoot && noticeRoot.dataset.notice) {
+    try {
+      const n = JSON.parse(noticeRoot.dataset.notice);
+      const kind = n.type === 'error' ? 'error' : (n.type === 'warning' || n.type === 'warn' ? 'warn' : 'success');
+      if (n.message) toast(n.message, kind, kind === 'error' ? 12000 : 5000);
+    } catch (e) { /* a malformed bag must not break the page */ }
+    delete noticeRoot.dataset.notice;
+  }
+
   /* --------------------------------------------------------- api helper */
   async function api(url, { method = 'GET', body = null, timeout = 12000 } = {}) {
     // Failing immediately is the right answer offline: a clinic waiting on a

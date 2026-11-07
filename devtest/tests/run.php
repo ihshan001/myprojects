@@ -4608,6 +4608,112 @@ Assert::test('the position page is read-only', function (): void {
     Assert::true(strpos($view, 'data-position-auto') !== false, 'a live visit keeps itself current');
 });
 
+/* ---- one token series per room ------------------------------------ */
+
+Assert::test('each room gets its own series letter, with no collisions', function (): void {
+    $clinicId = 1;
+    $svc = new App\Domain\Queue\QueueService();
+    // A fresh tenant so today's existing sessions cannot skew the letters.
+    seedTenant(201, 'series-clinic', 'Series Clinic');
+    $r1 = (int) Db::scalar('SELECT id FROM rooms WHERE clinic_id = 201 ORDER BY id LIMIT 1');
+    $r2 = (int) Db::insert('INSERT INTO rooms (clinic_id, name, floor) VALUES (?,?,?)', [201, 'Room 2', '1']);
+    $r3 = (int) Db::insert('INSERT INTO rooms (clinic_id, name, floor) VALUES (?,?,?)', [201, 'Room 3', '1']);
+
+    // The seeded session already holds A, so the next rooms must move on rather
+    // than handing a second room the same letter.
+    $used = array_column(Db::all('SELECT token_prefix FROM queues WHERE clinic_id = 201'), 'token_prefix');
+    Assert::same(['A'], $used, 'the first session took A');
+    $b = $svc->suggestPrefix(201, $r2);
+    Assert::same('B', $b, 'Room 2 gets B');
+
+    Db::run('INSERT INTO queues (clinic_id, name, token_prefix, session_date, status, last_token_no, created_at) VALUES (?,?,?,?,?,0,?)',
+        [201, 'Second', $b, Db::today(), 'open', Db::now()]);
+    Assert::same('C', $svc->suggestPrefix(201, $r3), 'Room 3 gets C');
+
+    // Asking for a room whose letter is taken must not duplicate it.
+    Db::run('INSERT INTO queues (clinic_id, name, token_prefix, session_date, status, last_token_no, created_at) VALUES (?,?,?,?,?,0,?)',
+        [201, 'Third', 'C', Db::today(), 'open', Db::now()]);
+    $again = $svc->suggestPrefix(201, $r2);
+    Assert::true(!in_array($again, ['A', 'B', 'C'], true), 'a taken room letter falls forward to a free one');
+    Assert::same('D', $again);
+    Assert::same($again, $svc->suggestPrefix(201, $r2), 'the allocator is deterministic for the same state');
+});
+
+Assert::test('an explicit preferred letter is honoured only while it is free', function (): void {
+    $svc = new App\Domain\Queue\QueueService();
+    seedTenant(202, 'pref-clinic', 'Preferred Clinic');
+    Assert::same('K', $svc->suggestPrefix(202, null, 'K'), 'a free preferred letter wins');
+    Assert::same('OP', $svc->suggestPrefix(202, null, 'op'), 'two letters are allowed and upper-cased');
+    // A is held by the seeded session, so the preference must not collide.
+    Assert::true($svc->suggestPrefix(202, null, 'A') !== 'A', 'a taken preference is ignored rather than duplicated');
+    Assert::true(preg_match('/^[A-Z]{1,2}$/', $svc->suggestPrefix(202, null, '!!!')) === 1, 'a junk preference falls back to a letter');
+});
+
+Assert::test('the board lists waiting tokens in ascending order', function (): void {
+    $clinicId = 1;
+    seedTenant(203, 'order-clinic', 'Order Clinic');
+    $qid = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 203');
+    Db::run('UPDATE queues SET token_prefix = ? WHERE id = ?', ['A', $qid]);
+    $patients = new App\Services\PatientService();
+    // Insert rows so that row id order and token order DISAGREE: token 1 is
+    // written last. Ordering on id would list A003, A002, A001.
+    foreach ([[3, 30], [2, 20], [1, 10]] as [$no, $mins]) {
+        $p = $patients->findOrCreate(203, ['full_name' => 'Order Patient ' . $no, 'phone' => '077000' . str_pad((string) $no, 4, '0', STR_PAD_LEFT)]);
+        Db::run(
+            "INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status, priority, sort_weight, source, joined_at, track_token, version)
+             VALUES (?,?,?,?,?,'waiting',0,0,'walkin',?,?,0)",
+            [203, $qid, (int) $p['id'], $no, 'A' . str_pad((string) $no, 3, '0', STR_PAD_LEFT),
+             date('Y-m-d H:i:s', time() - $mins * 60), App\Core\Str::urlToken(24)]
+        );
+    }
+    $payload = (new App\Services\DisplayService())->payload(203, null);
+    $tokens = array_column($payload['rooms'][0]['up_next'], 'token');
+    Assert::same(['A001', 'A002', 'A003'], $tokens, 'lowest token first, regardless of insert order');
+});
+
+Assert::test('a patient position agrees with the order the board shows', function (): void {
+    $qid = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 203');
+    $rows = Db::all("SELECT * FROM queue_entries WHERE queue_id = ? AND status = 'waiting' ORDER BY token_no", [$qid]);
+    $svc = new App\Domain\Queue\QueueService();
+    $board = array_column((new App\Services\DisplayService())->payload(203, null)['rooms'][0]['up_next'], 'token');
+    foreach ($rows as $i => $row) {
+        $pos = $svc->positionFor($row, 203);
+        Assert::same($i + 1, $pos, $row['token_label'] . ' is place ' . ($i + 1));
+        Assert::same($row['token_label'], $board[$i], 'and the board shows it in that same place');
+    }
+});
+
+Assert::test('changing a series is owner-only and guarded', function (): void {
+    $routes = file_get_contents(QP_ROOT . '/routes/web.php');
+    Assert::true(
+        strpos($routes, "'/queues/{id}/prefix', [QueueConfigController::class, 'prefix'], ['auth' => true, 'ability' => 'clinic.manage']") !== false,
+        'the prefix route requires clinic.manage'
+    );
+    $ctrl = file_get_contents(QP_ROOT . '/app/Http/Controllers/QueueConfigController.php');
+    $body = substr($ctrl, strpos($ctrl, 'public function prefix('));
+    $body = substr($body, 0, strpos($body, 'private function put('));
+    Assert::true(strpos($body, "last_token_no'] > 0") !== false, 'refuses once a token is on paper');
+    Assert::true(strpos($body, 'UPPER(token_prefix) = ?') !== false, 'refuses a letter another session already uses');
+    Assert::true(strpos($body, "^[A-Z]{1,2}$") !== false, 'accepts only one or two letters');
+    Assert::true(strpos($body, 'queue.prefix_changed') !== false, 'the change is audited');
+});
+
+Assert::test('controller flash messages actually reach the screen', function (): void {
+    $toast = file_get_contents(QP_ROOT . '/resources/views/partials/toast.php');
+    $layout = file_get_contents(QP_ROOT . '/resources/views/layouts/app.php');
+    $js = file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+    // 176 call sites set a flash; for a long time nothing read the bag, so every
+    // refusal and confirmation was silently dropped.
+    Assert::true(strpos($toast, 'notice()') !== false, 'the toast partial reads the flash bag');
+    Assert::true(strpos($toast, 'data-notice') !== false, 'and passes it as a data attribute');
+    Assert::true(strpos($layout, 'partials/toast.php') !== false, 'the layout includes it');
+    Assert::true(strpos($js, 'dataset.notice') !== false, 'and app.js renders it');
+    // Strip comments first: the docblock explains why there is no inline
+    // script, and grepping the raw file matches that explanation.
+    $toastCode = preg_replace('~/\*.*?\*/~s', '', $toast);
+    Assert::same(0, preg_match_all('/<script(?![^>]*\bsrc=)[^>]*>/i', (string) $toastCode), 'no inline script (CSP is script-src self)');
+});
+
 /* ------------------------------------------------------------------ */
 
 $code = Assert::summary();

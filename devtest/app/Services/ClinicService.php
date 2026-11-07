@@ -121,10 +121,13 @@ final class ClinicService
                 [$clinicId, $specIds['General Medicine'], $roomIds['Room 1'], $data['owner_name'], 2000, 10, Db::now()]
             );
 
+            // Room 1 starts the A series, same rule as every later session.
+            $prefix = (new \App\Domain\Queue\QueueService())
+                ->suggestPrefix($clinicId, $roomIds['Room 1']);
             Db::insert(
                 "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
                  VALUES (?,?,?,?, 'open', ?, ?, 0, 3, ?)",
-                [$clinicId, $doctorId, 'OPD — Consultation', 'consultation', Db::today(), strtoupper(substr($slug, 0, 1)), Db::now()]
+                [$clinicId, $doctorId, 'OPD — Consultation', 'consultation', Db::today(), $prefix, Db::now()]
             );
 
             Db::insert(

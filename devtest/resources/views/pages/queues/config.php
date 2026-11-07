@@ -51,10 +51,13 @@
 
       <div class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
         <div>
-          <label class="label" for="prefix">Token prefix</label>
+          <label class="label" for="prefix">Preferred first letter</label>
           <input class="input font-mono uppercase" id="prefix" name="prefix" maxlength="3"
                  value="<?= e($settings['prefix']) ?>" placeholder="A">
-          <p class="mt-1 text-[10px] text-ink-400">1–3 letters. Read aloud, so keep it sayable. Blank uses the doctor's initial.</p>
+          <p class="mt-1 text-[10px] leading-snug text-ink-400">
+            Used only if that letter is still free. Each room otherwise gets its own letter
+            by room number (Room 1 &rarr; A, Room 2 &rarr; B), so no two rooms issue "A002".
+          </p>
         </div>
         <div>
           <label class="label" for="padding">Digits in a token</label>
@@ -113,30 +116,51 @@
     <?php else: ?>
       <ul class="divide-y divide-slate-100">
         <?php foreach ($todayQueues as $q): ?>
-          <li class="px-4 py-2.5">
-            <div class="flex items-start justify-between gap-2">
-              <div class="min-w-0">
-                <p class="truncate text-xs font-semibold text-ink-900"><?= e($q['name']) ?></p>
-                <p class="mt-0.5 text-[10px] text-ink-500">
-                  <?= e($q['kind']) ?> ·
-                  <?= e((string) $q['token_prefix']) ?><?= str_pad('1', (int) $q['token_padding'], '0', STR_PAD_LEFT) ?> series ·
-                  issued <?= (int) $q['last_token_no'] ?>
-                </p>
+          <li class="px-4 py-3">
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex min-w-0 items-start gap-2.5">
+                <!-- The series letter is the thing patients actually read off
+                     their slip, so show it as a chip rather than burying it. -->
+                <span class="mt-0.5 shrink-0 rounded-lg bg-brand-50 px-2 py-1 text-[12px] font-extrabold tabular text-brand-700">
+                  <?= e((string) $q['token_prefix']) ?><?= str_pad('1', (int) $q['token_padding'], '0', STR_PAD_LEFT) ?>
+                </span>
+                <div class="min-w-0">
+                  <p class="truncate text-xs font-semibold text-ink-900"><?= e($q['name']) ?></p>
+                  <p class="mt-0.5 text-[10px] text-ink-500">
+                    <?= e($q['kind']) ?> &middot; issued <?= (int) $q['last_token_no'] ?>
+                  </p>
+                </div>
               </div>
 
               <?php if ($canManage && (int) $q['last_token_no'] === 0): ?>
                 <details class="relative shrink-0">
-                  <summary class="cursor-pointer list-none text-[10px] font-medium text-ink-500 underline">rename</summary>
-                  <div class="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-hairline bg-white p-2.5 shadow-lg">
-                    <form method="post" action="/queues/<?= (int) $q['id'] ?>/rename" class="space-y-2">
+                  <summary class="cursor-pointer list-none text-[10px] font-medium text-ink-500 underline">edit</summary>
+                  <div class="absolute right-0 z-20 mt-1 w-64 space-y-3 rounded-lg border border-hairline bg-white p-3 shadow-lg">
+                    <form method="post" action="/queues/<?= (int) $q['id'] ?>/prefix" class="space-y-1.5">
                       <?= csrf_field() ?>
-                      <input class="input !py-1 text-xs" name="name" value="<?= e($q['name']) ?>" required maxlength="60">
-                      <button class="btn-primary btn-sm w-full">Save</button>
+                      <label class="label !text-[10px]" for="px-<?= (int) $q['id'] ?>">Token series letter</label>
+                      <div class="flex gap-1.5">
+                        <input class="input !py-1 text-xs font-bold uppercase" id="px-<?= (int) $q['id'] ?>"
+                               name="prefix" value="<?= e((string) $q['token_prefix']) ?>"
+                               required maxlength="2" pattern="[A-Za-z]{1,2}">
+                        <button class="btn-primary btn-sm shrink-0">Set</button>
+                      </div>
+                      <p class="text-[10px] leading-snug text-ink-500">
+                        One or two letters. Each room needs its own, so patients can tell
+                        whose A002 is whose.
+                      </p>
+                    </form>
+                    <form method="post" action="/queues/<?= (int) $q['id'] ?>/rename" class="space-y-1.5 border-t border-hairline pt-2.5">
+                      <?= csrf_field() ?>
+                      <label class="label !text-[10px]" for="qn-<?= (int) $q['id'] ?>">Queue name</label>
+                      <input class="input !py-1 text-xs" id="qn-<?= (int) $q['id'] ?>" name="name" value="<?= e($q['name']) ?>" required maxlength="60">
+                      <button class="btn-secondary btn-sm w-full">Rename</button>
                     </form>
                   </div>
                 </details>
               <?php elseif ($canManage): ?>
-                <span class="shrink-0 text-[10px] text-ink-400" title="Renaming would make the slip in a patient's hand disagree with the screen">locked</span>
+                <span class="shrink-0 text-[10px] text-ink-400"
+                      title="Tokens are already on paper in patients' hands, so the name and letter are fixed for today">locked</span>
               <?php endif; ?>
             </div>
           </li>
@@ -146,8 +170,10 @@
 
     <div class="border-t border-hairline px-4 py-3">
       <p class="text-[11px] leading-relaxed text-ink-500">
-        A queue becomes locked once it issues its first token. Changing the label then
-        would leave patients holding a slip the screen no longer matches.
+Each room is given its own letter automatically &mdash; Room 1 issues A, Room 2 B, and so
+        on &mdash; and you can set any one or two letters yourself before the first token.
+        A queue locks once it issues one: changing the name or letter after that would leave
+        patients holding a slip the screen no longer matches.
       </p>
     </div>
   </div>

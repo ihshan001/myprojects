@@ -171,7 +171,7 @@ final class DisplayService
                    LEFT JOIN doctors d ON d.id = q.doctor_id
                    LEFT JOIN rooms r ON r.id = d.room_id
                   WHERE e.queue_id = ? AND e.status = 'waiting'
-                  ORDER BY e.priority DESC, e.sort_weight, e.id LIMIT 5",
+                  ORDER BY e.priority DESC, e.sort_weight, e.token_no LIMIT 5",
                 [$q['id']]
             );
             $roomCards[] = [

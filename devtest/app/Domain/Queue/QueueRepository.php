@@ -88,7 +88,7 @@ final class QueueRepository
                 AND e.status IN ('waiting','called','in_consultation','skipped','on_hold')
               ORDER BY CASE e.status WHEN 'in_consultation' THEN 0 WHEN 'called' THEN 1
                                      WHEN 'waiting' THEN 2 WHEN 'on_hold' THEN 3 ELSE 4 END,
-                       e.priority DESC, e.sort_weight ASC, e.id ASC",
+                       e.priority DESC, e.sort_weight ASC, e.token_no ASC",
             [$clinicId, $queueId]
         );
     }
@@ -105,7 +105,7 @@ final class QueueRepository
                LEFT JOIN doctors d ON d.id = q.doctor_id
               WHERE e.clinic_id = ? AND e.status IN ('waiting','called','in_consultation','skipped','on_hold')
               ORDER BY q.id, CASE e.status WHEN 'on_hold' THEN 1 ELSE 0 END,
-                       e.priority DESC, e.sort_weight ASC, e.id",
+                       e.priority DESC, e.sort_weight ASC, e.token_no ASC",
             [$clinicId]
         );
     }
@@ -186,14 +186,20 @@ final class QueueRepository
         );
     }
 
-    public function position(int $queueId, int $entryId, int $priority, int $weight): int
+    /**
+     * 1-based place in line, using the same rule every list sorts by:
+     * priority, then weight, then token number. Tiebreaking on the token rather
+     * than the row id keeps "A002 is ahead of A003" true even when rows were
+     * written out of order by an offline sync or a transfer.
+     */
+    public function position(int $queueId, int $entryId, int $priority, int $weight, int $tokenNo): int
     {
         return (int) Db::scalar(
             "SELECT COUNT(*) FROM queue_entries
               WHERE queue_id = ? AND status = 'waiting' AND id <> ?
                 AND (priority > ? OR (priority = ? AND sort_weight < ?)
-                     OR (priority = ? AND sort_weight = ? AND id < ?))",
-            [$queueId, $entryId, $priority, $priority, $weight, $priority, $weight, $entryId]
+                     OR (priority = ? AND sort_weight = ? AND (token_no < ? OR (token_no = ? AND id < ?))))",
+            [$queueId, $entryId, $priority, $priority, $weight, $priority, $weight, $tokenNo, $tokenNo, $entryId]
         ) + 1;
     }
 

@@ -653,8 +653,14 @@
   }
   .wr-card-idle { @apply mt-1 text-[26px] font-bold leading-none text-ink-300 sm:text-[32px]; }
   .wr-chips { @apply mt-2 flex flex-wrap gap-1.5; }
-  .wr-chip { background: var(--wr-bg); color: var(--wr); @apply rounded-md px-2 py-1 text-[12px] font-bold tabular sm:text-[13px]; }
-  .wr-chip-lg { @apply rounded-lg px-3 py-1.5 text-[18px] sm:text-[22px]; }
+  /* Up-next tokens are read from a seat, not from the desk: 12px was too small
+     for the one list a waiting patient actually scans for their number. */
+  .wr-chip {
+    background: var(--wr-bg);
+    color: var(--wr);
+    @apply rounded-lg px-2.5 py-1 text-[16px] font-extrabold tabular sm:text-[18px];
+  }
+  .wr-chip-lg { @apply rounded-lg px-3.5 py-1.5 text-[22px] sm:text-[26px]; }
   /* A called room is ringed, never enlarged: attention without demoting the
      other rooms to a smaller type size. */
   .wr-card-called {

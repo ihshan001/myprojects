@@ -111,7 +111,7 @@ Db::transaction(function () use ($planIds, $today) {
         ['Dr. Amara Silva', 'Paediatrics', 'Room 2', 2500, 12],
         ['Dr. Ruwan Jayasinghe', 'Cardiology', 'Room 3', 4000, 15],
         ['Dr. Fathima Rizwan', 'Dermatology', 'Room 4', 3000, 11],
-        ['Dr. Kasun Bandara', 'ENT', 'Room 2', 2800, 10],
+        ['Dr. Kasun Bandara', 'ENT', 'Procedure Room', 2800, 10],
     ];
     $doctors = [];
     foreach ($doctorDefs as [$name, $spec, $room, $fee, $avg]) {
@@ -125,11 +125,15 @@ Db::transaction(function () use ($planIds, $today) {
     addUser($c1, 'doctor', 'Dr. Ruwan Jayasinghe', 'ruwan@serenity.lk', 'Doctor#2026', $doctors[2]);
 
     $queues = [];
+    $series = new App\Domain\Queue\QueueService();
     foreach ($doctors as $i => $docId) {
+        // Use the real allocator rather than hardcoding a letter, so the demo
+        // shows the same A/B/C/D/E series a clinic actually gets: one per room.
+        $prefix = $series->suggestPrefix($c1, $rooms[$doctorDefs[$i][2]]);
         $queues[$i] = Db::insert(
             "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
              VALUES (?,?,?,?, 'open', ?, ?, 0, 3, ?)",
-            [$c1, $docId, 'OPD — ' . explode(' ', $doctorDefs[$i][0])[1] . ' ' . explode(' ', $doctorDefs[$i][0])[2], 'consultation', $today, 'A', Db::now()]
+            [$c1, $docId, 'OPD — ' . explode(' ', $doctorDefs[$i][0])[1] . ' ' . explode(' ', $doctorDefs[$i][0])[2], 'consultation', $today, $prefix, Db::now()]
         );
     }
 
@@ -187,26 +191,30 @@ Db::transaction(function () use ($planIds, $today) {
     }
 
     // today's live board
+    // Each room reads in ascending order: the token being seen is the lowest
+    // live one, and the waiting list runs upward from it. The previous fixture
+    // had A005 called while A002-A004 still waited, which looked like the board
+    // had the order wrong even though the query was fine.
     $live = [
         // patient idx, doctor idx, status, priority, joined minutes ago
-        [0, 0, 'in_consultation', 0, 32],
-        [1, 0, 'waiting', 1, 25],
-        [2, 0, 'waiting', 0, 21],
-        [3, 0, 'waiting', 0, 16],
-        [4, 0, 'called', 0, 12],
-        [5, 1, 'waiting', 0, 14],
-        [6, 1, 'waiting', 0, 9],
-        [7, 2, 'in_consultation', 1, 40],
-        [8, 2, 'waiting', 0, 6],
-        [9, 3, 'waiting', 0, 4],
-        [10, 4, 'waiting', 0, 2],
+        [0, 0, 'in_consultation', 0, 32],  // A001 with the doctor
+        [1, 0, 'waiting', 1, 25],          // A002 clinician-approved priority
+        [2, 0, 'waiting', 0, 21],          // A003
+        [3, 0, 'waiting', 0, 16],          // A004
+        [4, 0, 'waiting', 0, 12],          // A005
+        [5, 1, 'in_consultation', 0, 14],  // B001
+        [6, 1, 'waiting', 0, 9],           // B002
+        [7, 2, 'called', 1, 40],           // C001 just called
+        [8, 2, 'waiting', 0, 6],           // C002
+        [9, 3, 'waiting', 0, 4],           // D001
+        [10, 4, 'waiting', 0, 2],          // E001
     ];
     $counters = [];
     foreach ($live as [$pi, $qi, $status, $priority, $minsAgo]) {
         $qid = $queues[$qi];
         $counters[$qid] = ($counters[$qid] ?? 0) + 1;
         $n = $counters[$qid];
-        $prefix = 'A';
+        $prefix = (string) Db::scalar('SELECT token_prefix FROM queues WHERE id = ?', [$qid]);
         $joined = date('Y-m-d H:i:s', time() - $minsAgo * 60);
         $called = in_array($status, ['called', 'in_consultation'], true)
             ? date('Y-m-d H:i:s', strtotime($joined) + 6 * 60) : null;

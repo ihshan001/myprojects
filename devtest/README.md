@@ -34,10 +34,30 @@ no login screen to get past.
 | **8081** | Receptionist | `reception@serenity.lk` | `/app` | Serenity OPD & Family Clinic |
 | **8082** | Doctor | `amara@serenity.lk` | `/app` | Serenity OPD & Family Clinic |
 | **8083** | Platform Admin | `owner@queuepilot.app` | `/admin` | — platform wide — |
-| **8084** | Clinic Owner (2nd) | `admin@lakeview.lk` | `/app` | Lakeview Medical Centre |
+| **8084** | Clinic Owner (2nd) | `admin@lakeview.lk` | `/app` | Lakeview Medical Centre — **one doctor** |
+| **8085** | Public homepage | — no sign-in — | `/` | marketing site, pricing, live demo |
 
 8084 is the same role as 8080 in a **different tenant**, so you can prove
-isolation: it must never show Serenity's patients.
+isolation: it must never show Serenity's patients. It is also the solo-doctor
+fixture: one session, so it exercises the single-doctor board and console.
+
+**8085 is not devtest.** devtest has no landing page, no sign-in and no
+registration by design, so the homepage only exists in the pristine reference
+app. `tools/serve-landing.mjs` runs `../queuepilot`'s own unmodified server on
+8085, changing the transport only:
+
+- strips `X-Frame-Options` and `frame-ancestors` so the Arena preview iframe can
+  render it (production keeps its clickjacking protection);
+- defaults `Content-Type` to `text/html`. queuepilot's `serve.mjs` never sets it —
+  PHP's implicit content type does not appear in `headers_list()` — and with
+  `X-Content-Type-Options: nosniff` the browser refuses to guess and prints the
+  page as escaped source. devtest's `serve-role.mjs` already carried this fix.
+
+No file under `queuepilot/` is modified; `git status queuepilot/` stays clean.
+
+```bash
+PORT=8085 node tools/serve-landing.mjs     # from devtest/
+```
 
 One port at a time, or a subset:
 
@@ -143,6 +163,41 @@ now returns a `solo` flag and the board branches on it:
   opens a second session (or closes one) reloads into the other layout rather
   than trying to rebuild it in the poller. Verified live in both directions.
 
+#### One token series per room
+
+Every room issues its own letter: Room 1 A, Room 2 B, Room 3 C, and so on. Three
+separate session-opening paths (new doctor, bulk open, clinic signup) each used to
+derive the letter from the clinic-wide default or the doctor's initial, so five
+rooms all issued "A001" and nobody could tell whose A002 was whose. They now share
+`QueueService::suggestPrefix()`, which allocates against today's other sessions
+and walks forward past any letter already taken.
+
+- The owner can set any one or two letters per session in **Queue settings**
+  (`docs/design/token-series-settings.png`), before the first token is issued.
+- After the first token the letter is **locked**: re-lettering a queue would make
+  the slip in a patient's hand disagree with the wall. The refusal says so, and
+  says to set it on tomorrow's session instead.
+- A letter another of today's sessions already uses is refused, so the allocator's
+  guarantee cannot be undone by hand. Every change is audited.
+- The clinic-wide setting is now a *preferred first letter*, honoured only while
+  that letter is still free — a default must not reintroduce the collisions.
+
+#### Order reads the way patients expect
+
+`A001` is seen before `A002`, and the up-next list runs upward from whatever is
+being served. The rule is **priority, then appointment/walk-in weight, then token
+number**. The last part used to be the row `id`, which agrees with token order only
+by luck; an offline sync or a transfer can write rows out of order. Five queries
+shared that tiebreak and now all use `token_no`: the waiting-room up-next list,
+`QueueRepository::board()` and `clinicBoard()` (what reception sees),
+`QueueRepository::position()` (what the patient is told) and the notification
+queue. A test asserts the board's order and the patient's stated position agree.
+
+Clinical priority still outranks both, so an urgent patient is still called first.
+
+Up-next chips went from 12–13px to 16–18px (22–26px on the solo board): it is the
+one list a seated patient actually scans for their own number.
+
 #### "Where do I stand?" — one patient, one queue
 
 `/board/{key}/position` is a read-only lookup for someone who has stepped
@@ -165,6 +220,15 @@ claiming to show one room's position).
   queue id is required rather than optional (a solo clinic supplies it itself).
 - A waiting or called visit refreshes itself every 30s; a finished one does not
   poll forever.
+
+#### Flash messages were being discarded
+
+176 places call `flash('error'|'success', ...)`, and nothing read the bag — every
+confirmation and every refusal was silently dropped, so a guarded action looked
+like a dead button. `partials/toast.php` now reads `notice()` and hands it to the
+existing toast helper through a data attribute (an inline script would be blocked
+by `script-src 'self'`). Errors linger 12s and stay dismissible, because a message
+explaining *why* something was refused is useless if it vanishes unread.
 
 #### One board, three routes
 

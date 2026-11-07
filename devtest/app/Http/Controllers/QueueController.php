@@ -619,11 +619,15 @@ final class QueueController
                 $pattern
             );
 
-            // An explicit clinic prefix wins; otherwise the doctor's initial, as
-            // before. The prefix must be one letter group, not the whole name.
-            $prefix = $prefixSetting !== ''
-                ? $prefixSetting
-                : substr(strtoupper(preg_replace('/[^A-Za-z]/', '', (string) $doc['name']) ?: 'A'), 0, 1);
+            // One letter per room, allocated against today's other sessions so
+            // no two rooms issue the same series. The clinic-wide prefix is no
+            // longer forced onto every queue: that is what made five doctors
+            // all issue "A001".
+            $prefix = (new \App\Domain\Queue\QueueService())->suggestPrefix(
+                $clinicId,
+                !empty($doc['room_id']) ? (int) $doc['room_id'] : null,
+                $prefixSetting !== '' ? $prefixSetting : null
+            );
 
             Db::insert(
                 "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)

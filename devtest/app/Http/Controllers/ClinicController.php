@@ -120,12 +120,14 @@ final class ClinicController
             'reg_no' => Request::string('reg_no'),
         ]);
 
-        // open today's queue immediately so reception can issue tokens
+        // Open today's queue immediately so reception can issue tokens. The
+        // series letter comes from the room, not the clinic default, so two
+        // doctors never share "A".
+        $prefix = (new \App\Domain\Queue\QueueService())->suggestPrefix($clinicId, Request::int('room_id') ?: null);
         Db::insert(
             "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
              VALUES (?,?,?,'consultation','open',?,?,0,3,?)",
-            [$clinicId, $id, 'OPD — ' . $name, Db::today(),
-             strtoupper(substr(Auth::clinic()['token_prefix'] ?: $name, 0, 1)) ?: 'A', Db::now()]
+            [$clinicId, $id, 'OPD — ' . $name, Db::today(), $prefix, Db::now()]
         );
 
         (new AuditService())->log($clinicId, 'doctor.created', 'doctor', $id, ['name' => $name]);

@@ -124,7 +124,7 @@ final class NotificationService
                FROM queue_entries e
               WHERE e.clinic_id = ? AND e.queue_id = ?
                 AND e.status = 'waiting' AND e.approach_notified_at IS NULL
-              ORDER BY e.priority DESC, e.sort_weight ASC, e.id ASC
+              ORDER BY e.priority DESC, e.sort_weight ASC, e.token_no ASC
               LIMIT ?",
             [$clinicId, $queueId, $threshold]
         );
