@@ -664,65 +664,91 @@
       { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
     ));
     const seen = new Map();
-    const roomHtml = (r) => {
-      const call = r.status === 'called';
-      return `<div class="tv-room ${call ? 'tv-room-call' : 'tv-room-busy'}" data-token="${esc(r.token)}">
-        <div>
-          <p class="tv-eyebrow">${esc(r.room)}</p>
-          <p class="tv-room-token mt-2">${esc(r.token)}</p>
-        </div>
-        <div>
-          <p class="tv-room-meta">${esc(r.doctor || r.queue || '')}</p>
-          <p class="tv-room-sub">${call ? 'Please proceed to the room' : 'In consultation'}</p>
-        </div>
+    // Must stay in step with $accents in partials/waiting-board.php.
+    const ACCENTS = ['wr-green', 'wr-blue', 'wr-violet', 'wr-orange', 'wr-slate'];
+
+    const heroHtml = (r, brand) => `
+      <div class="wr-hero" data-token="${esc(r.token)}"
+           style="background-image: linear-gradient(135deg, ${esc(brand)}, color-mix(in srgb, ${esc(brand)} 62%, #000))">
+        <p class="wr-hero-room">${esc(r.room)}</p>
+        <p class="wr-hero-token">${esc(r.token)}</p>
+        <p class="wr-hero-doc">${esc(r.doctor || r.queue || '')}</p>
+        ${r.specialty ? `<p class="wr-hero-spec">
+          <svg class="h-4 w-4 shrink-0 sm:h-5 sm:w-5" aria-hidden="true"><use href="#i-stethoscope"/></svg>
+          ${esc(r.specialty)}</p>` : ''}
       </div>`;
-    };
-    const emptyHtml = `<div class="tv-empty" data-tv-empty>
-      <svg class="h-9 w-9 text-white/25" aria-hidden="true"><use href="#i-clock"/></svg>
-      <p class="mt-4 text-lg font-bold text-white/70 sm:text-xl">No token called yet</p>
-      <p class="mt-1.5 max-w-sm text-[13px] leading-relaxed text-white/40">
+    const heroEmpty = `<div class="wr-empty">
+      <svg class="h-9 w-9 text-ink-300" aria-hidden="true"><use href="#i-clock"/></svg>
+      <p class="mt-4 text-lg font-bold text-ink-700 sm:text-xl">No token called yet</p>
+      <p class="mt-1.5 max-w-sm text-[13px] leading-relaxed text-ink-500">
         Take a number at reception or on the tablet, then watch this screen for your token.
       </p>
     </div>`;
 
+    const cardHtml = (r, i) => `
+      <div class="wr-card ${ACCENTS[i % ACCENTS.length]}" data-room="${esc(r.room)}">
+        <div class="flex items-start justify-between gap-2">
+          <p class="wr-card-room min-w-0 truncate">${esc(r.room)}</p>
+          ${r.paused
+            ? '<span class="stale-pill shrink-0">Paused</span>'
+            : '<span class="live-pill shrink-0"><span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>LIVE</span>'}
+        </div>
+        <p class="wr-card-doc">${esc(r.doctor || r.queue || '')}</p>
+        ${r.specialty ? `<p class="wr-card-spec">${esc(r.specialty)}</p>` : ''}
+        <div class="wr-rule"></div>
+        <p class="wr-card-label">Now serving</p>
+        ${r.token
+          ? `<p class="wr-card-token" data-token="${esc(r.token)}">${esc(r.token)}</p>`
+          : '<p class="wr-card-idle">&mdash;</p>'}
+        <p class="wr-card-label mt-4">Up next</p>
+        ${(r.up_next && r.up_next.length)
+          ? `<div class="wr-chips">${r.up_next.slice(0, 6).map((u) => `<span class="wr-chip">${esc(u.token)}</span>`).join('')}</div>`
+          : '<p class="mt-1.5 text-[12px] text-ink-400">No one waiting</p>'}
+        <p class="wr-card-foot mt-4">${Number(r.waiting || 0)} waiting</p>
+      </div>`;
+
     const apply = (data) => {
-      const rooms = $('[data-tv-rooms]');
-      if (rooms) {
-        // Fall back to the single headline for an older payload.
-        const list = data.serving || (data.now_serving ? [data.now_serving] : []);
-        rooms.innerHTML = list.length ? list.map(roomHtml).join('') : emptyHtml;
-        list.forEach((r) => {
-          const id = (r.room || '') + '|' + (r.queue || '');
-          const prev = seen.get(id);
-          // Announce once per room per token, and only when it is a call the
-          // patient must act on — not on every four-second poll.
-          if (prev !== undefined && prev !== r.token && r.status === 'called') {
-            const tile = rooms.querySelector(`[data-token="${CSS.escape(r.token)}"]`);
-            if (tile) tile.classList.add('call-flash');
-            speak(r);
+      const serving = data.serving || (data.now_serving ? [data.now_serving] : []);
+      // Promote a call the patient must act on over a consultation already
+      // behind the door. Every room still keeps its own card below.
+      const hero = serving.find((r) => r.status === 'called') || serving[0] || null;
+      const heroBox = $('[data-tv-hero]');
+      if (heroBox) {
+        const brand = heroBox.getAttribute('data-brand') || '#0D7459';
+        heroBox.innerHTML = hero ? heroHtml(hero, brand) : heroEmpty;
+      }
+
+      const cards = $('[data-tv-cards]');
+      if (cards) {
+        const rooms = data.rooms || [];
+        cards.innerHTML = rooms.length
+          ? rooms.map(cardHtml).join('')
+          : '<p class="col-span-full rounded-2xl border border-dashed border-hairline bg-canvas px-5 py-8 text-center text-[13px] text-ink-500">No session is open right now. Please ask reception when the next one starts.</p>';
+      }
+
+      serving.forEach((r) => {
+        const id = (r.room || '') + '|' + (r.queue || '');
+        const prev = seen.get(id);
+        // Announce once per room per token, and only for a call the patient
+        // must act on - not on every four-second poll.
+        if (prev !== undefined && prev !== r.token && r.status === 'called') {
+          const tile = document.querySelector(`.wr-card[data-room="${CSS.escape(r.room || '')}"] .wr-card-token`);
+          if (tile) tile.classList.add('call-flash');
+          if (heroBox && hero && hero.token === r.token) {
+            heroBox.querySelector('.wr-hero')?.classList.add('call-flash');
           }
-          seen.set(id, r.token);
-        });
-      }
-      const next = $('[data-tv-next]');
-      if (next) {
-        next.innerHTML = (data.upcoming || []).slice(0, 6).map((u) => `
-          <div class="tv-chip">
-            <span class="tv-chip-token">${esc(u.token)}</span>
-            <span class="min-w-0">
-              <span class="block truncate text-[13px] font-semibold text-white/75">${esc(u.room)}</span>
-              <span class="block truncate text-[11px] text-white/40">${esc(u.doctor || u.queue || '')}</span>
-            </span>
-          </div>`).join('')
-          || '<p class="py-8 text-center text-[13px] text-white/35" data-tv-next-empty>No one waiting.</p>';
-      }
+          speak(r);
+        }
+        seen.set(id, r.token);
+      });
+
       // Announced delays and paused queues are the clinic talking to the room.
       const noticeBox = $('[data-tv-notices]');
       const noticeText = $('[data-tv-notices-text]');
       if (noticeBox && noticeText) {
         const parts = [];
         (data.delays || []).forEach((d) => {
-          parts.push(`${d.queue}: about ${d.minutes} min behind${d.note ? ' — ' + d.note : ''}`);
+          parts.push(`${d.queue}: about ${d.minutes} min behind${d.note ? ' - ' + d.note : ''}`);
         });
         (data.paused || []).forEach((q) => parts.push(`${q}: temporarily paused`));
         if (parts.length) {
@@ -733,10 +759,8 @@
         }
       }
 
-      const clinics = $('[data-tv-counts]');
-      if (clinics) {
-        clinics.textContent = `${data.stats?.waiting ?? 0} waiting · ${data.stats?.completed ?? 0} seen today`;
-      }
+      const counts = $('[data-tv-counts]');
+      if (counts) counts.textContent = `${data.stats?.waiting ?? 0} waiting`;
       const clock = $('[data-tv-clock]');
       if (clock) clock.textContent = data.server_time || '';
     };
@@ -783,7 +807,7 @@
           pill.style.color = '';
           pill.style.boxShadow = '';
         }
-        if (text) text.textContent = 'Live';
+        if (text) text.textContent = 'LIVE';
       },
     }).start();
 

@@ -2250,13 +2250,31 @@ Assert::test('the display board marks itself stale, and the pill is driven by th
     // watch: the banner element must be the one the poller looks for, and the
     // pill text must be addressable. A selector mismatch here means staff are
     // told to watch a signal that never changes.
-    $screen = (string) file_get_contents(QP_ROOT . '/resources/views/pages/display/screen.php');
+    // The board markup is shared, so read the screen together with the partial
+    // it includes rather than pinning the contract to one file.
+    $screen = (string) file_get_contents(QP_ROOT . '/resources/views/pages/display/screen.php')
+        . (string) file_get_contents(QP_ROOT . '/resources/views/partials/waiting-board.php');
     $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
 
     Assert::contains('data-tv-offline', $screen, 'the offline banner is addressable');
     Assert::contains('[data-tv-offline]', $js, 'the poller looks for the same attribute');
     Assert::contains('data-tv-live-text', $screen, 'the pill text has a hook');
     Assert::contains('Offline — not live', $js, 'the pill lies no more than the banner does');
+
+    // Every route that shows the board must render the SAME partial. Two of
+    // these were once rebuilt while /live/{key} kept the old markup and an
+    // inline script CSP had already disabled, so it opened and then froze.
+    foreach (['display/screen', 'display/live'] as $tpl) {
+        $src = (string) file_get_contents(QP_ROOT . '/resources/views/pages/' . $tpl . '.php');
+        Assert::contains('partials/waiting-board.php', $src, $tpl . ' renders the shared board');
+        // A script tag WITHOUT src is inline and CSP will drop it. Match the
+        // tag, not the word, or a comment describing the old bug trips this.
+        Assert::true(
+            preg_match('/<script(?![^>]*\\bsrc=)[^>]*>/i', $src) !== 1,
+            $tpl . ' has no inline script for CSP to block'
+        );
+        Assert::contains("asset('js/app.js')", $src, $tpl . ' loads the external poller');
+    }
 });
 
 Assert::test('the service worker never serves a cached api response', function (): void {

@@ -103,21 +103,46 @@ sidebar, and one of them is not even signed in.
 
 ### Waiting room
 
-- **One tile per room, not one token per clinic.** The old screen collapsed
+Rebuilt to `docs/design/waiting-room-reference.png`: a **light** board rather
+than the old dark one, because a waiting room is lit and a black wall reads as
+switched off. Hero token on a brand gradient, a "please be seated" panel, then
+one card per open session with its own accent colour.
+
+- **One card per room, not one token per clinic.** The old screen collapsed
   five consulting rooms into a single headline token, so a patient whose room
-  was called never saw it. `DisplayService::payload()` now returns `serving[]`
-  and keeps `now_serving` for older consumers.
+  was called never saw it. `DisplayService::payload()` returns `rooms[]` (card
+  per session, with its own up-next list and waiting count), plus `serving[]`
+  and `now_serving` for older consumers.
+- The hero promotes a `called` token over an `in_consultation` one, because a
+  call is the thing a patient must act on. Every room still keeps its own card.
 - Tokens are disambiguated by room **and** doctor: every queue restarts its own
   A-series, so three rooms can all be waiting on "A002".
-- `called` gets a filled brand tile and a flash; `in_consultation` is quieter.
-  Voice announcements fire once per room per token, not on every poll.
-- Inter tabular numerals. The old `font-mono` em-dash at 10rem rendered as a
-  solid white bar, which is what the empty state looked like.
-- Fits a 1920×1080 wall exactly with no scrolling; reflows to one column on a
-  phone. Full-screen button, wake lock, offline banner.
-- First paint is server-rendered from the **same** builder the poller uses, so
+- The card grid is `auto-fit`, not a fixed four: five open sessions get five
+  columns instead of four plus an orphan row.
+- Voice announcements fire once per room per token, not on every poll.
+- First paint is server-rendered from the **same** service the poller reads, so
   the wall is never blank for four seconds and the two cannot drift.
-- Staff setup controls (kiosk, rotate key, exit) are hidden on `/board/{key}`.
+
+#### One board, three routes
+
+`/display`, `/board/{key}` and `/live/{key}` all include
+`partials/waiting-board.php`. They used to be three templates: two were
+rebuilt while `/live/{key}` kept the old markup **and an inline script that
+CSP silently blocked**, so that link opened and then froze. A test now asserts
+all three share the partial and none carries an inline script.
+
+#### Two deliberate departures from the mockup
+
+- **No patient names.** The reference lists "A-033 Priya Nair" under each
+  doctor. This board is on an unauthenticated URL that anyone in the room can
+  photograph, so "up next" is **tokens only**. `DisplayService` never puts a
+  name or phone number in the payload at all. Verified: 12 names and 12 phone
+  numbers, zero occurrences in the board HTML, the API JSON, or `/live`.
+- **The doctor's specialty is shown** ("General Medicine", "Cardiology"). It is
+  the doctor's own public attribute, not a patient field — but note that next
+  to a token it lets someone infer why a neighbour is there. Say the word and
+  it comes off; it is one line in the partial.
+
 
 ### Patient view
 

@@ -116,6 +116,8 @@ final class DisplayController
         return [
             'servingRooms' => $board['serving'] ?? [],
             'upcomingTokens' => $board['upcoming'] ?? [],
+            'boardRooms' => $board['rooms'] ?? [],
+            'boardStats' => $board['stats'] ?? ['waiting' => 0, 'completed' => 0],
         ];
     }
 
@@ -171,6 +173,9 @@ final class DisplayController
         );
 
         $departmentName = null;
+        // A department key must stay scoped to its own waiting area, or a
+        // screen in one wing would announce another wing's tokens.
+        $scopeId = null;
         if (!$clinicId) {
             $row = Db::one(
                 "SELECT owner_id, key_name FROM settings
@@ -179,9 +184,10 @@ final class DisplayController
             );
             if ($row) {
                 $clinicId = (int) $row['owner_id'];
+                $scopeId = (int) substr((string) $row['key_name'], strlen('display.department.'));
                 $departmentName = Db::scalar(
                     'SELECT name FROM departments WHERE id = ? AND clinic_id = ?',
-                    [(int) substr((string) $row['key_name'], strlen('display.department.')), $clinicId]
+                    [$scopeId, $clinicId]
                 );
             }
         }
@@ -200,7 +206,9 @@ final class DisplayController
             'key' => $key,
             'clinicRecord' => $clinic,
             'departmentName' => $departmentName,
-        ], false);
+            'canRotate' => false,
+            'publicScreen' => true,
+        ] + $this->initialBoard((int) $clinicId, $scopeId), false);
     }
 
     public function rotate(): void
