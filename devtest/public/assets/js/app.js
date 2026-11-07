@@ -498,35 +498,45 @@
 
     function rowHtml(r) {
       const priority = Number(r.priority) === 1;
+      const meta = {
+        call: ['act-call', 'Call', 'megaphone'], recall: ['act-call', 'Call again', 'megaphone'],
+        start: ['act-start', 'Start', 'play'], complete: ['act-done', 'Complete', 'check'],
+        requeue: ['act-start', 'Re-queue', 'refresh'], skip: ['act-skip', 'Skip', null],
+        no_show: ['act-mute', 'No show', null], cancel: ['act-stop', 'Cancel', null],
+        hold: ['act-mute', 'Hold', null], release_hold: ['act-start', 'Back to queue', null],
+        transfer: ['act-mute', 'Transfer', null], priority: ['act-stop', 'Priority', null],
+      };
       const actions = (r.actions || []).map((a) => {
-        const label = {
-          call: 'Call', recall: 'Call again', start: 'Start', complete: 'Complete',
-          skip: 'Skip', no_show: 'No show', cancel: 'Cancel', transfer: 'Transfer',
-          requeue: 'Re-queue', priority: 'Priority', hold: 'Hold', release_hold: 'Back to queue',
-        }[a] || a;
-        const tone = {
-          call: 'act-call', recall: 'act-call', start: 'act-start', complete: 'act-done',
-          skip: 'act-skip', cancel: 'act-stop', no_show: 'act-mute', transfer: 'act-mute',
-          requeue: 'act-start', priority: 'act-stop', hold: 'act-mute', release_hold: 'act-start',
-        }[a] || 'act-mute';
-        return `<button type="button" class="${tone}" data-act="${a}">${label}</button>`;
+        const [tone, label, icon] = meta[a] || ['act-mute', a, null];
+        const svg = icon ? `<svg class="h-3.5 w-3.5"><use href="#i-${icon}"/></svg>` : '';
+        return `<button type="button" class="${tone}" data-act="${a}">${svg}${esc(label)}</button>`;
       }).join('');
 
-      return `<div class="flex flex-wrap items-center gap-3 border-b border-slate-100 px-4 py-3 last:border-0
+      // Mirrors components/queue-row.php. When this drifted before, the row
+      // reverted to the old design five seconds after load.
+      return `<div class="group flex flex-wrap items-center gap-x-2 gap-y-2 border-b border-hairline px-3 py-3 last:border-0 sm:gap-3 sm:px-4
         ${r.status === 'called' ? 'bg-sky-50/60' : ''} ${priority ? 'border-l-2 border-l-red-500' : ''}"
         data-entry-row data-entry='${esc(JSON.stringify({ id: r.id, version: r.version, status: r.status, token: r.token }))}'>
-        <div class="w-10 text-center text-xs font-bold text-slate-400 tabular">${r.status === 'waiting' ? r.position : '—'}</div>
+        <div class="w-7 text-center sm:w-10">
+          <span class="text-xs ${r.status === 'waiting' ? 'font-bold text-ink-400 tabular' : 'text-ink-300'}">${r.status === 'waiting' ? r.position : '—'}</span>
+        </div>
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-2">
             <span class="token-chip">${esc(r.token)}</span>
             ${priority ? '<span class="badge-priority">Priority</span>' : ''}
             <span class="${r.badge_class || 'badge-slate'}">${esc(r.status_label)}</span>
+            ${r.queue_name ? `<span class="text-xs text-ink-400">· ${esc(r.queue_name)}</span>` : ''}
           </div>
-          <p class="mt-1 truncate text-sm font-medium text-slate-800">${esc(r.full_name)}
-            <span class="ml-1 text-xs font-normal text-slate-400">${esc(r.patient_code || '')}</span></p>
-          <p class="text-[11px] text-slate-500 tabular">joined ${esc(r.joined)}${Number(r.call_count) > 1 ? ` · called ${r.call_count}×` : ''}</p>
+          <p class="mt-1 truncate text-sm font-medium text-ink-900">${esc(r.full_name)}
+            <span class="ml-1 text-xs font-normal text-ink-400">${esc(r.patient_code || '')}</span></p>
+          <p class="text-[11px] text-ink-500 tabular">joined ${esc(r.joined)}${Number(r.call_count) > 1 ? ` · called ${r.call_count}×` : ''}</p>
         </div>
-        <div class="flex flex-wrap items-center gap-1.5">${actions}</div>
+        ${actions ? `<div class="flex w-full flex-wrap items-center gap-1.5 border-t border-hairline pt-2 sm:w-auto sm:border-0 sm:pt-0">
+          ${actions}
+          <a class="act-mute" href="/queue/entry?id=${encodeURIComponent(r.id)}" title="Open details">
+            <svg class="h-3.5 w-3.5"><use href="#i-chevron-right"/></svg>
+          </a>
+        </div>` : ''}
       </div>`;
     }
 
@@ -559,19 +569,38 @@
     const apply = (d) => {
       const set = (sel, val) => { const el = $(sel); if (el && val !== undefined && val !== null) el.textContent = val; };
       set('[data-track-status]', d.status_label);
-      set('[data-track-position]', d.position > 0 ? String(d.position) : '—');
-      set('[data-track-estimate]', d.estimate?.label || '');
-      set('[data-track-confidence]', d.estimate?.confidence === 'data' ? 'Based on recent visit times' : 'Estimating — we learn as the clinic runs');
+      // Mirror the server: show the real status, never a bare dash.
+      set('[data-track-position]', d.status === 'waiting' && d.position > 0
+        ? String(d.position)
+        : (d.status_label || ''));
+      // Match the server: an estimate is meaningless after the call.
+      const estOverride = { called: 'Now', in_consultation: 'In progress',
+        completed: 'Finished', cancelled: '—', no_show: '—' }[d.status];
+      set('[data-track-estimate]', estOverride || d.estimate?.label || '');
+      set('[data-track-confidence]', d.status !== 'waiting' ? ''
+        : (d.estimate?.confidence === 'data' ? 'Based on recent visit times' : 'Estimating — we learn as the clinic runs'));
+      const caveat = $('[data-track-caveat]');
+      if (caveat) caveat.classList.toggle('hidden', d.status !== 'waiting');
       set('[data-track-updated]', d.updated_at ? d.updated_at.slice(11, 16) : '');
 
       const posLabel = $('[data-track-position-label]');
-      if (posLabel) posLabel.textContent = d.status === 'waiting' ? (d.position === 1 ? 'You are next' : 'People ahead') : 'Status';
+      if (posLabel) {
+        posLabel.textContent = d.status === 'waiting'
+          ? (d.position === 1 ? 'You are next' : 'People ahead of you')
+          : 'Your status';
+      }
+      const posEl = $('[data-track-position]');
+      if (posEl) {
+        posEl.className = d.status === 'waiting'
+          ? 'mt-1 stat-value text-4xl'
+          : 'mt-1 text-xl font-bold leading-tight text-ink-900';
+      }
       const pill = $('[data-track-pill]');
       if (pill) {
         pill.textContent = d.status_label;
         pill.className = `inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${
           d.status === 'called' ? 'bg-sky-100 text-sky-800'
-            : d.status === 'in_consultation' ? 'bg-teal-100 text-teal-800'
+            : d.status === 'in_consultation' ? 'bg-brand-100 text-brand-800'
             : d.status === 'completed' ? 'bg-emerald-100 text-emerald-800'
             : 'bg-amber-100 text-amber-800'}`;
       }
@@ -600,25 +629,63 @@
   const tvBoard = $('[data-display-board]');
   if (tvBoard) {
     const key = tvBoard.getAttribute('data-display-board');
+    // Room tiles are built here with the same classes the server renders, so
+    // a refresh never changes the shape of the board.
+    const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+    const seen = new Map();
+    const roomHtml = (r) => {
+      const call = r.status === 'called';
+      return `<div class="tv-room ${call ? 'tv-room-call' : 'tv-room-busy'}" data-token="${esc(r.token)}">
+        <div>
+          <p class="tv-eyebrow">${esc(r.room)}</p>
+          <p class="tv-room-token mt-2">${esc(r.token)}</p>
+        </div>
+        <div>
+          <p class="tv-room-meta">${esc(r.doctor || r.queue || '')}</p>
+          <p class="tv-room-sub">${call ? 'Please proceed to the room' : 'In consultation'}</p>
+        </div>
+      </div>`;
+    };
+    const emptyHtml = `<div class="tv-empty" data-tv-empty>
+      <svg class="h-9 w-9 text-white/25" aria-hidden="true"><use href="#i-clock"/></svg>
+      <p class="mt-4 text-lg font-bold text-white/70 sm:text-xl">No token called yet</p>
+      <p class="mt-1.5 max-w-sm text-[13px] leading-relaxed text-white/40">
+        Take a number at reception or on the tablet, then watch this screen for your token.
+      </p>
+    </div>`;
+
     const apply = (data) => {
-      const servingEl = $('[data-tv-serving]');
-      if (servingEl && data.now_serving) {
-        const prev = servingEl.getAttribute('data-token');
-        servingEl.textContent = data.now_serving.token;
-        servingEl.setAttribute('data-token', data.now_serving.token);
-        if (prev && prev !== data.now_serving.token) {
-          servingEl.classList.add('call-flash');
-          setTimeout(() => servingEl.classList.remove('call-flash'), 6000);
-          speak(data.now_serving);
-        }
+      const rooms = $('[data-tv-rooms]');
+      if (rooms) {
+        // Fall back to the single headline for an older payload.
+        const list = data.serving || (data.now_serving ? [data.now_serving] : []);
+        rooms.innerHTML = list.length ? list.map(roomHtml).join('') : emptyHtml;
+        list.forEach((r) => {
+          const id = (r.room || '') + '|' + (r.queue || '');
+          const prev = seen.get(id);
+          // Announce once per room per token, and only when it is a call the
+          // patient must act on — not on every four-second poll.
+          if (prev !== undefined && prev !== r.token && r.status === 'called') {
+            const tile = rooms.querySelector(`[data-token="${CSS.escape(r.token)}"]`);
+            if (tile) tile.classList.add('call-flash');
+            speak(r);
+          }
+          seen.set(id, r.token);
+        });
       }
       const next = $('[data-tv-next]');
       if (next) {
-        next.innerHTML = (data.upcoming || []).map((u) => `
-          <div class="flex items-center gap-4 rounded-xl bg-white/5 px-5 py-3">
-            <span class="tv-token text-3xl text-white">${u.token}</span>
-            <span class="text-sm text-slate-400">${u.room || ''}</span>
-          </div>`).join('') || '<p class="text-slate-500">No one waiting</p>';
+        next.innerHTML = (data.upcoming || []).slice(0, 6).map((u) => `
+          <div class="tv-chip">
+            <span class="tv-chip-token">${esc(u.token)}</span>
+            <span class="min-w-0">
+              <span class="block truncate text-[13px] font-semibold text-white/75">${esc(u.room)}</span>
+              <span class="block truncate text-[11px] text-white/40">${esc(u.doctor || u.queue || '')}</span>
+            </span>
+          </div>`).join('')
+          || '<p class="py-8 text-center text-[13px] text-white/35" data-tv-next-empty>No one waiting.</p>';
       }
       // Announced delays and paused queues are the clinic talking to the room.
       const noticeBox = $('[data-tv-notices]');

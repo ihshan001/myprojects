@@ -30,46 +30,46 @@ $chosenQueue = (int) ($old['queue_id'] ?? 0) ?: ($first !== null ? (int) $first[
     <meta http-equiv="refresh" content="<?= (int) $receiptSeconds ?>;url=/kiosk/<?= e($key) ?>?done=1">
   <?php endif; ?>
 </head>
-<body class="min-h-full bg-slate-100">
+<body class="patient-view min-h-full bg-canvas">
   <main class="mx-auto w-full max-w-xl px-5 py-8">
     <header class="text-center">
-      <p class="text-sm font-semibold uppercase tracking-widest text-teal-700"><?= e((string) $clinic['name']) ?></p>
-      <h1 class="mt-1 text-2xl font-bold text-slate-900">Self check-in</h1>
+      <p class="text-sm font-semibold uppercase tracking-widest text-brand-700"><?= e((string) $clinic['name']) ?></p>
+      <h1 class="mt-1 text-2xl font-bold text-ink-900">Self check-in</h1>
     </header>
 
     <?php if ($receipt !== null): ?>
       <!-- ---------------- the receipt ---------------- -->
       <div class="card mt-6 p-8 text-center">
-        <p class="text-sm text-slate-500">Your number</p>
-        <p class="mt-2 font-mono text-7xl font-bold tracking-tight text-teal-700"><?= e((string) $receipt['token']) ?></p>
+        <p class="text-sm text-ink-500">Your number</p>
+        <p class="mt-2 font-mono text-7xl font-bold tracking-tight text-brand-700"><?= e((string) $receipt['token']) ?></p>
 
         <dl class="mx-auto mt-6 max-w-xs space-y-2 text-left text-sm">
           <div class="flex justify-between gap-3">
-            <dt class="text-slate-500">Service</dt>
-            <dd class="font-semibold text-slate-900"><?= e((string) $receipt['queue']) ?></dd>
+            <dt class="text-ink-500">Service</dt>
+            <dd class="font-semibold text-ink-900"><?= e((string) $receipt['queue']) ?></dd>
           </div>
           <?php if ((string) $receipt['doctor'] !== ''): ?>
             <div class="flex justify-between gap-3">
-              <dt class="text-slate-500">Doctor</dt>
-              <dd class="font-semibold text-slate-900"><?= e((string) $receipt['doctor']) ?></dd>
+              <dt class="text-ink-500">Doctor</dt>
+              <dd class="font-semibold text-ink-900"><?= e((string) $receipt['doctor']) ?></dd>
             </div>
           <?php endif; ?>
           <div class="flex justify-between gap-3">
-            <dt class="text-slate-500">Ahead of you</dt>
-            <dd class="font-semibold text-slate-900"><?= (int) $receipt['ahead'] ?> patient(s)</dd>
+            <dt class="text-ink-500">Ahead of you</dt>
+            <dd class="font-semibold text-ink-900"><?= (int) $receipt['ahead'] ?> patient(s)</dd>
           </div>
         </dl>
 
-        <div class="mt-6 rounded-xl bg-teal-50 px-4 py-3 text-sm leading-relaxed text-teal-900">
+        <div class="mt-6 rounded-xl bg-brand-50 px-4 py-3 text-sm leading-relaxed text-teal-900">
           <?= e((string) $receipt['message']) ?>
           <?php if ((string) ($receipt['track_url'] ?? '') !== ''): ?>
-            <span class="mt-1 block text-xs text-teal-800">
+            <span class="mt-1 block text-xs text-brand-800">
               Watch your place on your phone: scan the slip at the desk, or ask reception for the link.
             </span>
           <?php endif; ?>
         </div>
 
-        <p class="mt-4 text-xs text-slate-400">
+        <p class="mt-4 text-xs text-ink-400">
           This screen clears itself in <?= (int) $receiptSeconds ?> seconds.
         </p>
       </div>
@@ -84,8 +84,8 @@ $chosenQueue = (int) ($old['queue_id'] ?? 0) ?: ($first !== null ? (int) $first[
 
       <?php if ($queues === []): ?>
         <div class="card mt-6 p-8 text-center">
-          <p class="text-lg font-semibold text-slate-900">No session is open right now</p>
-          <p class="mt-2 text-sm leading-relaxed text-slate-600">
+          <p class="text-lg font-semibold text-ink-900">No session is open right now</p>
+          <p class="mt-2 text-sm leading-relaxed text-ink-600">
             The clinic has not opened a queue for today. Please speak to the reception desk.
           </p>
           <?php if (!empty($clinic['phone'])): ?>
@@ -106,7 +106,7 @@ $chosenQueue = (int) ($old['queue_id'] ?? 0) ?: ($first !== null ? (int) $first[
           </div>
 
           <div>
-            <label class="label text-base" for="phone">Mobile number <span class="font-normal text-slate-400">(optional)</span></label>
+            <label class="label text-base" for="phone">Mobile number <span class="font-normal text-ink-400">(optional)</span></label>
             <input class="input !py-4 text-lg" id="phone" name="phone" inputmode="tel" maxlength="10"
                    value="<?= e((string) ($old['phone'] ?? '')) ?>" placeholder="0771234567">
             <p class="help text-xs">So the clinic can text you if the doctor is delayed.</p>
@@ -117,13 +117,13 @@ $chosenQueue = (int) ($old['queue_id'] ?? 0) ?: ($first !== null ? (int) $first[
               <legend class="label text-base">Which service?</legend>
               <div class="mt-2 space-y-2">
                 <?php foreach ($queues as $q): ?>
-                  <label class="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3
-                                has-[:checked]:border-teal-600 has-[:checked]:bg-teal-50">
-                    <input type="radio" name="queue_id" value="<?= (int) $q['id'] ?>" class="h-5 w-5"
+                  <label class="flex cursor-pointer items-center gap-3 rounded-xl border border-hairline bg-white px-4 py-3
+                                has-[:checked]:border-brand-600 has-[:checked]:bg-brand-50">
+                    <input type="radio" name="queue_id" value="<?= (int) $q['id'] ?>" class="h-5 w-5 shrink-0 accent-brand-600"
                            <?= (int) $q['id'] === $chosenQueue ? 'checked' : '' ?> required>
                     <span class="min-w-0 flex-1">
-                      <span class="block text-base font-semibold text-slate-900"><?= e((string) $q['name']) ?></span>
-                      <span class="block text-xs text-slate-500">
+                      <span class="block text-base font-semibold text-ink-900"><?= e((string) $q['name']) ?></span>
+                      <span class="block text-xs text-ink-500">
                         <?= e((string) ($q['doctor_name'] ?? 'Any available doctor')) ?>
                         · <?= (int) $q['waiting_count'] ?> waiting
                         <?php if ((string) $q['status'] === 'paused'): ?>
@@ -137,9 +137,9 @@ $chosenQueue = (int) ($old['queue_id'] ?? 0) ?: ($first !== null ? (int) $first[
             </fieldset>
           <?php else: ?>
             <input type="hidden" name="queue_id" value="<?= (int) $first['id'] ?>">
-            <div class="rounded-xl bg-slate-50 px-4 py-3 text-sm">
-              <p class="font-semibold text-slate-900"><?= e((string) $first['name']) ?></p>
-              <p class="text-xs text-slate-500">
+            <div class="rounded-xl bg-canvas px-4 py-3 text-sm">
+              <p class="font-semibold text-ink-900"><?= e((string) $first['name']) ?></p>
+              <p class="text-xs text-ink-500">
                 <?= e((string) ($first['doctor_name'] ?? 'Any available doctor')) ?>
                 · <?= (int) $first['waiting_count'] ?> waiting
                 <?php if ((string) $first['status'] === 'paused'): ?>
@@ -149,18 +149,18 @@ $chosenQueue = (int) ($old['queue_id'] ?? 0) ?: ($first !== null ? (int) $first[
             </div>
           <?php endif; ?>
 
-          <button class="btn w-full justify-center bg-teal-700 !py-4 text-lg text-white" type="submit">
+          <button class="btn w-full justify-center bg-brand-700 !py-4 text-lg text-white" type="submit">
             Get my number
           </button>
 
-          <p class="text-center text-xs leading-relaxed text-slate-400">
+          <p class="text-center text-xs leading-relaxed text-ink-400">
             Not sure, or here for something urgent? Please speak to the reception desk.
           </p>
         </form>
       <?php endif; ?>
     <?php endif; ?>
 
-    <p class="mt-8 text-center text-[10px] text-slate-400">
+    <p class="mt-8 text-center text-[10px] text-ink-400">
       Powered by QueuePilot · this screen shows no other patient's details
     </p>
   </main>

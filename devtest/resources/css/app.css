@@ -580,13 +580,88 @@
   }
 
   /* ------------------------------------------------------ display mode */
+  /* ---------------------------------------------------------------------
+     Waiting-room screen. Same palette and type as the console, inverted for
+     a screen read from six metres. Deliberately NOT the console shell: no
+     sidebar, no navigation, nothing clickable a patient could wander into.
+     --------------------------------------------------------------------- */
   .tv {
-    @apply bg-slate-950 text-white;
+    @apply text-white;
+    background: #07110E;
+    /* Fixed to the viewport: on a phone the page scrolls, and a background
+       sized to the document showed a visible seam where the glow ended. */
+    background-attachment: fixed;
+    background-image:
+      radial-gradient(1100px 520px at 18% -8%, rgba(13, 116, 89, 0.22), transparent 60%),
+      radial-gradient(900px 460px at 92% 4%, rgba(13, 116, 89, 0.10), transparent 62%);
   }
+  /* Inter, not font-mono: a monospace em-dash at 10rem rendered as a solid
+     white bar, which is what the empty state used to look like. */
   .tv-token {
     font-variant-numeric: tabular-nums;
-    @apply font-mono font-black tracking-tight;
+    font-feature-settings: 'tnum' 1;
+    @apply font-black tracking-tight;
   }
+  .tv-head {
+    @apply flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-5;
+  }
+  .tv-mark {
+    @apply flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-base font-black text-white;
+    background: linear-gradient(145deg, #12896B, #0D7459);
+  }
+  .tv-eyebrow {
+    @apply text-[11px] font-bold uppercase tracking-[0.28em] text-white/40;
+  }
+  .tv-panel {
+    @apply rounded-3xl border border-white/10 bg-white/[0.03] p-5 sm:p-7;
+  }
+  /* auto-fit so one room reads huge and five rooms still fit the wall. */
+  .tv-rooms {
+    @apply grid h-full gap-4 sm:gap-5;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+    /* One row of two rooms should fill the wall, not leave two thirds of it
+       empty underneath. */
+    grid-auto-rows: 1fr;
+  }
+  .tv-room {
+    /* Centred as one stack: justify-between left a large void between the
+       token and the doctor once the tile grew to fill the wall. */
+    @apply relative flex flex-col justify-center overflow-hidden rounded-3xl border p-5 text-center sm:p-7;
+    min-height: 13rem;
+  }
+  .tv-room-call {
+    border-color: rgba(45, 212, 191, 0.45);
+    background: linear-gradient(160deg, rgba(13, 116, 89, 0.95), rgba(9, 82, 64, 0.92));
+    box-shadow: 0 20px 60px -24px rgba(13, 116, 89, 0.85);
+  }
+  .tv-room-busy {
+    @apply border-white/10 bg-white/[0.04];
+  }
+  .tv-room-token {
+    @apply tv-token leading-none text-white;
+    font-size: clamp(3.5rem, 8vw, 8.5rem);
+  }
+  .tv-room-meta { @apply mt-5 text-sm font-semibold text-white/80 sm:text-lg; }
+  .tv-room-sub  { @apply mt-0.5 text-[12px] text-white/50 sm:text-[13px]; }
+  .tv-chip {
+    @apply flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2.5;
+  }
+  .tv-chip-token { @apply tv-token text-2xl text-white sm:text-3xl; }
+  .tv-empty {
+    @apply flex flex-col items-center justify-center rounded-3xl border border-dashed
+           border-white/15 bg-white/[0.02] px-6 py-14 text-center;
+    min-height: 13rem;
+  }
+  .tv-btn {
+    @apply rounded-lg border border-white/15 px-2.5 py-1.5 text-[11px] font-medium
+           text-white/55 transition hover:border-white/30 hover:text-white;
+  }
+
+  /* The console is a dense staff tool and its 9px stat labels match the
+     reference. A patient reading their own position on a phone is a different
+     reader — give those labels back their legibility. */
+  .patient-view .stat-label { font-size: 11px; letter-spacing: 0.04em; }
+  .patient-view .stat-hint  { font-size: 11px; }
 }
 
 @layer utilities {
@@ -614,10 +689,13 @@
 .rise { animation: qp-rise 0.22s ease-out both; }
 
 @keyframes qp-call-flash {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(14, 165, 233, 0); }
-  50% { box-shadow: 0 0 0 6px rgba(14, 165, 233, 0.18); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0); }
+  50% { box-shadow: 0 0 0 8px rgba(45, 212, 191, 0.22); }
 }
 .call-flash { animation: qp-call-flash 1.8s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .call-flash { animation: none; box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.35); }
+}
 
 /* Print: reports should print clean, without chrome */
 @media print {

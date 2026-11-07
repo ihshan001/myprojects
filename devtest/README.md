@@ -89,6 +89,55 @@ the same sidebar, top bar, cards, buttons, tables and mobile behaviour. The
 clinic board and the platform console are built from the same parts — greeting,
 five stat tiles, a main card and a right rail — with each role's own data.
 
+## The two patient-facing screens
+
+These are deliberately **not** the console shell. They render as standalone
+documents (`view($tpl, $data, false)`) because neither audience should see a
+sidebar, and one of them is not even signed in.
+
+| Screen | Route | Who looks at it |
+|---|---|---|
+| Waiting room | `/display` (staff preview) · `/board/{key}` (the wall) | everyone in the room |
+| Patient view | `/t/{token}` | one patient, on their own phone |
+| Self check-in | `/kiosk/{key}` | a walk-in at a lobby tablet |
+
+### Waiting room
+
+- **One tile per room, not one token per clinic.** The old screen collapsed
+  five consulting rooms into a single headline token, so a patient whose room
+  was called never saw it. `DisplayService::payload()` now returns `serving[]`
+  and keeps `now_serving` for older consumers.
+- Tokens are disambiguated by room **and** doctor: every queue restarts its own
+  A-series, so three rooms can all be waiting on "A002".
+- `called` gets a filled brand tile and a flash; `in_consultation` is quieter.
+  Voice announcements fire once per room per token, not on every poll.
+- Inter tabular numerals. The old `font-mono` em-dash at 10rem rendered as a
+  solid white bar, which is what the empty state looked like.
+- Fits a 1920×1080 wall exactly with no scrolling; reflows to one column on a
+  phone. Full-screen button, wake lock, offline banner.
+- First paint is server-rendered from the **same** builder the poller uses, so
+  the wall is never blank for four seconds and the two cannot drift.
+- Staff setup controls (kiosk, rotate key, exit) are hidden on `/board/{key}`.
+
+### Patient view
+
+- Position when waiting ("2 people ahead of you"), the real status otherwise.
+  It used to print a bare `—` for every non-waiting state.
+- Guidance follows the visit: a called patient is told to go to the room, not
+  to "wait until your token is called". The wait estimate reads `Now` /
+  `In progress` / `Finished` instead of a stale range.
+- `.patient-view` raises stat labels back to 11px. The console's 9px labels suit
+  a dense staff tool; a patient reading their own position deserves better.
+- Staff can reopen it: **Patient view** and **Copy patient link** in each queue
+  row's overflow menu, so a lost slip no longer means a new token.
+
+Privacy on the wall: tokens, rooms and **doctor** names only. Verified by
+scraping every patient name from the directory and asserting none appear in
+either the HTML or the JSON of the public board.
+
+Verified: 20 patient-surface checks at 360 / 426 / 768 / 1484 / 1920px, zero
+overflow, zero JS errors, zero sub-10px type, no console chrome.
+
 ### Every page, not just the board
 
 The layout wraps **every** authenticated page in the same `.board-panel`, and

@@ -79,6 +79,26 @@ $payload = htmlspecialchars(json_encode([
               </button>
             <?php endforeach; ?>
           <?php endif; ?>
+          <?php
+          // The patient's own screen. Reception issues the link on the token
+          // slip, but until now had no way to reopen it — so a patient who
+          // lost the slip could only be given a fresh token.
+          $trackToken = (string) ($row['track_token'] ?? '');
+          $trackLive = $trackToken !== ''
+              && (empty($row['track_expires_at']) || strtotime((string) $row['track_expires_at']) > time());
+          ?>
+          <?php if ($trackLive): ?>
+            <a href="/t/<?= e($trackToken) ?>" target="_blank" rel="noopener"
+               class="flex items-center gap-1.5 rounded px-2 py-1.5 text-[12px] font-medium text-ink-700 hover:bg-slate-50">
+              <svg class="h-3.5 w-3.5 shrink-0 text-ink-400"><use href="#i-phone"/></svg>
+              Patient view
+            </a>
+            <button type="button" data-copy="<?= e(rtrim((string) \App\Core\Env::get('app.url', ''), '/') . '/t/' . $trackToken) ?>"
+                    class="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[12px] font-medium text-ink-700 hover:bg-slate-50">
+              <svg class="h-3.5 w-3.5 shrink-0 text-ink-400"><use href="#i-link"/></svg>
+              Copy patient link
+            </button>
+          <?php endif; ?>
           <a href="/queue/<?= $eid ?>" class="block rounded px-2 py-1.5 text-[12px] font-medium text-ink-700 hover:bg-slate-50">Open visit</a>
         </span>
       </span>
