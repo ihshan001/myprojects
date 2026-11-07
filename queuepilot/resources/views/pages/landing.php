@@ -152,9 +152,18 @@ $principles = [
     ['“The board keeps working when the line drops.”', 'Built for a real clinic', 'It shows last-known state and says so, instead of silently freezing or inventing a queue.'],
 ];
 $navLinks = [['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pricing'], ['#patient', 'Patient view']];
+
+// The brand mark: a token-shaped Q whose tail ends in a gold signal dot.
+// Inline so it inherits no external request and stays crisp at any size.
+$mark = '<svg viewBox="0 0 32 32" class="h-full w-full" aria-hidden="true">'
+      . '<circle cx="14" cy="14" r="6.4" fill="none" stroke="#fff" stroke-width="2.6"/>'
+      . '<path d="M18.2 18.2 L22.6 22.6" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>'
+      . '<circle cx="23.4" cy="23.4" r="2.6" fill="#E0A63C"/>'
+      . '</svg>';
+$markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
 ?>
 <!DOCTYPE html>
-<html lang="en" class="h-full scroll-smooth">
+<html lang="en" class="lp-root h-full scroll-smooth">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -163,19 +172,19 @@ $navLinks = [['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pr
   <meta name="theme-color" content="#0F766E">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/assets/img/icon.svg" type="image/svg+xml">
-  <link rel="preload" href="/assets/fonts/inter-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="<?= e(asset('fonts/fraunces-var.woff2')) ?>" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="<?= e(asset('build/app.css')) ?>">
 </head>
 <body class="lp">
 <?php include QP_ROOT . '/resources/views/partials/icons.php'; ?>
 
 <!-- ============================================================ header -->
-<header class="sticky top-0 z-40 border-b border-slate-200/70 bg-white/90 backdrop-blur">
-  <div class="lp-wrap flex h-[62px] items-center justify-between gap-4">
+<header class="lp-header" data-lp-header>
+  <span class="lp-progress" data-lp-progress aria-hidden="true"></span>
+  <div class="lp-wrap flex h-[3.875rem] items-center justify-between gap-4">
     <a href="/" class="flex shrink-0 items-center gap-2.5">
-      <span class="flex h-8 w-8 items-center justify-center rounded-lg text-[13px] font-extrabold text-white"
-            style="background-image: linear-gradient(140deg,#14807A,#0B5F59)">Q</span>
-      <span class="text-[16px] font-extrabold tracking-[-0.02em] text-slate-900">QueuePilot</span>
+      <span class="h-8 w-8 shrink-0 rounded-[0.625rem] p-0.5" style="<?= e($markBg) ?>"><?= $mark ?></span>
+      <span class="lp-wordmark text-[1.1875rem]">QueuePilot</span>
     </a>
     <nav class="hidden items-center gap-7 md:flex">
       <?php foreach ($navLinks as [$href, $label]): ?>
@@ -183,8 +192,8 @@ $navLinks = [['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pr
       <?php endforeach; ?>
     </nav>
     <div class="flex shrink-0 items-center gap-3">
-      <a href="/login" class="hidden text-[13px] font-semibold text-slate-700 hover:text-slate-900 sm:block">Sign in</a>
-      <a href="/register" class="lp-btn !px-4 !py-2.5 !text-[12.5px]">Start free trial</a>
+      <a href="/login" class="hidden text-[0.8125rem] font-semibold text-slate-700 hover:text-slate-900 sm:block">Sign in</a>
+      <a href="/register" class="lp-btn !px-4 !py-2.5 !text-[0.78125rem]">Start free trial</a>
     </div>
   </div>
 </header>
@@ -199,15 +208,15 @@ $navLinks = [['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pr
         <span class="lp-badge">
           <span class="h-1.5 w-1.5 rounded-full bg-brand-600"></span>Built for Sri Lankan OPDs
         </span>
-        <h1 class="lp-h1 mt-5">
-          Your clinic deserves<br><span class="lp-teal">more than a queue.</span>
+        <h1 class="lp-h1 mt-5" data-reveal>
+          Your clinic deserves<br><span class="lp-teal lp-underline">more than a queue.</span>
         </h1>
-        <p class="lp-lead mt-5 max-w-lg">
+        <p class="lp-lead mt-5 max-w-lg" data-reveal style="--reveal-delay:90ms">
           QueuePilot is the queue operating system for outpatient clinics. Issue a token in
           seconds, put every room on one board, and let patients follow their place from
           any phone.
         </p>
-        <div class="mt-7 flex flex-wrap gap-3">
+        <div class="mt-7 flex flex-wrap gap-3" data-reveal style="--reveal-delay:160ms">
           <a href="/register" class="lp-btn">
             Start 14-day free trial
             <svg class="h-4 w-4" aria-hidden="true"><use href="#i-arrow-right"/></svg>
@@ -217,9 +226,9 @@ $navLinks = [['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pr
             Open the live demo
           </a>
         </div>
-        <ul class="mt-7 flex flex-wrap gap-x-6 gap-y-2.5">
+        <ul class="mt-7 flex flex-wrap gap-x-6 gap-y-2.5" data-reveal style="--reveal-delay:230ms">
           <?php foreach (['No card required', '14 days, full access', 'Sinhala · Tamil · English'] as $t): ?>
-            <li class="flex items-center gap-2 text-[12.5px] font-medium text-slate-600">
+            <li class="flex items-center gap-2 text-[0.78125rem] font-medium text-slate-600">
               <svg class="h-4 w-4 shrink-0 text-brand-600" aria-hidden="true"><use href="#i-check-circle"/></svg>
               <?= e($t) ?>
             </li>
@@ -228,72 +237,76 @@ $navLinks = [['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pr
       </div>
 
       <!-- Floating product cards. Real values, or a dash. -->
-      <div class="relative lg:h-[382px]">
-        <div class="lp-float relative z-10 w-full max-w-[300px] p-4 lg:absolute lg:left-0 lg:top-0 lg:w-[53%] lg:max-w-none">
+      <div class="relative lg:h-[23.875rem]">
+        <div data-reveal style="--reveal-delay:120ms" class="lp-float relative z-10 w-full max-w-[18.75rem] p-4 lg:absolute lg:left-0 lg:top-0 lg:w-[53%] lg:max-w-none">
           <div class="flex items-center gap-2">
-            <span class="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 text-[10.5px] font-bold text-brand-700">
+            <span class="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 text-[0.65625rem] font-bold text-brand-700">
               <span class="h-1.5 w-1.5 rounded-full bg-brand-600"></span>Live demo
             </span>
-            <span class="truncate text-[12px] font-bold text-slate-800"><?= e($demoQueue['room_name'] ?? 'Main OPD') ?></span>
+            <span class="truncate text-[0.75rem] font-bold text-slate-800"><?= e($demoQueue['room_name'] ?? 'Main OPD') ?></span>
           </div>
-          <div class="mt-3 rounded-xl border border-slate-200/80 p-3.5">
-            <p class="text-[11px] font-medium text-slate-500">Now serving</p>
-            <div class="mt-1 flex items-center justify-between gap-2">
-              <p class="font-mono text-[30px] font-extrabold leading-none tracking-tight text-brand-700">
-                <?= e($nowServing['token_label'] ?? '—') ?>
-              </p>
-              <svg class="h-5 w-5 text-brand-600" aria-hidden="true"><use href="#i-arrow-right"/></svg>
+          <div class="lp-ticket mt-3">
+            <div class="px-3.5 pb-3 pt-3.5">
+              <p class="lp-mono text-[0.625rem] uppercase tracking-[0.16em] text-slate-400">Now serving</p>
+              <div class="mt-1 flex items-center justify-between gap-2">
+                <p class="lp-mono text-[1.875rem] font-bold leading-none tracking-tight text-brand-700">
+                  <?= e($nowServing['token_label'] ?? '—') ?>
+                </p>
+                <svg class="h-5 w-5 text-brand-600" aria-hidden="true"><use href="#i-arrow-right"/></svg>
+              </div>
             </div>
-            <p class="mt-2.5 truncate text-[12.5px] font-bold text-slate-800"><?= e($demoQueue['doctor_name'] ?? '—') ?></p>
-            <p class="text-[11px] font-medium text-brand-700"><?= e($nowServing ? App\Domain\Queue\QueueStateMachine::meta($nowServing['status'])['label'] : 'No token called') ?></p>
+            <div class="lp-ticket-tear px-3.5 pb-3.5 pt-3">
+              <p class="truncate text-[0.78125rem] font-bold text-slate-800"><?= e($demoQueue['doctor_name'] ?? '—') ?></p>
+              <p class="text-[0.6875rem] font-medium text-brand-700"><?= e($nowServing ? App\Domain\Queue\QueueStateMachine::meta($nowServing['status'])['label'] : 'No token called') ?></p>
+            </div>
           </div>
           <div class="mt-3.5 grid grid-cols-2 gap-3">
             <div>
-              <p class="text-[10.5px] font-medium text-slate-500">Waiting</p>
-              <p class="lp-num mt-0.5 text-[24px]"><?= $waitingNow ?></p>
+              <p class="text-[0.65625rem] font-medium text-slate-500">Waiting</p>
+              <p class="lp-num mt-0.5 text-[1.5rem]" data-count="<?= (int) $waitingNow ?>"><?= $waitingNow ?></p>
             </div>
             <div>
-              <p class="text-[10.5px] font-medium text-slate-500">Avg wait</p>
-              <p class="lp-num mt-0.5 text-[24px]">
-                <?= $avgWait !== null ? $avgWait : '—' ?><span class="ml-1 text-[11px] font-semibold text-slate-400">min</span>
+              <p class="text-[0.65625rem] font-medium text-slate-500">Avg wait</p>
+              <p class="lp-num mt-0.5 text-[1.5rem]">
+                <?= $avgWait !== null ? $avgWait : '—' ?><span class="ml-1 text-[0.6875rem] font-semibold text-slate-400">min</span>
               </p>
             </div>
           </div>
         </div>
 
-        <div class="lp-float relative z-20 mt-4 w-full max-w-[290px] p-4 lg:absolute lg:right-0 lg:top-[54px] lg:mt-0 lg:w-[48%] lg:max-w-none">
-          <p class="text-[12px] font-bold text-slate-800">Visits · last 14 days</p>
+        <div data-reveal style="--reveal-delay:220ms" class="lp-float relative z-20 mt-4 w-full max-w-[18.125rem] p-4 lg:absolute lg:right-0 lg:top-[3.375rem] lg:mt-0 lg:w-[48%] lg:max-w-none">
+          <p class="text-[0.75rem] font-bold text-slate-800">Visits · last 14 days</p>
           <div class="mt-1 flex items-baseline justify-between">
-            <p class="text-[11px] font-medium text-slate-500">Patients</p>
-            <p class="lp-num text-[19px]"><?= array_sum($series) ?></p>
+            <p class="text-[0.6875rem] font-medium text-slate-500">Patients</p>
+            <p class="lp-num text-[1.1875rem]"><?= array_sum($series) ?></p>
           </div>
           <?php if ($chart['line'] !== ''): ?>
-            <svg viewBox="0 0 260 70" class="mt-2 h-[70px] w-full" role="img" aria-label="Daily patient visits over the last 14 days">
+            <svg viewBox="0 0 260 70" class="mt-2 h-[4.375rem] w-full" role="img" aria-label="Daily patient visits over the last 14 days">
               <polyline points="<?= e($chart['line']) ?>" fill="none" stroke="#0F766E" stroke-width="2"
                         stroke-linecap="round" stroke-linejoin="round"/>
               <?php foreach ($chart['dots'] as $d): ?>
                 <circle cx="<?= $d['x'] ?>" cy="<?= $d['y'] ?>" r="2.4" fill="#0F766E"/>
               <?php endforeach; ?>
             </svg>
-            <div class="mt-1 flex justify-between text-[9.5px] font-medium text-slate-400">
+            <div class="mt-1 flex justify-between text-[0.59375rem] font-medium text-slate-400">
               <span><?= e(date('j M', strtotime((string) array_key_first($daily)))) ?></span>
               <span><?= e(date('j M', strtotime((string) array_key_last($daily)))) ?></span>
             </div>
           <?php else: ?>
-            <p class="mt-4 text-[11.5px] text-slate-400">Not enough visits recorded to draw a trend.</p>
+            <p class="mt-4 text-[0.71875rem] text-slate-400">Not enough visits recorded to draw a trend.</p>
           <?php endif; ?>
         </div>
 
-        <div class="mt-4 grid grid-cols-2 gap-3 lg:absolute lg:bottom-0 lg:right-[4%] lg:mt-0 lg:w-[56%]">
+        <div data-reveal style="--reveal-delay:320ms" class="mt-4 grid grid-cols-2 gap-3 lg:absolute lg:bottom-0 lg:right-[4%] lg:mt-0 lg:w-[56%]">
           <div class="lp-float p-3.5">
-            <p class="flex items-center gap-1.5 text-[10.5px] font-semibold text-slate-500">
+            <p class="flex items-center gap-1.5 text-[0.65625rem] font-semibold text-slate-500">
               <svg class="h-3.5 w-3.5 text-brand-600" aria-hidden="true"><use href="#i-check-circle"/></svg>Rooms open
             </p>
-            <p class="lp-num mt-1 text-[26px]"><?= $roomsOpen ?></p>
+            <p class="lp-num mt-1 text-[1.625rem]" data-count="<?= (int) $roomsOpen ?>"><?= $roomsOpen ?></p>
           </div>
           <div class="lp-float p-3.5">
-            <p class="text-[10.5px] font-semibold text-slate-500">Patients today</p>
-            <p class="lp-num mt-1 text-[26px] text-brand-700"><?= $patientsToday ?></p>
+            <p class="text-[0.65625rem] font-semibold text-slate-500">Patients today</p>
+            <p class="lp-num mt-1 text-[1.625rem] text-brand-700" data-count="<?= (int) $patientsToday ?>"><?= $patientsToday ?></p>
           </div>
         </div>
       </div>
@@ -305,34 +318,35 @@ $navLinks = [['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pr
 <div class="lp-wrap space-y-5 pb-14">
 
   <!-- ============================================ what it is built for -->
-  <!-- Not a customer logo wall: there are no customers to name yet, so this
-       row states capabilities the software actually has. -->
-  <section class="lp-panel px-5 py-6 sm:px-8">
-    <p class="text-center text-[12px] font-bold text-slate-700">Built for the way Sri Lankan OPDs actually run</p>
-    <ul class="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+  <?php /* Not a customer logo wall: there are no customers to name yet, so this
+       row states capabilities the software actually has. */ ?>
+  <section data-reveal class="lp-panel px-5 py-6 sm:px-8">
+    <p class="text-center text-[0.75rem] font-bold text-slate-700">Built for the way Sri Lankan OPDs actually run</p>
+    <ul data-reveal-group class="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
       <?php foreach ($capabilities as [$icon, $label]): ?>
         <li class="flex items-center justify-center gap-2.5">
           <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-50 text-brand-700">
             <svg class="h-3.5 w-3.5" aria-hidden="true"><use href="#i-<?= e($icon) ?>"/></svg>
           </span>
-          <span class="text-[12px] font-bold text-slate-700"><?= e($label) ?></span>
+          <span class="text-[0.75rem] font-bold text-slate-700"><?= e($label) ?></span>
         </li>
       <?php endforeach; ?>
     </ul>
   </section>
 
   <!-- ================================================== the challenge -->
-  <section id="product" class="lp-panel scroll-mt-20 px-5 py-8 sm:px-8 sm:py-10">
+  <section id="product" data-reveal class="lp-panel scroll-mt-20 px-5 py-8 sm:px-8 sm:py-10">
     <div class="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)_minmax(0,0.95fr)]">
       <div>
-        <h2 class="lp-h2 !text-[1.3rem] sm:!text-[1.35rem]">The OPD challenge is real</h2>
-        <ul class="mt-6 space-y-5">
+        <span class="lp-eyebrow">01 &mdash; The problem</span>
+        <h2 class="lp-h2 mt-3 !text-[1.45rem] sm:!text-[1.6rem]">The OPD challenge is real</h2>
+        <ul data-reveal-group class="mt-6 space-y-5">
           <?php foreach ($pains as [$icon, $title, $body]): ?>
             <li class="flex items-start gap-3">
               <span class="lp-ico"><svg class="h-4 w-4" aria-hidden="true"><use href="#i-<?= e($icon) ?>"/></svg></span>
               <div class="min-w-0">
-                <p class="text-[13px] font-bold text-slate-800"><?= e($title) ?></p>
-                <p class="mt-0.5 text-[11.5px] leading-snug text-slate-500"><?= e($body) ?></p>
+                <p class="text-[0.8125rem] font-bold text-slate-800"><?= e($title) ?></p>
+                <p class="mt-0.5 text-[0.71875rem] leading-snug text-slate-500"><?= e($body) ?></p>
               </div>
             </li>
           <?php endforeach; ?>
@@ -344,14 +358,15 @@ $navLinks = [['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pr
            class="w-full self-center rounded-2xl mix-blend-multiply">
 
       <div>
-        <h2 class="lp-h2 lp-teal !text-[1.3rem] sm:!text-[1.35rem]">What QueuePilot changes</h2>
-        <!-- Mechanisms, not statistics. We have no measured study to quote a
-             "2.5 hours saved" or "30% fewer no-shows" from, so none is claimed. -->
+        <span class="lp-eyebrow">02 &mdash; The answer</span>
+        <h2 class="lp-h2 lp-teal mt-3 !text-[1.45rem] sm:!text-[1.6rem]">What QueuePilot changes</h2>
+        <?php /* Mechanisms, not statistics. We have no measured study to quote a
+             "2.5 hours saved" or "30% fewer no-shows" from, so none is claimed. */ ?>
         <div class="mt-6 space-y-3">
           <?php foreach ($answers as [$title, $body]): ?>
             <div class="lp-stat">
-              <p class="text-[15px] font-extrabold tracking-[-0.01em] text-brand-700"><?= e($title) ?></p>
-              <p class="mt-1 text-[11.5px] leading-snug text-slate-500"><?= e($body) ?></p>
+              <p class="text-[0.9375rem] font-extrabold tracking-[-0.01em] text-brand-700"><?= e($title) ?></p>
+              <p class="mt-1 text-[0.71875rem] leading-snug text-slate-500"><?= e($body) ?></p>
             </div>
           <?php endforeach; ?>
         </div>
@@ -360,22 +375,23 @@ $navLinks = [['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pr
   </section>
 
   <!-- ==================================================== how it works -->
-  <section id="how" class="lp-panel scroll-mt-20 px-5 py-8 sm:px-8 sm:py-10">
+  <section id="how" data-reveal class="lp-panel scroll-mt-20 px-5 py-8 sm:px-8 sm:py-10">
     <div class="text-center">
-      <h2 class="lp-h2">One queue. Every step. No shouting.</h2>
+      <span class="lp-eyebrow">03 &mdash; How it works</span>
+      <h2 class="lp-h2 mt-3">One queue. Every step. No shouting.</h2>
       <p class="lp-lead mx-auto mt-2 max-w-2xl">
         From the first token to the end-of-day report &mdash; the same record follows the patient.
       </p>
     </div>
-    <ol class="mt-9 grid gap-5 sm:grid-cols-2 lg:grid-cols-5 lg:gap-3">
+    <ol data-reveal-group class="mt-9 grid gap-5 sm:grid-cols-2 lg:grid-cols-5 lg:gap-3">
       <?php foreach ($steps as $i => [$n, $icon, $title, $body]): ?>
         <li class="relative rounded-2xl border border-slate-200/70 px-4 pb-4 pt-6">
           <span class="lp-step-num"><?= e($n) ?></span>
           <div class="flex items-start gap-2.5">
             <span class="lp-ico !h-8 !w-8"><svg class="h-4 w-4" aria-hidden="true"><use href="#i-<?= e($icon) ?>"/></svg></span>
             <div class="min-w-0">
-              <p class="pt-1 text-[12.5px] font-bold text-slate-800"><?= e($title) ?></p>
-              <p class="mt-2 text-[11.5px] leading-relaxed text-slate-500"><?= e($body) ?></p>
+              <p class="pt-1 text-[0.78125rem] font-bold text-slate-800"><?= e($title) ?></p>
+              <p class="mt-2 text-[0.71875rem] leading-relaxed text-slate-500"><?= e($body) ?></p>
             </div>
           </div>
           <?php if ($i < count($steps) - 1): ?>
@@ -387,7 +403,7 @@ $navLinks = [['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pr
   </section>
 
   <!-- ========================================================= pricing -->
-  <section id="pricing" class="scroll-mt-20 pt-4">
+  <section id="pricing" data-reveal class="scroll-mt-20 pt-4">
     <div class="text-center">
       <span class="lp-badge">Simple, transparent pricing</span>
       <h2 class="lp-h2 mt-4">Plans that grow with your clinic.</h2>
@@ -395,15 +411,15 @@ $navLinks = [['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pr
         Every plan includes the live board, patient tracking links and the doctor screen.
         Cancel whenever you like.
       </p>
-      <!-- One currency, because one currency is what we bill in. A USD toggle
-           would need an exchange rate we do not have. -->
+      <?php /* One currency, because one currency is what we bill in. A USD toggle
+           would need an exchange rate we do not have. */ ?>
       <div class="mt-5 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5">
-        <span class="rounded-full bg-brand-700 px-3 py-1 text-[11px] font-bold text-white">LKR</span>
-        <span class="pr-1 text-[11px] font-medium text-slate-500">billed monthly</span>
+        <span class="rounded-full bg-brand-700 px-3 py-1 text-[0.6875rem] font-bold text-white">LKR</span>
+        <span class="pr-1 text-[0.6875rem] font-medium text-slate-500">billed monthly</span>
       </div>
     </div>
 
-    <div class="mt-9 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div data-reveal-group class="mt-9 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <?php foreach ($plans as $plan): ?>
         <?php
           $featured = ($plan['code'] ?? '') === 'professional';
@@ -420,18 +436,18 @@ $navLinks = [['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pr
         ?>
         <div class="lp-plan <?= $featured ? 'lp-plan-featured' : '' ?>">
           <?php if ($featured): ?>
-            <span class="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-brand-700 px-3.5 py-1 text-[10.5px] font-bold text-white">Recommended</span>
+            <span class="lp-mono absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full px-3.5 py-1 text-[0.625rem] font-bold uppercase tracking-[0.12em] text-white" style="background-image:linear-gradient(100deg,#0F766E,#06322E)">Recommended</span>
           <?php endif; ?>
-          <p class="text-[14.5px] font-extrabold tracking-[-0.01em] text-slate-900"><?= e($plan['name']) ?></p>
-          <p class="mt-1 text-[11.5px] text-slate-500">
+          <p class="text-[0.90625rem] font-extrabold tracking-[-0.01em] text-slate-900"><?= e($plan['name']) ?></p>
+          <p class="mt-1 text-[0.71875rem] text-slate-500">
             <?= $unlimited ? 'For multi-branch networks' : ((int) $plan['max_doctors'] === 1 ? 'For a single-doctor practice' : ((int) $plan['max_doctors'] >= 15 ? 'For a busy multi-room clinic' : 'For a growing clinic')) ?>
           </p>
           <p class="mt-4 flex items-baseline gap-1.5">
             <?php if ($price > 0): ?>
-              <span class="lp-num text-[27px]"><?= number_format($price) ?></span>
-              <span class="text-[10.5px] font-bold text-slate-500">LKR / month</span>
+              <span class="lp-num text-[1.6875rem]"><?= number_format($price) ?></span>
+              <span class="text-[0.65625rem] font-bold text-slate-500">LKR / month</span>
             <?php else: ?>
-              <span class="lp-num text-[24px]">Talk to us</span>
+              <span class="lp-num text-[1.5rem]">Talk to us</span>
             <?php endif; ?>
           </p>
           <ul class="mt-5 flex-1 space-y-2.5">
@@ -457,15 +473,15 @@ $navLinks = [['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pr
   </section>
 
   <!-- ============================================ principles + product -->
-  <section class="grid gap-4 pt-4 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,0.7fr)_minmax(0,1.5fr)]">
-    <!-- A carousel of product principles. No invented customer, no invented
-         percentage, no hospital brand borrowed for credibility. -->
+  <section data-reveal class="grid gap-4 pt-4 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,0.7fr)_minmax(0,1.5fr)]">
+    <?php /* A carousel of product principles. No invented customer, no invented
+         percentage, no hospital brand borrowed for credibility. */ ?>
     <div class="lp-quote flex flex-col" data-lp-carousel>
       <?php foreach ($principles as $i => [$quote, $label, $body]): ?>
         <div data-lp-slide="<?= $i ?>" <?= $i === 0 ? '' : 'hidden' ?>>
-          <p class="text-[19px] font-bold leading-snug tracking-[-0.02em]"><?= e($quote) ?></p>
-          <p class="mt-5 text-[12.5px] font-bold text-white"><?= e($label) ?></p>
-          <p class="mt-1 text-[11.5px] leading-relaxed text-white/70"><?= e($body) ?></p>
+          <p class="text-[1.1875rem] font-bold leading-snug tracking-[-0.02em]"><?= e($quote) ?></p>
+          <p class="mt-5 text-[0.78125rem] font-bold text-white"><?= e($label) ?></p>
+          <p class="mt-1 text-[0.71875rem] leading-relaxed text-white/70"><?= e($body) ?></p>
         </div>
       <?php endforeach; ?>
       <div class="mt-auto flex items-center gap-3 pt-6">
@@ -489,8 +505,8 @@ $navLinks = [['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pr
         <div class="flex items-start gap-3">
           <span class="lp-ico"><svg class="h-4 w-4" aria-hidden="true"><use href="#i-<?= e($icon) ?>"/></svg></span>
           <div class="min-w-0">
-            <p class="text-[12.5px] font-bold text-brand-700"><?= e($title) ?></p>
-            <p class="mt-0.5 text-[11.5px] leading-snug text-slate-500"><?= e($body) ?></p>
+            <p class="text-[0.78125rem] font-bold text-brand-700"><?= e($title) ?></p>
+            <p class="mt-0.5 text-[0.71875rem] leading-snug text-slate-500"><?= e($body) ?></p>
           </div>
         </div>
       <?php endforeach; ?>
@@ -498,24 +514,24 @@ $navLinks = [['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pr
 
     <div class="lp-panel px-5 py-6">
       <div class="flex items-center gap-2">
-        <span class="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 text-[10.5px] font-bold text-brand-700">
+        <span class="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 text-[0.65625rem] font-bold text-brand-700">
           <span class="h-1.5 w-1.5 rounded-full bg-brand-600"></span>Live demo
         </span>
-        <span class="text-[12px] font-bold text-slate-800"><?= e($demoClinic['name'] ?? 'Demo clinic') ?></span>
+        <span class="text-[0.75rem] font-bold text-slate-800"><?= e($demoClinic['name'] ?? 'Demo clinic') ?></span>
       </div>
       <div class="mt-4 grid grid-cols-3 gap-3">
         <?php foreach ([['Waiting', (string) $waitingNow], ['Avg wait', $avgWait !== null ? $avgWait . ' min' : '—'], ['Rooms open', (string) $roomsOpen]] as [$k, $v]): ?>
           <div class="rounded-xl bg-slate-50/80 px-3 py-2.5">
-            <p class="text-[10px] font-semibold text-slate-500"><?= e($k) ?></p>
-            <p class="lp-num mt-0.5 text-[18px]"><?= e($v) ?></p>
+            <p class="text-[0.625rem] font-semibold text-slate-500"><?= e($k) ?></p>
+            <p class="lp-num mt-0.5 text-[1.125rem]"><?= e($v) ?></p>
           </div>
         <?php endforeach; ?>
       </div>
       <div class="mt-4 grid gap-4 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
         <div>
-          <p class="text-[11.5px] font-bold text-slate-700">Visits · last 14 days</p>
+          <p class="text-[0.71875rem] font-bold text-slate-700">Visits · last 14 days</p>
           <?php if ($chart['line'] !== ''): ?>
-            <svg viewBox="0 0 260 70" class="mt-2 h-[74px] w-full" role="img" aria-label="Daily visits over the last 14 days">
+            <svg viewBox="0 0 260 70" class="mt-2 h-[4.625rem] w-full" role="img" aria-label="Daily visits over the last 14 days">
               <polyline points="<?= e($chart['line']) ?>" fill="none" stroke="#0F766E" stroke-width="2"
                         stroke-linecap="round" stroke-linejoin="round"/>
               <?php foreach ($chart['dots'] as $d): ?>
@@ -523,24 +539,24 @@ $navLinks = [['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pr
               <?php endforeach; ?>
             </svg>
           <?php else: ?>
-            <p class="mt-3 text-[11.5px] text-slate-400">No trend to show yet.</p>
+            <p class="mt-3 text-[0.71875rem] text-slate-400">No trend to show yet.</p>
           <?php endif; ?>
-          <p class="mt-1 text-[10px] text-slate-400">
+          <p class="mt-1 text-[0.625rem] text-slate-400">
             <?= $avgWait !== null
                 ? 'Average wait measured from ' . $waitSample . ' finished visits.'
                 : 'Not enough finished visits yet to publish an average wait.' ?>
           </p>
         </div>
         <div>
-          <p class="text-[11.5px] font-bold text-slate-700">Waiting by doctor</p>
+          <p class="text-[0.71875rem] font-bold text-slate-700">Waiting by doctor</p>
           <ul class="mt-2 space-y-2">
             <?php if ($byDoctor === []): ?>
-              <li class="text-[11.5px] text-slate-400">No session open.</li>
+              <li class="text-[0.71875rem] text-slate-400">No session open.</li>
             <?php endif; ?>
             <?php foreach ($byDoctor as $d): ?>
               <li class="flex items-center justify-between gap-2 border-b border-slate-100 pb-1.5">
-                <span class="truncate text-[11px] font-medium text-slate-600"><?= e($d['name']) ?></span>
-                <span class="shrink-0 text-[11px] font-bold tabular text-slate-800"><?= (int) $d['waiting'] ?></span>
+                <span class="truncate text-[0.6875rem] font-medium text-slate-600"><?= e($d['name']) ?></span>
+                <span class="shrink-0 text-[0.6875rem] font-bold tabular text-slate-800"><?= (int) $d['waiting'] ?></span>
               </li>
             <?php endforeach; ?>
           </ul>
@@ -550,15 +566,15 @@ $navLinks = [['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pr
   </section>
 
   <!-- =================================================== patient view -->
-  <section id="patient" class="lp-panel scroll-mt-20 grid gap-8 px-5 py-8 sm:px-8 lg:grid-cols-2">
+  <section id="patient" data-reveal class="lp-panel scroll-mt-20 grid gap-8 px-5 py-8 sm:px-8 lg:grid-cols-2">
     <div class="flex items-center gap-6">
       <div class="lp-phone shrink-0 px-3 pb-4 pt-6">
-        <p class="text-center text-[9px] font-semibold text-slate-500">Your token</p>
-        <p class="mt-1 text-center font-mono text-[26px] font-extrabold leading-none text-brand-700"><?= e($phone['token'] ?? '—') ?></p>
-        <p class="mt-2.5 truncate text-center text-[9.5px] font-bold text-slate-800"><?= e($phone['doctor'] ?? '—') ?></p>
-        <p class="truncate text-center text-[8.5px] text-slate-500"><?= e($phone['room'] ?? '') ?></p>
-        <p class="mt-2 text-center text-[8.5px] font-medium text-slate-500"><?= e($phone['estimate'] ?? '') ?></p>
-        <p class="mt-3 rounded-full bg-brand-700 py-1.5 text-center text-[8.5px] font-bold text-white">No app needed</p>
+        <p class="text-center text-[0.5625rem] font-semibold text-slate-500">Your token</p>
+        <p class="mt-1 text-center font-mono text-[1.625rem] font-extrabold leading-none text-brand-700"><?= e($phone['token'] ?? '—') ?></p>
+        <p class="mt-2.5 truncate text-center text-[0.59375rem] font-bold text-slate-800"><?= e($phone['doctor'] ?? '—') ?></p>
+        <p class="truncate text-center text-[0.53125rem] text-slate-500"><?= e($phone['room'] ?? '') ?></p>
+        <p class="mt-2 text-center text-[0.53125rem] font-medium text-slate-500"><?= e($phone['estimate'] ?? '') ?></p>
+        <p class="mt-3 rounded-full bg-brand-700 py-1.5 text-center text-[0.53125rem] font-bold text-white">No app needed</p>
       </div>
       <div class="min-w-0">
         <h3 class="lp-h3 lp-teal">Keep patients in the loop<br>without lifting the phone.</h3>
@@ -575,13 +591,13 @@ $navLinks = [['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pr
 
     <div class="flex flex-col justify-center gap-5 rounded-2xl bg-slate-50/70 p-5 sm:flex-row sm:items-center">
       <div class="shrink-0">
-        <div class="h-[92px] w-[92px] overflow-hidden rounded-xl bg-white p-1.5 [&>svg]:h-full [&>svg]:w-full">
+        <div class="h-[5.75rem] w-[5.75rem] overflow-hidden rounded-xl bg-white p-1.5 [&>svg]:h-full [&>svg]:w-full">
           <?= App\Support\QrCode::svg('/demo/board', 3, 2) ?>
         </div>
       </div>
       <div class="min-w-0 flex-1">
-        <p class="text-[12.5px] font-bold text-slate-800">Try the patient view</p>
-        <p class="mt-0.5 text-[11.5px] text-slate-500">Scan to open the demo patient link.</p>
+        <p class="text-[0.78125rem] font-bold text-slate-800">Try the patient view</p>
+        <p class="mt-0.5 text-[0.71875rem] text-slate-500">Scan to open the demo patient link.</p>
         <div class="mt-3 grid grid-cols-3 gap-2.5">
           <?php foreach ([
               [$avgWait !== null ? $avgWait . ' min' : '—', 'Avg wait'],
@@ -589,8 +605,8 @@ $navLinks = [['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pr
               ['0', 'Apps to install'],
           ] as [$v, $k]): ?>
             <div class="rounded-xl border border-slate-200/70 bg-white px-2 py-2.5 text-center">
-              <p class="lp-num text-[16px]"><?= e($v) ?></p>
-              <p class="mt-0.5 text-[9.5px] font-medium text-slate-500"><?= e($k) ?></p>
+              <p class="lp-num text-[1rem]"><?= e($v) ?></p>
+              <p class="mt-0.5 text-[0.59375rem] font-medium text-slate-500"><?= e($k) ?></p>
             </div>
           <?php endforeach; ?>
         </div>
@@ -601,23 +617,39 @@ $navLinks = [['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pr
 </div>
 
 <!-- ============================================================ footer -->
-<footer class="border-t border-slate-200/70 bg-white">
-  <div class="lp-wrap flex flex-wrap items-center justify-between gap-x-8 gap-y-4 py-7">
-    <div class="flex items-center gap-2.5">
-      <span class="flex h-7 w-7 items-center justify-center rounded-lg text-[12px] font-extrabold text-white"
-            style="background-image: linear-gradient(140deg,#14807A,#0B5F59)">Q</span>
-      <span class="text-[14px] font-extrabold tracking-[-0.02em] text-slate-900">QueuePilot</span>
+<footer class="lp-footer">
+  <div class="lp-wrap py-12">
+    <div class="flex flex-wrap items-start justify-between gap-8">
+      <div class="max-w-xs">
+        <div class="flex items-center gap-2.5">
+          <span class="h-8 w-8 shrink-0 rounded-[0.625rem] p-0.5" style="<?= e($markBg) ?>"><?= $mark ?></span>
+          <span class="lp-display text-[1.1875rem] font-semibold text-white">QueuePilot</span>
+        </div>
+        <p class="mt-4 text-[0.75rem] leading-relaxed" style="color:#9FBDB6">
+          The queue operating system for Sri Lankan outpatient clinics. Tokens and rooms
+          on every public screen &mdash; never a patient name.
+        </p>
+      </div>
+      <nav class="flex flex-wrap gap-x-10 gap-y-3">
+        <?php foreach ([['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pricing'], ['#patient', 'Patient view'], ['/demo/board', 'Live demo'], ['/login', 'Sign in'], ['/register', 'Start trial']] as [$href, $label]): ?>
+          <a href="<?= e($href) ?>" class="lp-footer-link"><?= e($label) ?></a>
+        <?php endforeach; ?>
+      </nav>
+      <div class="flex items-center gap-1.5">
+        <?php foreach (['EN', 'SI', 'TA'] as $lang): ?>
+          <span class="lp-mono flex h-7 items-center rounded-full px-2.5 text-[0.625rem] font-bold" style="background:rgba(255,255,255,.08);color:#CFE0DB"><?= e($lang) ?></span>
+        <?php endforeach; ?>
+      </div>
     </div>
-    <p class="text-[11.5px] text-slate-500">&copy; <?= e(date('Y')) ?> QueuePilot. All rights reserved.</p>
-    <nav class="flex flex-wrap items-center gap-x-6 gap-y-2">
-      <?php foreach ([['#product', 'Product'], ['#pricing', 'Pricing'], ['/demo/board', 'Live demo'], ['/login', 'Sign in'], ['/register', 'Start trial']] as [$href, $label]): ?>
-        <a href="<?= e($href) ?>" class="text-[11.5px] font-semibold text-slate-500 hover:text-slate-900"><?= e($label) ?></a>
-      <?php endforeach; ?>
-    </nav>
-    <div class="flex items-center gap-1.5">
-      <?php foreach (['EN', 'SI', 'TA'] as $lang): ?>
-        <span class="flex h-7 items-center rounded-full bg-slate-100 px-2.5 text-[10px] font-bold text-slate-600"><?= e($lang) ?></span>
-      <?php endforeach; ?>
+
+    <div class="lp-rail my-9 opacity-25"></div>
+
+    <!-- The wordmark as the closing image: the last thing on the page is the brand. -->
+    <div class="flex flex-wrap items-end justify-between gap-4">
+      <p class="lp-display select-none text-[3.25rem] leading-none text-white sm:text-[5rem] lg:text-[6.5rem]">
+        QueuePilot<span style="color:#E0A63C">.</span>
+      </p>
+      <p class="lp-mono pb-2 text-[0.6875rem]" style="color:#7FA098">&copy; <?= e(date('Y')) ?> QueuePilot</p>
     </div>
   </div>
 </footer>

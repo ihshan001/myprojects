@@ -4874,6 +4874,55 @@ Assert::test('the service worker cannot pin an old stylesheet', function (): voi
     Assert::true(strpos($sw, "url.pathname.startsWith('/api/')") !== false, 'the api bypass survives');
 });
 
+/* ---- brand surface: one document, one scale, honest motion ----------- */
+
+Assert::test('a full-document view is not wrapped in the console layout', function (): void {
+    // view() took two parameters while nine callers passed a third `false`.
+    // PHP silently drops extra arguments, so the landing, kiosk and track
+    // error pages were rendered INSIDE the console layout: two <html> tags.
+    // The browser keeps the first, so the page's own html/body classes — the
+    // brand tokens and the scale knob — were thrown away.
+    $fn = new \ReflectionFunction('view');
+    Assert::same(3, $fn->getNumberOfParameters(), 'view() accepts the asLayout flag');
+    $render = new \ReflectionMethod(\App\Core\View::class, 'render');
+    Assert::same(3, $render->getNumberOfParameters(), 'View::render accepts it too');
+    $helpers = (string) file_get_contents(QP_ROOT . '/app/helpers.php');
+    Assert::true(strpos($helpers, 'View::render($template, $data, $asLayout)') !== false, 'and the helper actually forwards it');
+});
+
+Assert::test('the homepage scale is a single knob that reaches every size', function (): void {
+    $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+    Assert::true(strpos($css, '.lp-root { font-size: 90%; }') !== false, 'the page renders at the 90% proportions');
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/landing.php');
+    Assert::true(strpos($view, 'class="lp-root') !== false, 'and the document opts into it');
+    // A stray px size would silently ignore the knob and break the proportion.
+    Assert::true(preg_match('~\[[0-9.]+px\]~', $view) === 0, 'every arbitrary size in the view is in rem');
+});
+
+Assert::test('scroll reveal is an enhancement, never a gate on content', function (): void {
+    $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+    $js  = (string) file_get_contents(QP_ROOT . '/public/assets/js/landing.js');
+    // Hidden ONLY once the script has armed it, so a no-JS visitor sees everything.
+    Assert::true(strpos($css, '.lp-reveal-ready [data-reveal] { opacity: 0') !== false, 'hiding is scoped to the armed class');
+    Assert::true(strpos($js, "classList.add('lp-reveal-ready')") !== false, 'the script arms it');
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/landing.php');
+    Assert::true(strpos($view, 'lp-reveal-ready') === false, 'the markup never ships pre-hidden');
+    Assert::true(strpos($css, 'prefers-reduced-motion') !== false, 'reduced motion is honoured');
+    Assert::true(strpos($js, 'prefers-reduced-motion') !== false, 'in both the styles and the script');
+});
+
+Assert::test('the brand type is self-hosted and licensed', function (): void {
+    $dir = QP_ROOT . '/public/assets/fonts/';
+    foreach (['fraunces-var.woff2', 'jetbrains-mono-var.woff2'] as $font) {
+        Assert::true(is_file($dir . $font), $font . ' is present');
+    }
+    foreach (['LICENSE.txt', 'LICENSE-fraunces.txt', 'LICENSE-jetbrains-mono.txt'] as $lic) {
+        Assert::true(is_file($dir . $lic), $lic . ' ships with the fonts');
+    }
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/landing.php');
+    Assert::true(strpos($view, 'fonts.googleapis') === false, 'no third-party font request');
+});
+
 /* ------------------------------------------------------------------ */
 
 $code = Assert::summary();

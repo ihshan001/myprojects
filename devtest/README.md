@@ -90,6 +90,40 @@ at `qp-v3` with an offline fallback. Two test groups assert the pairing, and a
 browser test reproduces the failure — reverting `asset()` makes a warm-cache
 reload miss the rebuild; restoring it makes the rebuild win.
 
+A fifth change gave the homepage an actual identity, and fixed the bug that was
+hiding it. `view()` accepted two parameters while nine callers passed a third
+`false` meaning "this view is already a whole document". PHP drops extra
+arguments silently, so `View::render` wrapped the landing (and the kiosk and
+track error pages) in the console layout anyway. The response carried **two
+`<html>` tags**; browsers keep the first, so the page's own `html`/`body` classes
+were discarded — which is why the brand tokens resolved to nothing and every
+border fell back to `currentColor`. The helper now forwards `$asLayout`.
+
+The brand surface itself:
+
+| Decision | What it is |
+| --- | --- |
+| Idea | **The token.** A clinic runs on a numbered ticket, so the ticket is the identity: a perforated hero card with punched notches, mono numerals, a dotted queue rail. |
+| Display | Fraunces, variable, with `SOFT 40` and `WONK 1` — warm, slightly wonky serifs that make the wordmark recognisable. |
+| UI / numbers | Inter for text, JetBrains Mono for anything numeric. All self-hosted, licences included. |
+| Palette | Warm paper `#FBFAF7` instead of clinical white, deep teal ink `#06322E`, and one gold signal `#E0A63C` used sparingly enough to still mean something. |
+| Mark | A token-shaped Q whose tail ends in a gold dot. Inline SVG, no request. |
+| Close | A dark footer carrying an oversized wordmark, so the last thing on the page is the brand. |
+
+**Scale.** The page is designed to be read at the proportions of a browser at
+90% zoom while the browser stays at 100%. `.lp-root { font-size: 90% }` is the
+single knob and every size on the page is in `rem`, so one number retunes it.
+Breakpoints stay in `px`, so responsive behaviour is unchanged. A test asserts
+no arbitrary `px` size creeps into the view and escapes the knob.
+
+**Motion.** Sections fade and rise on entry, list items stagger, the header
+gains a stuck state, a progress bar tracks reading position, and the real
+figures count up. All of it is progressive enhancement: the hiding rules are
+scoped to `.lp-reveal-ready`, which only the script adds, so a no-JS visitor
+sees the whole page. `prefers-reduced-motion` skips the arming entirely. Count-ups
+read their target from the server-rendered DOM and land on exactly that value —
+they animate a true number, never invent one.
+
 ```bash
 PORT=8085 node tools/serve-landing.mjs     # from devtest/
 ```

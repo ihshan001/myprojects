@@ -312,79 +312,223 @@
 }
 
 /* ===================================================================
-   Landing page (.lp) — scoped so the console keeps its own type scale.
-   Inter is loaded only here; every other queuepilot page is unchanged.
+   QueuePilot brand surface — the public homepage only.
+
+   Brand idea: THE TOKEN. A clinic runs on a little numbered ticket, so the
+   ticket is the identity: perforated cards, mono numerals, a dotted queue
+   rail between sections. Warm paper instead of clinical white, deep teal
+   ink, and one gold signal colour used sparingly so it still means something.
+
+   Type: Fraunces (display, with its SOFT/WONK axes on) over Inter (UI), with
+   JetBrains Mono for anything that is a number. All self-hosted.
+
+   SCALE KNOB: .lp-root sets the root to 90%, and every size below is in rem,
+   so the whole page renders at the proportions of a browser at 90% zoom while
+   the browser itself stays at 100%. Change one number to retune the page.
+   Breakpoints stay in px, so responsive behaviour is unaffected.
    =================================================================== */
 @font-face { font-family: 'Inter'; font-style: normal; font-weight: 400; font-display: swap; src: url('/assets/fonts/inter-400.woff2') format('woff2'); }
 @font-face { font-family: 'Inter'; font-style: normal; font-weight: 500; font-display: swap; src: url('/assets/fonts/inter-500.woff2') format('woff2'); }
 @font-face { font-family: 'Inter'; font-style: normal; font-weight: 600; font-display: swap; src: url('/assets/fonts/inter-600.woff2') format('woff2'); }
 @font-face { font-family: 'Inter'; font-style: normal; font-weight: 700; font-display: swap; src: url('/assets/fonts/inter-700.woff2') format('woff2'); }
 @font-face { font-family: 'Inter'; font-style: normal; font-weight: 800; font-display: swap; src: url('/assets/fonts/inter-800.woff2') format('woff2'); }
+@font-face {
+  font-family: 'Fraunces'; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url('/assets/fonts/fraunces-var.woff2') format('woff2-variations');
+}
+@font-face {
+  font-family: 'JetBrains Mono'; font-style: normal; font-weight: 100 800; font-display: swap;
+  src: url('/assets/fonts/jetbrains-mono-var.woff2') format('woff2-variations');
+}
+
+.lp-root { font-size: 90%; }
 
 @layer components {
   .lp {
+    --lp-ink:      #08211E;
+    --lp-body:     #46605B;
+    --lp-muted:    #7A908B;
+    --lp-teal:     #0F766E;
+    --lp-deep:     #0B4F49;
+    --lp-deeper:   #06322E;
+    --lp-sand:     #C98A1E;
+    --lp-sand-lit: #F6E7C8;
+    --lp-paper:    #FBFAF7;
+    --lp-mist:     #EFF5F2;
+    --lp-line:     #E2E9E5;
+
     font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'Noto Sans Sinhala', 'Noto Sans Tamil', sans-serif;
-    @apply bg-white text-slate-600 antialiased;
+    background-color: var(--lp-paper);
+    color: var(--lp-body);
+    @apply antialiased;
   }
-  .lp-wrap { @apply mx-auto w-full max-w-[1180px] px-5 sm:px-7; }
+  .lp-wrap { @apply mx-auto w-full px-5 sm:px-7; max-width: 73.75rem; }
 
-  /* Section shell: a white rounded panel floating on a very pale wash. */
-  .lp-panel { @apply rounded-[28px] border border-slate-200/70 bg-white shadow-soft; }
-  .lp-wash { background-image: linear-gradient(180deg, #F4F9F9 0%, #FBFDFD 42%, #FFFFFF 100%); }
+  .lp-display {
+    font-family: 'Fraunces', ui-serif, Georgia, serif;
+    font-variation-settings: 'SOFT' 40, 'WONK' 1, 'opsz' 96;
+    letter-spacing: -0.02em;
+  }
+  .lp-mono {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variation-settings: 'wght' 600;
+    font-feature-settings: 'tnum' 1;
+  }
 
-  .lp-h1 { @apply text-[2rem] font-extrabold leading-[1.08] tracking-[-0.03em] text-slate-900 sm:text-[2.8rem] lg:text-[3.15rem]; }
-  .lp-h2 { @apply text-[1.6rem] font-extrabold leading-tight tracking-[-0.025em] text-slate-900 sm:text-[2rem]; }
-  .lp-h3 { @apply text-[1.05rem] font-bold leading-snug tracking-[-0.015em] text-slate-900 sm:text-[1.2rem]; }
-  .lp-lead { @apply text-[14.5px] leading-relaxed text-slate-500 sm:text-[15.5px]; }
-  .lp-teal { @apply text-brand-700; }
+  .lp-panel {
+    @apply rounded-[1.75rem] border bg-white;
+    border-color: var(--lp-line);
+    box-shadow: 0 1px 2px rgba(8,33,30,.03), 0 1.5rem 3rem -1.75rem rgba(8,33,30,.14);
+  }
+  .lp-wash { background-image: linear-gradient(180deg, #EAF3F0 0%, var(--lp-paper) 46%, var(--lp-paper) 100%); }
+
+  .lp-h1 { @apply lp-display text-[2.15rem] font-semibold leading-[1.03] sm:text-[2.9rem] lg:text-[3.35rem]; color: var(--lp-ink); }
+  .lp-h2 { @apply lp-display text-[1.7rem] font-semibold leading-[1.12] sm:text-[2.15rem]; color: var(--lp-ink); }
+  .lp-h3 { @apply text-[1.05rem] font-bold leading-snug tracking-[-0.015em] sm:text-[1.2rem]; color: var(--lp-ink); }
+  .lp-lead { @apply text-[0.9375rem] leading-relaxed sm:text-[1rem]; color: var(--lp-body); }
+  .lp-teal { color: var(--lp-teal); }
+
+  /* Section eyebrow: a mono index and a rule, like a docket header. */
+  .lp-eyebrow {
+    @apply lp-mono inline-flex items-center gap-2.5 text-[0.6875rem] uppercase;
+    letter-spacing: .2em; color: var(--lp-teal);
+  }
+  .lp-eyebrow::before {
+    content: ""; @apply h-px w-8; background-color: var(--lp-sand);
+  }
 
   .lp-badge {
-    @apply inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white
-           px-3 py-1.5 text-[11.5px] font-semibold text-brand-700;
+    @apply inline-flex items-center gap-2 rounded-full border bg-white px-3 py-1.5 text-[0.71875rem] font-semibold;
+    border-color: var(--lp-line); color: var(--lp-deep);
   }
   .lp-btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-[13.5px]
-           font-bold text-white transition;
-    background-image: linear-gradient(100deg, #0F766E, #0B5F59);
-    box-shadow: 0 8px 20px -10px rgba(15, 118, 110, .65);
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-[0.84375rem] font-bold text-white;
+    background-image: linear-gradient(100deg, #0F766E, #06322E);
+    box-shadow: 0 .5rem 1.25rem -.625rem rgba(11,79,73,.7);
+    transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
   }
-  .lp-btn:hover { background-image: linear-gradient(100deg, #115E59, #0A544F); }
+  .lp-btn:hover { transform: translateY(-1px); filter: saturate(1.1); box-shadow: 0 .75rem 1.5rem -.625rem rgba(11,79,73,.75); }
   .lp-btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200
-           bg-white px-5 py-3 text-[13.5px] font-bold text-slate-800 transition hover:bg-slate-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border bg-white px-5 py-3 text-[0.84375rem] font-bold;
+    border-color: var(--lp-line); color: var(--lp-ink);
+    transition: transform .18s ease, background-color .18s ease;
   }
-  .lp-ico { @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700; }
-  .lp-check { @apply flex items-start gap-2.5 text-[13px] text-slate-600; }
-  .lp-stat { @apply rounded-2xl border border-slate-200/80 bg-white px-4 py-3.5; }
-  .lp-num { @apply font-extrabold tracking-[-0.02em] text-slate-900 tabular; }
+  .lp-btn-ghost:hover { transform: translateY(-1px); background-color: var(--lp-mist); }
+  .lp-ico { @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-xl; background-color: var(--lp-mist); color: var(--lp-teal); }
+  .lp-check { @apply flex items-start gap-2.5 text-[0.8125rem]; color: var(--lp-body); }
+  .lp-stat { @apply rounded-2xl border bg-white px-4 py-3.5; border-color: var(--lp-line); }
+  .lp-num { @apply lp-mono font-bold tabular; color: var(--lp-ink); letter-spacing: -0.02em; }
 
-  /* Hero: photo bleeds in from the right and dissolves into the page. */
+  /* The queue rail: the product's own motif, used to separate sections. */
+  .lp-rail { @apply relative h-px w-full; background-image: repeating-linear-gradient(90deg, var(--lp-line) 0 .375rem, transparent .375rem .75rem); }
+  .lp-rail::after {
+    content: ""; @apply absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full;
+    background-color: var(--lp-sand);
+  }
+
   .lp-hero-photo {
     @apply pointer-events-none absolute inset-y-0 right-0 hidden w-[62%] bg-cover bg-right bg-no-repeat lg:block;
-    -webkit-mask-image: linear-gradient(90deg, transparent 0%, rgba(0,0,0,.35) 26%, #000 62%);
-    mask-image: linear-gradient(90deg, transparent 0%, rgba(0,0,0,.35) 26%, #000 62%);
+    -webkit-mask-image: linear-gradient(90deg, transparent 0%, rgba(0,0,0,.3) 28%, #000 64%);
+    mask-image: linear-gradient(90deg, transparent 0%, rgba(0,0,0,.3) 28%, #000 64%);
   }
-  .lp-float { @apply rounded-2xl border border-slate-200/70 bg-white/95 shadow-soft backdrop-blur; }
+  .lp-float {
+    @apply rounded-2xl border;
+    border-color: var(--lp-line);
+    background-color: rgba(255,255,255,.94);
+    backdrop-filter: blur(8px);
+    box-shadow: 0 1px 2px rgba(8,33,30,.04), 0 1.25rem 2.5rem -1.25rem rgba(8,33,30,.22);
+  }
+
+  /* The signature object: a real clinic token, perforated and torn. */
+  .lp-ticket { @apply relative rounded-xl border bg-white; border-color: var(--lp-line); }
+  .lp-ticket-tear { @apply relative; border-top: 1px dashed var(--lp-line); }
+  .lp-ticket-tear::before, .lp-ticket-tear::after {
+    content: ""; @apply absolute top-0 h-2.5 w-2.5 -translate-y-1/2 rounded-full;
+    background-color: #fff; border: 1px solid var(--lp-line);
+  }
+  .lp-ticket-tear::before { left: -0.3125rem; }
+  .lp-ticket-tear::after  { right: -0.3125rem; }
 
   .lp-step-num {
-    @apply absolute -top-3 left-4 flex h-8 w-8 items-center justify-center rounded-full
-           text-[11px] font-bold text-white;
-    background-image: linear-gradient(140deg, #14807A, #0B5F59);
+    @apply lp-mono absolute -top-3 left-4 flex h-8 w-8 items-center justify-center rounded-full text-[0.6875rem] font-bold text-white;
+    background-image: linear-gradient(140deg, #0F766E, #06322E);
+    box-shadow: 0 0 0 .25rem var(--lp-paper);
   }
-  .lp-plan { @apply relative flex flex-col rounded-2xl border border-slate-200/80 bg-white p-5; }
-  .lp-plan-featured { @apply border-brand-600 ring-1 ring-brand-600; }
+  .lp-plan { @apply relative flex flex-col rounded-2xl border bg-white p-5; border-color: var(--lp-line); transition: transform .2s ease, box-shadow .2s ease; }
+  .lp-plan:hover { transform: translateY(-2px); box-shadow: 0 1.25rem 2.5rem -1.5rem rgba(8,33,30,.25); }
+  .lp-plan-featured { border-color: var(--lp-teal); box-shadow: 0 0 0 1px var(--lp-teal), 0 1.5rem 3rem -1.75rem rgba(11,79,73,.35); }
   .lp-quote {
-    @apply relative overflow-hidden rounded-[22px] p-6 text-white;
-    background-image: linear-gradient(155deg, #0F766E, #0A4E49);
+    @apply relative overflow-hidden rounded-[1.375rem] p-6 text-white;
+    background-image: linear-gradient(155deg, #0B4F49, #06322E);
   }
-  .lp-nav-link { @apply text-[13px] font-semibold text-slate-600 transition hover:text-slate-900; }
+  /* A faint token grid, so the dark card is branded rather than merely dark. */
+  .lp-quote::before {
+    content: ""; @apply pointer-events-none absolute inset-0 opacity-[0.07];
+    background-image: radial-gradient(circle at 1px 1px, #fff 1px, transparent 0);
+    background-size: 1.125rem 1.125rem;
+  }
+  .lp-nav-link { @apply relative text-[0.8125rem] font-semibold; color: var(--lp-body); transition: color .18s ease; }
+  .lp-nav-link::after {
+    content: ""; @apply absolute -bottom-1.5 left-0 h-px w-full origin-left scale-x-0;
+    background-color: var(--lp-sand); transition: transform .22s ease;
+  }
+  .lp-nav-link:hover { color: var(--lp-ink); }
+  .lp-nav-link:hover::after { @apply scale-x-100; }
 
-  /* Phone frame, drawn rather than photographed so the token stays crisp. */
   .lp-phone {
-    @apply relative mx-auto w-[168px] rounded-[26px] border-[6px] border-slate-900 bg-white;
-    box-shadow: 0 18px 40px -18px rgba(15, 23, 42, .45);
+    @apply relative mx-auto w-[10.5rem] rounded-[1.625rem] border-[0.375rem] bg-white;
+    border-color: var(--lp-ink);
+    box-shadow: 0 1.125rem 2.5rem -1.125rem rgba(8,33,30,.5);
   }
-  .lp-phone::before {
-    content: ""; @apply absolute left-1/2 top-1.5 h-1.5 w-14 -translate-x-1/2 rounded-full bg-slate-900;
+  .lp-phone::before { content: ""; @apply absolute left-1/2 top-1.5 h-1.5 w-14 -translate-x-1/2 rounded-full; background-color: var(--lp-ink); }
+
+  .lp-header { @apply sticky top-0 z-40 border-b; border-color: transparent; background-color: rgba(251,250,247,.8); backdrop-filter: blur(10px); transition: box-shadow .25s ease, border-color .25s ease, background-color .25s ease; }
+  .lp-header.is-stuck { border-color: var(--lp-line); background-color: rgba(251,250,247,.94); box-shadow: 0 .5rem 1.5rem -1rem rgba(8,33,30,.3); }
+  .lp-progress { @apply absolute inset-x-0 bottom-0 h-0.5 origin-left; background-image: linear-gradient(90deg, var(--lp-teal), var(--lp-sand)); transform: scaleX(var(--lp-progress, 0)); }
+
+  .lp-wordmark { @apply lp-display font-semibold; color: var(--lp-ink); letter-spacing: -0.03em; }
+
+  /* A gold stroke under the promise — painted as a background so it sits
+     behind the glyphs without a z-index fight. */
+  .lp-underline {
+    background-image: linear-gradient(90deg, rgba(224,166,60,.35), rgba(224,166,60,.85));
+    background-repeat: no-repeat;
+    background-size: 100% .09em;
+    background-position: 0 96%;
   }
+  .lp-footer { background-color: var(--lp-deeper); color: #CFE0DB; }
+  .lp-footer-link { @apply text-[0.75rem] font-medium; color: #9FBDB6; transition: color .18s ease; }
+  .lp-footer-link:hover { color: #fff; }
+}
+
+/* ---- scroll reveal -------------------------------------------------
+   Armed by JS only. With scripting off, or before the observer runs, every
+   section is fully visible — the animation is an enhancement, never a gate. */
+.lp-reveal-ready [data-reveal] { opacity: 0; transform: translateY(1.5rem); }
+.lp-reveal-ready [data-reveal].is-in {
+  opacity: 1; transform: none;
+  transition: opacity .75s cubic-bezier(.22,1,.36,1), transform .75s cubic-bezier(.22,1,.36,1);
+  transition-delay: var(--reveal-delay, 0ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  .lp-reveal-ready [data-reveal],
+  .lp-reveal-ready [data-reveal].is-in { opacity: 1 !important; transform: none !important; transition: none !important; }
+  .lp-btn:hover, .lp-btn-ghost:hover, .lp-plan:hover { transform: none; }
+  html { scroll-behavior: auto; }
+}
+
+/* Staggered children: one observer entry animates a whole row in sequence. */
+.lp-reveal-ready [data-reveal-group] > * { opacity: 0; transform: translateY(1rem); }
+.lp-reveal-ready [data-reveal-group].is-in > * {
+  opacity: 1; transform: none;
+  transition: opacity .6s cubic-bezier(.22,1,.36,1), transform .6s cubic-bezier(.22,1,.36,1);
+}
+.lp-reveal-ready [data-reveal-group].is-in > *:nth-child(1) { transition-delay: 40ms; }
+.lp-reveal-ready [data-reveal-group].is-in > *:nth-child(2) { transition-delay: 110ms; }
+.lp-reveal-ready [data-reveal-group].is-in > *:nth-child(3) { transition-delay: 180ms; }
+.lp-reveal-ready [data-reveal-group].is-in > *:nth-child(4) { transition-delay: 250ms; }
+.lp-reveal-ready [data-reveal-group].is-in > *:nth-child(5) { transition-delay: 320ms; }
+@media (prefers-reduced-motion: reduce) {
+  .lp-reveal-ready [data-reveal-group] > *,
+  .lp-reveal-ready [data-reveal-group].is-in > * { opacity: 1 !important; transform: none !important; transition: none !important; }
 }
