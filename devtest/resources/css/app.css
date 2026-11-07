@@ -66,6 +66,36 @@
     scroll-behavior: smooth;
   }
 
+  /* ================================================================
+     SCALE — every page renders at the proportions of a browser zoomed
+     to 90%, so nobody has to press Ctrl/Cmd − to get that view.
+     ----------------------------------------------------------------
+     `zoom` is the property that reproduces browser zoom faithfully:
+     it scales type, Tailwind's px utilities, images, borders and
+     shadows together. A root `font-size: 90%` would only reach
+     rem-based sizes and leave everything written in px behind, so it
+     cannot produce the same picture.
+
+     Two things must stay in step with this number:
+       · `screens` in resources/tailwind/tailwind.config.js and the
+         two max-width rules below are every breakpoint × 0.9 —
+         element zoom does NOT resize the viewport media queries see
+         (real browser zoom divides it by 0.9), so without that the
+         layouts would flip at the wrong physical window widths;
+       · app.js asks matchMedia for the same scaled lg (921.6px).
+     Change 0.9, change all three.
+     ================================================================ */
+  html {
+    zoom: 0.9;
+  }
+
+  /* Printing is never screen-scaled: a browser at 90% zoom still prints
+     at 100%, so slips, receipts and reports come out at their true size
+     and QR codes stay scannable. */
+  @media print {
+    html { zoom: 1; }
+  }
+
   /* Nothing may make the page wider than the phone. A single wide table used
      to drag the whole layout sideways, which also moved the fixed top bar. */
   html, body {
@@ -74,8 +104,10 @@
   }
 
   /* iOS Safari zooms in when a focused input is under 16px, then never zooms
-     back out — the page stays mis-scaled for the rest of the session. */
-  @media (max-width: 640px) {
+     back out — the page stays mis-scaled for the rest of the session.
+     640 × 0.9 = 576, kept in step with the scale above (every real phone is
+     far below it either way, so the guard still fires where iOS needs it). */
+  @media (max-width: 576px) {
     input, select, textarea {
       font-size: 16px !important;
     }
@@ -516,7 +548,10 @@
   .table-scroll > table {
     @apply min-w-full;
   }
-  @media (max-width: 640px) {
+  /* 640 × 0.9 — with the scale rule above, these small-screen overrides
+     must flip at the same physical window width a browser at 90% zoom
+     would switch them (see the SCALE comment in @layer base). */
+  @media (max-width: 576px) {
     /* Selects were rendering at 13px next to 10px labels and pushing their
        row wider than the card. Keep them legible but proportional. */
     .qtab { @apply min-h-[38px] text-[11.5px]; }

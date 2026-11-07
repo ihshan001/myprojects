@@ -152,7 +152,9 @@
 
     // Rotating a phone to landscape crosses the lg breakpoint, where the
     // drawer is display:none but the body would stay scroll-locked.
-    const wide = window.matchMedia('(min-width: 1024px)');
+    // 1024 × 0.9 = 921.6 — the retuned lg from tailwind.config.js, kept in
+    // step with the 90% scale rule in resources/css/app.css.
+    const wide = window.matchMedia('(min-width: 921.6px)');
     (wide.addEventListener ? wide.addEventListener.bind(wide, 'change') : wide.addListener.bind(wide))((e) => {
       if (e.matches) close();
     });

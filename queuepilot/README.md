@@ -91,7 +91,10 @@ npm run worker       # drain the notification outbox once
 
 The dev server (`tools/serve.mjs`) mounts the host filesystem into the WASM
 runtime and translates HTTP requests into PHP superglobals, so the same code
-runs under nginx/php-fpm unchanged.
+runs under nginx/php-fpm unchanged. PHP's implicit `text/html` never appears
+in `headers_list()`, so the server defaults a missing `Content-Type` before
+replying — with `X-Content-Type-Options: nosniff` set by `Response`, a browser
+would otherwise refuse to guess and print every page as escaped source.
 
 ## Demo accounts
 

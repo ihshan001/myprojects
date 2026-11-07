@@ -224,6 +224,15 @@ require ${JSON.stringify(ROOT + '/public/index.php')};
     if (meta.encoding === 'base64') payload = Buffer.from(body, 'base64');
 
     const headers = { ...meta.headers };
+    // PHP's implicit text/html never appears in headers_list(), so a page
+    // response arrives with NO Content-Type. With X-Content-Type-Options:
+    // nosniff (set by Response) the browser then refuses to guess and prints
+    // the markup as escaped source. Default it here — tools/serve-role.mjs
+    // and serve-landing.mjs already carry this fix; anything genuinely
+    // non-HTML (QR png, JSON, zip) sends its own header and keeps it.
+    if (!Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')) {
+      headers['Content-Type'] = 'text/html; charset=utf-8';
+    }
     delete headers['Content-Length'];
     headers['Content-Length'] = Buffer.byteLength(payload);
     res.writeHead(meta.status || 200, headers);
