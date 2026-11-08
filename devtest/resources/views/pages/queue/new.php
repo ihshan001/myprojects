@@ -21,53 +21,101 @@ $selectedPatient = (int) ($preselect ?? 0);
   <!-- existing patient -->
   <div class="space-y-5">
     <div class="card card-pad">
-      <h2 class="text-sm font-bold text-ink-900">1 · Find an existing patient</h2>
-      <p class="mt-1 text-xs text-ink-500">Phone number works best — it prevents duplicate records.</p>
+      <div class="flex items-baseline justify-between gap-3">
+        <h2 class="text-sm font-bold text-ink-900">1 · Who is it?</h2>
+        <span class="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-ink-400">Step 1 of 2</span>
+      </div>
+      <p class="mt-1 text-xs text-ink-500">Search first, every time. It prevents duplicate records.</p>
 
-      <form method="get" action="/queue/new" class="mt-3 flex gap-2">
-        <div class="relative flex-1">
-          <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400"><use href="#i-search"/></svg>
-          <input class="input pl-9" name="q" value="<?= e($search ?? '') ?>" autocomplete="off"
-                 placeholder="077 123 4567 · Nimali · P-00001" aria-label="Search patients">
-        </div>
-        <button class="btn-secondary" type="submit">Search</button>
-      </form>
 
-      <?php if (($search ?? '') !== ''): ?>
-        <div class="mt-4 space-y-2">
-          <?php if ($results === []): ?>
-            <div class="rounded-lg border border-dashed border-hairline px-4 py-6 text-center">
-              <p class="text-sm text-ink-700">No patient matches "<?= e($search) ?>".</p>
-              <p class="mt-1 text-xs text-ink-400">Register them below — the record will be created once and reused next time.</p>
-            </div>
-          <?php endif; ?>
-          <?php foreach ($results as $p): ?>
-            <button type="button"
-                    class="flex w-full items-center gap-3 rounded-xl border border-hairline px-3.5 py-2.5 text-left transition hover:border-teal-400 hover:bg-brand-50/40"
-                    data-pick-patient="<?= (int) $p['id'] ?>"
-                    data-pick-name="<?= e($p['full_name']) ?>"
-                    data-pick-phone="<?= e((string) $p['phone']) ?>">
-              <span class="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-ink-700">
-                <?= e(Str::initials((string) $p['full_name'])) ?>
-              </span>
-              <span class="min-w-0 flex-1">
-                <span class="block truncate text-sm font-semibold text-ink-900"><?= e($p['full_name']) ?></span>
-                <span class="block text-[11px] text-ink-400"><?= e((string) $p['phone']) ?> · <?= e((string) $p['code']) ?></span>
-              </span>
-              <svg class="h-4 w-4 text-slate-300"><use href="#i-arrow-right"/></svg>
-            </button>
-          <?php endforeach; ?>
+      <div class="relative mt-3">
+        <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400"><use href="#i-search"/></svg>
+        <input class="input pl-9 pr-9" id="patient-search" type="search" value="<?= e($search ?? '') ?>"
+               autocomplete="off" spellcheck="false"
+               placeholder="Start typing a phone number or name…" aria-label="Search patients"
+               aria-describedby="search-help">
+        <span id="search-spinner" class="pointer-events-none absolute right-3 top-1/2 hidden h-4 w-4 -translate-y-1/2">
+          <svg class="h-4 w-4 animate-spin text-ink-300"><use href="#i-refresh"/></svg>
+        </span>
+      </div>
+      <p class="help" id="search-help">
+        Results appear as you type — from 2 characters. Phone or name or patient code.
+      </p>
+      <p class="sr-only" role="status" aria-live="polite" id="search-status"></p>
+
+      <div id="search-results" class="mt-3 space-y-1.5">
+        <?php /* Server-rendered results are LINKS, not buttons: selecting a
+                 patient has to work with JavaScript disabled, and a link to
+                 ?patient= is the only way to carry the choice across a page
+                 load. The live search swaps in buttons once JS is running. */ ?>
+        <?php foreach ($results as $p): ?>
+          <a class="np-result flex w-full items-center gap-3 rounded-xl border border-hairline px-3.5 py-2.5 text-left transition hover:border-teal-400 hover:bg-brand-50/40"
+             href="/queue/new?patient=<?= (int) $p['id'] ?>&amp;q=<?= e(urlencode((string) $search)) ?>"
+             data-pick-patient="<?= (int) $p['id'] ?>"
+             data-pick-name="<?= e($p['full_name']) ?>"
+             data-pick-phone="<?= e((string) $p['phone']) ?>">
+            <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-ink-700">
+              <?= e(Str::initials((string) $p['full_name'])) ?>
+            </span>
+            <span class="min-w-0 flex-1">
+              <span class="block truncate text-sm font-semibold text-ink-900"><?= e($p['full_name']) ?></span>
+              <span class="block truncate text-[11px] text-ink-400"><?= e((string) $p['phone']) ?> · <?= e((string) $p['code']) ?></span>
+            </span>
+            <svg class="h-4 w-4 shrink-0 text-slate-300"><use href="#i-arrow-right"/></svg>
+          </a>
+        <?php endforeach; ?>
+      </div>
+
+      <noscript>
+        <form method="get" action="/queue/new" class="mt-3 flex gap-2">
+          <input class="input" name="q" value="<?= e($search ?? '') ?>" placeholder="Phone, name or code" aria-label="Search patients">
+          <button class="btn-secondary" type="submit">Search</button>
+        </form>
+      </noscript>
+
+      <?php if (($search ?? '') !== '' && $results === []): ?>
+        <div class="mt-3 rounded-lg border border-dashed border-hairline px-4 py-5 text-center">
+          <p class="text-sm text-ink-700">No patient matches "<?= e($search) ?>".</p>
+          <p class="mt-1 text-xs text-ink-400">Fill in the details below — the record is created once and reused next time.</p>
         </div>
       <?php endif; ?>
 
-      <div id="picked-patient" class="mt-4 hidden rounded-xl border border-brand-200 bg-brand-50/60 px-4 py-3">
+      <div id="picked-patient" class="mt-3 <?= $picked ? '' : 'hidden' ?> rounded-xl border border-brand-200 bg-brand-50/60 px-4 py-3">
         <div class="flex items-center gap-2.5">
-          <svg class="h-4 w-4 text-brand-700"><use href="#i-check-circle"/></svg>
+          <svg class="h-4 w-4 shrink-0 text-brand-700"><use href="#i-check-circle"/></svg>
           <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-semibold text-brand-800" data-picked-name></p>
-            <p class="text-[11px] text-brand-700/70" data-picked-phone></p>
+            <p class="truncate text-sm font-semibold text-brand-800" data-picked-name><?= $picked ? e((string) $picked['full_name']) : '' ?></p>
+            <p class="truncate text-[11px] text-brand-700/70" data-picked-phone><?= $picked ? (e((string) ($picked['phone'] ?? '')) ?: 'no phone on file') : '' ?></p>
           </div>
-          <button type="button" id="clear-picked" class="text-[11px] font-semibold text-brand-800 hover:underline">Change</button>
+          <button type="button" id="clear-picked" class="shrink-0 text-[11px] font-semibold text-brand-800 hover:underline">Change</button>
+        </div>
+      </div>
+
+      <div id="new-patient-fields" class="mt-4 border-t border-slate-100 pt-4 <?= $picked ? 'hidden' : '' ?>">
+        <p class="mb-3 text-[11px] font-semibold uppercase tracking-wide text-ink-400">New walk-in</p>
+        <div class="space-y-3">
+          <div>
+            <label class="label" for="full_name">Patient name</label>
+            <input class="input" id="full_name" name="full_name" form="token-form" autocomplete="off"
+                   placeholder="Nimali Wickramasinghe">
+          </div>
+          <div class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
+            <div>
+              <label class="label" for="phone">Phone</label>
+              <input class="input" id="phone" name="phone" form="token-form" inputmode="tel"
+                     placeholder="077 123 4567" autocomplete="off" data-phone>
+              <p class="help" id="phone-hint">Optional, for the SMS tracking link</p>
+            </div>
+            <div>
+              <label class="label" for="gender">Gender</label>
+              <select class="select" id="gender" name="gender" form="token-form">
+                <option value="">—</option>
+                <option value="female">Female</option>
+                <option value="male">Male</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -105,38 +153,15 @@ $selectedPatient = (int) ($preselect ?? 0);
 
   <!-- issue token -->
   <div class="card card-pad lg:sticky lg:top-6 lg:self-start">
-    <h2 class="text-sm font-bold text-ink-900">2 · Issue the token</h2>
-    <p class="mt-1 text-xs text-ink-500">Choose a queue. The next number is allocated atomically.</p>
+    <div class="flex items-baseline justify-between gap-3">
+      <h2 class="text-sm font-bold text-ink-900">2 · Issue the token</h2>
+      <span class="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-ink-400">Step 2 of 2</span>
+    </div>
+    <p class="mt-1 text-xs text-ink-500" id="issue-sub">Choose a queue. The next number is allocated atomically.</p>
 
     <form method="post" action="/queue/new" class="mt-4 space-y-4" id="token-form">
       <?= csrf_field() ?>
       <input type="hidden" name="patient_id" id="patient_id" value="<?= $selectedPatient ?: '' ?>">
-
-      <div id="new-patient-fields">
-        <div class="space-y-3">
-          <div>
-            <label class="label" for="full_name">Patient name</label>
-            <input class="input" id="full_name" name="full_name" placeholder="Nimali Wickramasinghe" autocomplete="off">
-          </div>
-          <div class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
-            <div>
-              <label class="label" for="phone">Phone</label>
-              <input class="input" id="phone" name="phone" inputmode="tel" placeholder="077 123 4567"
-                     autocomplete="off" data-phone>
-              <p class="help" id="phone-hint">Optional, for SMS tracking link</p>
-            </div>
-            <div>
-              <label class="label" for="gender">Gender</label>
-              <select class="select" id="gender" name="gender">
-                <option value="">—</option>
-                <option value="female">Female</option>
-                <option value="male">Male</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-          </div>
-        </div>
-      </div>
 
       <div>
         <label class="label" for="queue_id">Queue</label>
@@ -195,60 +220,3 @@ $selectedPatient = (int) ($preselect ?? 0);
 </div>
 
 <script src="<?= e(asset('js/app.js')) ?>" defer></script>
-<script>
-(function () {
-  const patientId = document.getElementById('patient_id');
-  const fields = document.getElementById('new-patient-fields');
-  const picked = document.getElementById('picked-patient');
-  const nameEl = document.querySelector('[data-picked-name]');
-  const phoneEl = document.querySelector('[data-picked-phone]');
-
-  function pick(btn) {
-    patientId.value = btn.dataset.pickPatient;
-    nameEl.textContent = btn.dataset.pickName;
-    phoneEl.textContent = btn.dataset.pickPhone || 'no phone on file';
-    picked.classList.remove('hidden');
-    fields.classList.add('hidden');
-    document.querySelectorAll('[data-pick-patient]').forEach((b) => b.classList.remove('border-teal-400', 'bg-brand-50/40'));
-    btn.classList.add('border-teal-400', 'bg-brand-50/40');
-    picked.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }
-
-  document.querySelectorAll('[data-pick-patient]').forEach((btn) => {
-    btn.addEventListener('click', () => pick(btn));
-  });
-
-  document.getElementById('clear-picked').addEventListener('click', () => {
-    patientId.value = '';
-    picked.classList.add('hidden');
-    fields.classList.remove('hidden');
-    document.getElementById('full_name').focus();
-  });
-
-  // Alt+Enter submits from anywhere in the form (receptionist speed)
-  document.addEventListener('keydown', (e) => {
-    if (e.altKey && e.key === 'Enter') {
-      document.getElementById('token-form').requestSubmit();
-    }
-  });
-
-  // Phone: show what will be used for the link, and validate length inline.
-  const phone = document.querySelector('[data-phone]');
-  const hint = document.getElementById('phone-hint');
-  if (phone) {
-    phone.addEventListener('blur', () => {
-      const digits = phone.value.replace(/\D/g, '');
-      if (digits === '') {
-        hint.textContent = 'Optional, for SMS tracking link';
-        hint.className = 'help';
-      } else if (digits.length < 9) {
-        hint.textContent = 'That looks short — use 07X XXX XXXX';
-        hint.className = 'help text-rose-600';
-      } else {
-        hint.textContent = 'Tracking link will be sent to this number';
-        hint.className = 'help text-brand-700';
-      }
-    });
-  }
-})();
-</script>

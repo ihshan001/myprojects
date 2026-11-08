@@ -86,6 +86,16 @@
   }
   window.qpApi = api;
 
+  // Trailing-edge debounce. Lives here rather than inline on the desk page
+  // because the app's CSP (script-src 'self') blocks inline scripts outright.
+  function debounce(fn, ms) {
+    let t = null;
+    return function debounced(...args) {
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(this, args), ms);
+    };
+  }
+
   /* ------------------------------------------------- mobile nav drawer */
   /* Off-canvas, not an inline list. Locks the page behind it, closes on
      Escape / overlay / navigation, and restores focus to the button that
@@ -978,6 +988,197 @@
           place(row, all[next], e.key === 'ArrowDown');
           grip.focus();
         });
+      });
+    }
+  }
+
+  /* -------------------------------------------------------- token desk
+     The "New patient" screen. It used to carry an inline <script>, which the
+     app's own CSP (script-src 'self') refuses to execute -- so searching
+     worked but selecting a result did nothing, and the desk quietly created a
+     duplicate patient instead of the one it had just found. Everything below
+     therefore lives in this file, which IS served from 'self'.
+
+     The promise on the page is "four keystrokes to a token", so the search
+     runs as you type rather than on a submit. */
+  const searchInput = $('#patient-search');
+  if (searchInput) {
+    const results = $('#search-results');
+    const status = $('#search-status');
+    const spinner = $('#search-spinner');
+    const pickedBox = $('#picked-patient');
+    const pickedName = $('[data-picked-name]');
+    const pickedPhone = $('[data-picked-phone]');
+    const newFields = $('#new-patient-fields');
+    const patientId = $('#patient_id');
+    const issueSub = $('#issue-sub');
+    const MIN = 2;
+
+    let seq = 0; // ignore responses that arrive out of order
+
+    const esc = (s) => String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+    // Two-letter avatar, same idea as the server-side Str::initials.
+    const initials = (name) => String(name || '?').trim().split(/\s+/).slice(0, 2)
+      .map((w) => w.charAt(0).toUpperCase()).join('') || '?';
+
+    const ageOf = (birthYear) => {
+      if (!birthYear) return '';
+      const y = new Date().getFullYear() - Number(birthYear);
+      return y >= 0 && y < 130 ? String(y) + 'y' : '';
+    };
+
+    const rowFor = (p) => {
+      const meta = [p.phone, p.code].filter(Boolean).join(' · ');
+      const age = ageOf(p.birth_year);
+      // Someone already in a queue today will be REFUSED after submit. Saying
+      // so here turns a dead-end into a decision made up front.
+      const busy = p.active
+        ? '<span class="ml-auto shrink-0 rounded-md bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-800">'
+          + 'In ' + esc(p.active.queue.split('—')[0].trim()) + ' now · ' + esc(p.active.token) + '</span>'
+        : '';
+      return '<button type="button" class="np-result flex w-full items-center gap-3 rounded-xl border border-hairline'
+        + ' px-3.5 py-2.5 text-left transition hover:border-teal-400 hover:bg-brand-50/40"'
+        + ' data-pick-patient="' + Number(p.id) + '"'
+        + ' data-pick-name="' + esc(p.name) + '"'
+        + ' data-pick-phone="' + esc(p.phone) + '">'
+        + '<span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-ink-700">'
+        + esc(initials(p.name)) + '</span>'
+        + '<span class="min-w-0 flex-1">'
+        + '<span class="block truncate text-sm font-semibold text-ink-900">' + esc(p.name) + '</span>'
+        + '<span class="block truncate text-[11px] text-ink-400">' + esc(meta) + (age ? ' · ' + esc(age) : '') + '</span>'
+        + '</span>' + busy
+        + '<svg class="h-4 w-4 shrink-0 text-slate-300"><use href="#i-arrow-right"/></svg></button>';
+    };
+
+    // No match is not a dead end: offer to create the person, pre-filling
+    // whichever field the typed term actually looks like.
+    const noMatchRow = (term) => {
+      const digits = term.replace(/\D/g, '');
+      const looksLikePhone = digits.length >= 7;
+      return '<div class="rounded-lg border border-dashed border-hairline px-4 py-4">'
+        + '<p class="text-[13px] text-ink-700">No patient matches &ldquo;' + esc(term) + '&rdquo;.</p>'
+        + '<button type="button" class="np-create mt-2 text-[12px] font-semibold text-brand-700 hover:underline"'
+        + ' data-create-name="' + esc(looksLikePhone ? '' : term.trim()) + '"'
+        + ' data-create-phone="' + esc(looksLikePhone ? term.trim() : '') + '">'
+        + 'Register ' + (looksLikePhone ? 'this number' : '&ldquo;' + esc(term.trim()) + '&rdquo;') + ' as a new walk-in &rarr;</button>'
+        + '</div>';
+    };
+
+    function pick(id, name, phone) {
+      patientId.value = String(id);
+      pickedName.textContent = name;
+      pickedPhone.textContent = phone || 'no phone on file';
+      pickedBox.classList.remove('hidden');
+      newFields.classList.add('hidden');
+      $$('.np-result', results).forEach((b) => b.classList.remove('border-teal-400', 'bg-brand-50/40'));
+      const hit = $('[data-pick-patient="' + id + '"]', results);
+      if (hit) hit.classList.add('border-teal-400', 'bg-brand-50/40');
+      if (issueSub) {
+        issueSub.textContent = 'Issuing to ' + name + '. Choose a queue — the next number is allocated atomically.';
+      }
+      if (status) status.textContent = name + ' selected.';
+    }
+
+    function clearPick() {
+      patientId.value = '';
+      pickedBox.classList.add('hidden');
+      newFields.classList.remove('hidden');
+      if (issueSub) issueSub.textContent = 'Choose a queue. The next number is allocated atomically.';
+      const fn = $('#full_name');
+      if (fn) fn.focus();
+    }
+
+    results.addEventListener('click', (e) => {
+      const btn = e.target.closest('.np-result');
+      if (btn) {
+        // Server-rendered results are links so the page works without JS.
+        // With JS we select in place instead of reloading.
+        if (btn.tagName === 'A') e.preventDefault();
+        pick(btn.dataset.pickPatient, btn.dataset.pickName, btn.dataset.pickPhone);
+        return;
+      }
+      const create = e.target.closest('.np-create');
+      if (create) {
+        const name = create.dataset.createName || '';
+        const phone = create.dataset.createPhone || '';
+        clearPick();
+        if (name) $('#full_name').value = name;
+        if (phone) $('#phone').value = phone;
+        (name ? $('#phone') : $('#full_name')).focus();
+        if (status) status.textContent = 'New walk-in started for ' + (name || phone) + '.';
+      }
+    });
+
+    const clearBtn = $('#clear-picked');
+    if (clearBtn) clearBtn.addEventListener('click', clearPick);
+
+    const runSearch = debounce(async () => {
+      const term = searchInput.value.trim();
+      if (term.length < MIN) {
+        results.innerHTML = '';
+        if (spinner) spinner.classList.add('hidden');
+        if (status) status.textContent = '';
+        return;
+      }
+      const mine = ++seq;
+      if (spinner) spinner.classList.remove('hidden');
+      try {
+        const data = await api('/api/patient/search?q=' + encodeURIComponent(term), { method: 'GET' });
+        if (mine !== seq) return; // a newer keystroke already won
+        const list = (data && data.patients) || [];
+        results.innerHTML = list.length ? list.map(rowFor).join('') : noMatchRow(term);
+        if (status) {
+          status.textContent = list.length
+            ? list.length + (list.length === 1 ? ' patient' : ' patients') + ' found'
+            : 'No patient found for ' + term;
+        }
+      } catch (err) {
+        if (mine !== seq) return;
+        results.innerHTML = '<p class="text-[12px] text-rose-600">Search is unavailable right now. '
+          + 'Fill in the details below to register a walk-in.</p>';
+        if (status) status.textContent = 'Search failed.';
+      } finally {
+        if (mine === seq && spinner) spinner.classList.add('hidden');
+      }
+    }, 180);
+
+    searchInput.addEventListener('input', runSearch);
+    // Enter should select the first result, not submit the desk form.
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const first = $('.np-result', results);
+      if (first) first.click();
+    });
+
+    // Alt+Enter issues from anywhere (receptionist speed).
+    document.addEventListener('keydown', (e) => {
+      if (e.altKey && e.key === 'Enter') {
+        const form = $('#token-form');
+        if (form) form.requestSubmit();
+      }
+    });
+
+    // Phone: say what it will be used for, and flag a short number before
+    // the server has to reject it.
+    const phone = $('[data-phone]');
+    const hint = $('#phone-hint');
+    if (phone) {
+      phone.addEventListener('blur', () => {
+        const digits = phone.value.replace(/\D/g, '');
+        if (digits === '') {
+          hint.textContent = 'Optional, for the SMS tracking link';
+          hint.className = 'help';
+        } else if (digits.length < 9) {
+          hint.textContent = 'That looks short — use 07X XXX XXXX';
+          hint.className = 'help text-rose-600';
+        } else {
+          hint.textContent = 'Tracking link will be sent to this number';
+          hint.className = 'help text-brand-700';
+        }
       });
     }
   }

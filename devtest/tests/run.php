@@ -5070,6 +5070,64 @@ Assert::test('an unavailable integration cannot be switched on', function (): vo
     Assert::contains('$i[\'available\'] ? \'\' : \'disabled', $v, 'and Connect is disabled when the server cannot use it');
 });
 
+Assert::test('no view ships an inline script, which the app CSP blocks', function (): void {
+    // The app sends `script-src 'self'`. An inline <script> is therefore
+    // refused by the browser, silently: the token desk shipped one, so its
+    // patient picker, Change button, Alt+Enter shortcut and phone hint were
+    // all dead while the page looked finished. The failure mode is the worst
+    // kind -- no error, the page simply does not respond.
+    $dir = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    $offenders = [];
+    foreach ($dir as $file) {
+        if (!$file->isFile() || $file->getExtension() !== 'php') {
+            continue;
+        }
+        $src = (string) file_get_contents($file->getPathname());
+        // Strip comments so a comment merely *about* a script does not count.
+        $code = preg_replace('#/\*.*?\*/#s', '', $src) ?? $src;
+        if (preg_match('/<script(?![^>]*\bsrc=)/i', (string) $code)) {
+            $offenders[] = str_replace(QP_ROOT . '/', '', $file->getPathname());
+        }
+    }
+    Assert::same([], $offenders, 'every inline <script> must move into app.js: ' . implode(', ', $offenders));
+});
+
+Assert::test('the patient picker works without JavaScript', function (): void {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/queue/new.php');
+    // Live search is a progressive enhancement, not a requirement. Without
+    // JS the results must still be reachable, and a <button> cannot carry a
+    // selection across a page load while a link can.
+    Assert::contains('/queue/new?patient=', $view, 'results are links carrying the chosen id');
+    Assert::contains('<noscript>', $view, 'and there is a plain search form for the no-JS path');
+
+    // A preselected patient has to be resolved server-side into a name,
+    // otherwise ?patient=12 shows an empty green box.
+    Assert::contains('(new PatientService())->find(', (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/QueueController.php'),
+        'the controller resolves ?patient= to a real record');
+});
+
+Assert::test('the live patient search is clinic-scoped and refuses short terms', function (): void {
+    $c = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/ApiController.php');
+    // A picker that leaked patients across clinics would be a data breach
+    // reachable from the busiest screen in the building.
+    Assert::contains("Auth::clinicId()", $c, 'reads the clinic from the session');
+    Assert::contains("patient.manage", $c, 'and checks the ability, not just authentication');
+    // One character matches most of the book and tells the desk nothing.
+    Assert::contains('mb_strlen($term) < 2', $c, 'two characters minimum before it queries');
+});
+
+Assert::test('the search tells the desk when a patient is already queued', function (): void {
+    $c = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/ApiController.php');
+    // Issuing a second token is refused AFTER the form is filled in. Saying so
+    // in the result row turns a dead-end into an up-front decision.
+    Assert::contains("'active' => \$this->activeEntry(", $c, 'each result carries its live token');
+    // Must use the same status list as the pre-issue check, or the picker and
+    // the desk will disagree about whether someone is already queued.
+    Assert::contains("'waiting','called','in_consultation','on_hold'", $c, 'matching the status list the issue path uses');
+    // queue_entries has no session_date -- "today" comes from queues.
+    Assert::contains('q.session_date = ?', $c, 'and scopes it to today through the queue');
+});
+
 /* ------------------------------------------------------------------ */
 
 $code = Assert::summary();

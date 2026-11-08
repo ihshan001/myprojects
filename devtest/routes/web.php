@@ -284,6 +284,8 @@ Router::get('/a/{token}', [PublicController::class, 'manageAppointment'], ['csrf
 Router::post('/a/{token}/reschedule', [PublicController::class, 'rescheduleManaged']);
 Router::post('/a/{token}/cancel', [PublicController::class, 'cancelManaged']);
 Router::get('/api/summary', [ApiController::class, 'summary'], ['auth' => true]);
+// Live patient lookup for the token desk. Read-only and clinic-scoped.
+Router::get('/api/patient/search', [ApiController::class, 'patientSearch'], ['auth' => true, 'ability' => 'patient.manage']);
 
 // Health endpoint for an external monitor. Authorisation is inside the
 // controller (bearer token or super admin) because a "signed-in" probe is not

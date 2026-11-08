@@ -51,6 +51,12 @@ final class QueueController
                 ? (new PatientService())->search($clinicId, Request::string('q'))
                 : [],
             'preselect' => Request::int('patient'),
+            // Resolved here rather than trusted from the URL: the desk needs
+            // the name to show, and a patient id belonging to another clinic
+            // must resolve to nothing rather than to someone else's record.
+            'picked' => Request::int('patient') > 0
+                ? (new PatientService())->find($clinicId, Request::int('patient'))
+                : null,
             'appointments' => (new AppointmentService())->forDay($clinicId, null),
         ]);
     }

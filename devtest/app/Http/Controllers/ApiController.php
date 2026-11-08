@@ -395,6 +395,83 @@ final class ApiController
         json($payload);
     }
 
+    /**
+     * Patient lookup for the token desk.
+     *
+     * The desk page used to require a full form submit to search, which cost
+     * a page load per keystroke and made "four keystrokes to a token" a lie.
+     * This returns the same rows the full page would have, as JSON, so the
+     * search can run as the receptionist types.
+     *
+     * Deliberately narrow: name, phone and code only. It is a picker, not a
+     * patient record view, so it does not return notes or visit history.
+     */
+    public function patientSearch(): void
+    {
+        $clinicId = Auth::clinicId();
+        if ($clinicId === null) {
+            json(['ok' => false, 'error' => 'unauthenticated'], 401);
+            return;
+        }
+        if (!Auth::can('patient.manage')) {
+            json(['ok' => false, 'error' => 'forbidden'], 403);
+            return;
+        }
+
+        $term = trim((string) Request::string('q'));
+        // Two characters is the floor: a single character matches most of the
+        // book and tells the desk nothing.
+        if (mb_strlen($term) < 2) {
+            json(['ok' => true, 'patients' => []]);
+            return;
+        }
+
+        $out = [];
+        foreach ((new \App\Services\PatientService())->search($clinicId, $term, 8) as $p) {
+            $out[] = [
+                'id' => (int) $p['id'],
+                'name' => (string) $p['full_name'],
+                'phone' => (string) ($p['phone'] ?? ''),
+                'code' => (string) ($p['code'] ?? ''),
+                'birth_year' => $p['birth_year'] !== null ? (int) $p['birth_year'] : null,
+                // Whether this patient is ALREADY in a queue today. Issuing a
+                // second token is refused with an error AFTER the desk has
+                // filled the form in; saying so in the result list saves the
+                // dead-end. Carries the token so the row can say which one.
+                'active' => $this->activeEntry($clinicId, (int) $p['id']),
+            ];
+        }
+
+        json(['ok' => true, 'patients' => $out]);
+    }
+
+    /**
+     * The live token this patient already holds today, if any.
+     *
+     * Same status list as QueueService's pre-issue check, so the picker and
+     * the desk cannot disagree about whether someone is already queued.
+     *
+     * @return array{token: string, queue: string}|null
+     */
+    private function activeEntry(int $clinicId, int $patientId): ?array
+    {
+        $row = Db::one(
+            "SELECT e.token_label, q.name AS queue_name
+               FROM queue_entries e
+               JOIN queues q ON q.id = e.queue_id
+              WHERE e.clinic_id = ? AND e.patient_id = ? AND q.session_date = ?
+                AND e.status IN ('waiting','called','in_consultation','on_hold')
+              LIMIT 1",
+            [$clinicId, $patientId, Db::today()]
+        );
+
+        if (!$row) {
+            return null;
+        }
+
+        return ['token' => (string) $row['token_label'], 'queue' => (string) $row['queue_name']];
+    }
+
     public function summary(): void
     {
         $clinicId = Auth::clinicId();
