@@ -85,7 +85,7 @@ $addr = trim(implode(', ', array_filter([
           <svg class="st-card-icon"><use href="#i-building"/></svg>Clinic profile
         </h2>
         <?php if ($canManage): ?>
-          <details class="st-details">
+          <details class="st-details st-details-panel">
             <summary class="st-link">Edit profile</summary>
             <div class="st-details-body">
               <form method="post" action="/settings" class="space-y-3">
@@ -153,13 +153,56 @@ $addr = trim(implode(', ', array_filter([
     </section>
 
     <!-- ------------------------------------------------------ hours -->
-    <section class="card overflow-hidden">
+    <section class="card overflow-hidden" id="hours">
       <div class="st-card-head">
         <h2 class="st-card-title">
           <svg class="st-card-icon"><use href="#i-clock"/></svg>Operating hours
         </h2>
         <p class="st-card-sub">Set your clinic hours and public holidays.</p>
-        <a class="st-link" href="/settings?tab=clinic#hours">Edit hours</a>
+        <?php if ($canManage): ?>
+          <details class="st-details st-details-panel">
+            <summary class="st-link">Edit hours</summary>
+            <div class="st-details-body">
+              <!-- POST /settings/hours existed with no form anywhere in the
+                   UI to post to it, so "Edit hours" was a link to an anchor
+                   that was never rendered. This is the missing editor. -->
+              <form method="post" action="/settings/hours" class="space-y-3">
+                <?= csrf_field() ?>
+                <div class="space-y-1.5">
+                  <?php foreach ($dayNames as $dow => $dayName): ?>
+                    <?php
+                      $row = $weekHours[$dow] ?? ['open' => null, 'close' => null, 'closed' => true];
+                      $isClosed = !empty($row['closed']);
+                    ?>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span class="w-[5.5rem] shrink-0 text-[12px] font-semibold text-ink-700"><?= e($dayName) ?></span>
+                      <label class="flex items-center gap-1.5 text-[11.5px] text-ink-600">
+                        <input type="checkbox" name="closed_<?= (int) $dow ?>" value="1"
+                               <?= $isClosed ? 'checked' : '' ?> data-hours-closed="<?= (int) $dow ?>">
+                        Closed
+                      </label>
+                      <input type="time" name="open_<?= (int) $dow ?>"
+                             value="<?= e((string) ($row['open'] ?? '')) ?>" <?= $isClosed ? 'disabled' : '' ?>
+                             data-hours-open="<?= (int) $dow ?>" aria-label="<?= e($dayName) ?> opening time"
+                             class="input !w-auto !py-1 text-[12px]">
+                      <span class="text-ink-400">to</span>
+                      <input type="time" name="close_<?= (int) $dow ?>"
+                             value="<?= e((string) ($row['close'] ?? '')) ?>" <?= $isClosed ? 'disabled' : '' ?>
+                             data-hours-close="<?= (int) $dow ?>" aria-label="<?= e($dayName) ?> closing time"
+                             class="input !w-auto !py-1 text-[12px]">
+                    </div>
+                  <?php endforeach; ?>
+                </div>
+                <div>
+                  <label class="label" for="st-horizon">Booking window (days ahead patients can book)</label>
+                  <input class="input" type="number" id="st-horizon" name="horizon_days"
+                         min="1" max="180" value="<?= (int) ($horizon ?? 30) ?>">
+                </div>
+                <button class="btn-primary w-full">Save hours</button>
+              </form>
+            </div>
+          </details>
+        <?php endif; ?>
       </div>
 
       <div class="grid gap-x-6 gap-y-4 px-4 py-10 sm:grid-cols-2">
@@ -181,7 +224,7 @@ $addr = trim(implode(', ', array_filter([
               </div>
             <?php endforeach; ?>
           </dl>
-          <a class="st-link mt-2 inline-block" href="/settings?tab=clinic#hours">View full schedule</a>
+          <a class="st-link mt-2 inline-block" href="/calendar">View full schedule</a>
         </div>
 
         <div>
@@ -241,7 +284,7 @@ $addr = trim(implode(', ', array_filter([
     </section>
 
     <!-- ------------------------------------------------ system data -->
-    <section class="card overflow-hidden">
+    <section class="card overflow-hidden" id="retention">
       <div class="st-card-head">
         <h2 class="st-card-title">
           <svg class="st-card-icon"><use href="#i-database"/></svg>System &amp; data
@@ -324,7 +367,7 @@ $addr = trim(implode(', ', array_filter([
   <aside class="space-y-5">
 
     <!-- ------------------------------------------------------ guide -->
-    <section class="card card-pad">
+    <section class="card card-pad" id="guide">
       <h2 class="text-[13px] font-bold text-ink-900">Settings guide</h2>
       <p class="mt-2 text-[11px] leading-relaxed text-ink-500">
         Learn how to configure your clinic, from opening hours to priority rules,

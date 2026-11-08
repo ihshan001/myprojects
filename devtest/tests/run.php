@@ -5162,7 +5162,10 @@ Assert::test('the four behaviours those handlers provided still exist, CSP-safe'
     Assert::contains("[data-autosubmit]", $js, 'selects that submit on change declare data-autosubmit');
     Assert::contains("form.submit();", $js, 'and app.js submits their form');
     Assert::contains("[data-confirm]", $js, 'destructive forms declare data-confirm');
-    Assert::contains("window.confirm(msg)", $js, 'and app.js actually asks');
+    // askConfirm() renders an in-page dialog. It replaced window.confirm(),
+    // which the browser labels "an embedded page at <host> says" whenever the
+    // console runs inside the preview iframe.
+    Assert::contains('askConfirm(msg', $js, 'and app.js actually asks');
     Assert::contains("e.preventDefault();", $js, 'declining the prompt cancels the submit');
     Assert::contains("}, true);", $js, 'the confirm guard runs in the capture phase, before anything else submits');
     Assert::contains("[data-print]", $js, 'print buttons declare data-print');
@@ -5340,6 +5343,124 @@ Assert::test('the waiting row wraps instead of squeezing the name to nothing', f
         strpos($row, 'prow-main') < strpos($row, 'prow-name'),
         'on the column that holds the name, not a later element'
     );
+});
+
+/* ------------------------------------------------------------------ */
+/* Dialogs, settings dead ends, and the desktop header nav.             */
+/* ------------------------------------------------------------------ */
+
+Assert::test('no native confirm/prompt/alert is left anywhere', function (): void {
+    // Inside the preview iframe the browser prefixes every native dialog
+    // with "An embedded page at <host> says", which reads like phishing and
+    // takes no styling. Seven call sites were replaced by an in-page dialog.
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+    Assert::same(0, preg_match('/\bwindow\.confirm\s*\(/', $js), 'no window.confirm');
+    Assert::same(0, preg_match('/\bwindow\.prompt\s*\(/', $js), 'no window.prompt');
+    Assert::same(0, preg_match('/(?<![.\w])alert\s*\(/', $js), 'no alert()');
+    // Strip the comment block that narrates why they were removed, or the
+    // explanation of the rule reads like a violation of it.
+    $views = [];
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($it as $f) {
+        if ($f->isFile() && $f->getExtension() === 'php') {
+            $views[$f->getPathname()] = (string) file_get_contents($f->getPathname());
+        }
+    }
+    $bad = [];
+    foreach ($views as $path => $src) {
+        if (preg_match('/\b(?:window\.)?(?:confirm|prompt|alert)\s*\(/', $src)) {
+            $bad[] = basename($path);
+        }
+    }
+    Assert::same([], $bad, 'no native dialog in a view either: ' . implode(', ', $bad));
+});
+
+Assert::test('the replacement dialog is a real dialog', function (): void {
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+    Assert::contains("setAttribute('role', 'dialog')", $js, 'it announces itself as a dialog');
+    Assert::contains("setAttribute('aria-modal', 'true')", $js, 'and as modal');
+    Assert::contains("ev.key === 'Escape'", $js, 'Escape dismisses it');
+    Assert::contains("ev.key !== 'Tab'", $js, 'Tab is trapped inside it');
+    Assert::contains('returnFocus', $js, 'focus goes back where it came from');
+    // A dialog is async. The submit guard has to stop the submit first and
+    // re-issue it once answered, and mark it so the re-issue passes through.
+    Assert::contains("form.dataset.confirmed === '1'", $js, 'the re-issued submit is marked');
+    Assert::contains('form.requestSubmit()', $js, 'and re-issues through requestSubmit, which runs validation');
+    // Transfer used to be "type 1, 2 or 3". It is a select now.
+    Assert::contains("kind: 'select'", $js, 'transfer destination is picked from a list');
+});
+
+Assert::test('settings links point at anchors and routes that exist', function (): void {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/index.php');
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+
+    // "Edit hours" and "View full schedule" both pointed at #hours, which no
+    // element carried, and nothing posted to /settings/hours at all.
+    Assert::contains("id=\"hours\"", $view, 'the hours section is anchored');
+    Assert::contains('id="retention"', $view, 'the retention section is anchored');
+    Assert::contains('id="guide"', $view, 'the guide section is anchored');
+    Assert::contains("action=\"/settings/hours\"", $view, 'and there is now a form that posts the hours');
+    Assert::contains("Router::post('/settings/hours'", $routes, 'to the route that already existed');
+
+    // A booked-in day needs its two times and a closed flag, per saveHours().
+    Assert::contains("name=\"closed_", $view, 'each day has a closed flag');
+    Assert::contains('data-hours-closed=', $view, 'wired so checking it disables the time fields');
+    Assert::contains('name="horizon_days"', $view, 'and the booking window is editable');
+
+    // Every in-page anchor this view links to must resolve to an id it has.
+    preg_match_all('~href="/settings\?tab=[a-z]+#([a-z]+)"~', $view, $m);
+    $missing = [];
+    foreach (array_unique($m[1] ?? []) as $id) {
+        if (strpos($view, 'id="' . $id . '"') === false) {
+            $missing[] = $id;
+        }
+    }
+    Assert::same([], $missing, 'no link to a missing anchor: #' . implode(', #', $missing));
+});
+
+Assert::test('an editing panel is not rendered as a 288px dropdown', function (): void {
+    // .st-details-body is an 18rem popover sized for the "Clear data"
+    // confirmation. "Edit profile" dropped six fields into it and was
+    // clipped, so the editors use a full-width in-flow variant.
+    $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+    Assert::true(
+        (bool) preg_match('/\.st-details-panel\s*>\s*\.st-details-body\s*\{[^}]*static/s', $css),
+        'the panel variant stays in normal flow'
+    );
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/index.php');
+    Assert::same(2, substr_count($view, 'st-details st-details-panel'), 'both editors use it');
+    Assert::contains('<details class="st-details shrink-0">', $view, 'while the purge popover keeps the dropdown');
+});
+
+Assert::test('desktop navigation lives in a header, not a side rail', function (): void {
+    $layout = (string) file_get_contents(QP_ROOT . '/resources/views/layouts/app.php');
+    $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+
+    Assert::contains('<header class="topnav">', $layout, 'there is a header');
+    Assert::contains('$headerPrimary', $layout, 'with the destinations used all day on it');
+    Assert::contains('$headerMore', $layout, 'and the long tail grouped under More');
+
+    // The rail is gone, and with it the padding that reserved its width --
+    // leaving the pl would have stranded a 221px gutter down the page.
+    Assert::same(0, preg_match('/class="sidebar/', $layout), 'the sidebar is no longer rendered');
+    Assert::same(0, preg_match('/\.sidebar\s*\{/', $css), 'nor styled');
+    Assert::same(0, preg_match('/lg:pl-\[var\(--sidebar-w\)\]/', $css), 'the main column no longer reserves its width');
+
+    // A shared primary list left the platform console with nothing but
+    // "More": none of /admin/* matched a clinic's destinations. Assert the
+    // admin branch of the ternary itself -- `=== 'super_admin'` and
+    // '/admin/monitor' both occur elsewhere in this file, so either alone
+    // passes even when the role-aware set has been deleted.
+    Assert::contains("? ['/admin', '/admin/clinics'", $layout, 'the admin primary set exists');
+    Assert::contains(
+        "? ['/admin', '/admin/clinics', '/admin/organisations', '/admin/features',",
+        $layout,
+        'and lists the console destinations'
+    );
+
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+    Assert::contains('[data-nav-more]', $js, 'the More menu is wired');
+    Assert::contains('nav-more-menu', $js, 'and has a handler');
 });
 
 /* ------------------------------------------------------------------ */

@@ -256,6 +256,48 @@
   .label {
     @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500;
   }
+  /* In-page dialogs, replacing confirm() and prompt(). The native ones are
+     prefaced by the browser with "an embedded page at <host> says" whenever
+     the console runs inside the preview iframe, which reads like a phishing
+     attempt and takes no styling at all. */
+  .qp-dialog-locked { overflow: hidden; }
+
+  .qp-dialog-host {
+    @apply fixed inset-0 z-[120] flex items-center justify-center p-4;
+    background: rgb(15 23 42 / 0.45);
+    /* The console is drawn at 0.9 zoom, so a fixed overlay has to undo it or
+       it lands slightly off-centre against the rest of the chrome. */
+    zoom: 1;
+  }
+  .qp-dialog-host[hidden] { display: none; }
+
+  .qp-dialog {
+    @apply w-full max-w-[26rem] rounded-xl border border-hairline bg-white p-5 shadow-pop;
+  }
+  .qp-dialog-title {
+    @apply text-[15px] font-bold tracking-tight text-ink-900;
+  }
+  .qp-dialog-text {
+    @apply mt-1.5 text-[13px] leading-relaxed text-ink-600;
+  }
+  .qp-dialog-field {
+    @apply mt-3 block;
+  }
+  .qp-dialog-field > span {
+    @apply mb-1 block text-[11.5px] font-semibold text-ink-700;
+  }
+  .qp-dialog-field > .input {
+    @apply mt-0 w-full;
+  }
+  .qp-dialog-actions {
+    @apply mt-4 flex flex-wrap items-center justify-end gap-2;
+  }
+  .qp-dialog-actions > .btn-primary,
+  .qp-dialog-actions > .btn-danger,
+  .qp-dialog-actions > .btn-secondary {
+    @apply !w-auto;
+  }
+
   .input {
     @apply w-full rounded-lg border border-hairline bg-white px-3 py-2.5 text-sm text-ink-900
            placeholder:text-slate-400 focus:border-brand-600 focus:ring-2 focus:ring-brand-600/15;
@@ -627,15 +669,77 @@
   .shell {
     @apply flex min-h-screen;
   }
-  .sidebar {
-    @apply fixed inset-y-0 left-0 z-30 hidden w-[var(--sidebar-w)] flex-col
-           border-r border-hairline bg-white lg:flex;
-  }
   .main-col {
     /* min-w-0: a flex item defaults to min-width:auto, so one wide scroller
        inside would stretch the whole column past the phone's width. */
-    @apply flex min-h-screen w-full min-w-0 flex-col lg:pl-[var(--sidebar-w)];
+    @apply flex min-h-screen w-full min-w-0 flex-col;
   }
+  /* ------------------------------------------------------ desktop header
+     Navigation moved out of the 221px side rail and into a header. A rail
+     suited a phone drawer; on a wide screen it spent the width the queue
+     board needs on labels nobody scrolled. The header keeps the same
+     grouping, just horizontal, with the long tail under "More". */
+  .topnav {
+    @apply sticky top-0 z-40 hidden border-b border-hairline bg-white/95
+           backdrop-blur lg:block;
+  }
+  .topnav-inner {
+    @apply mx-auto flex h-14 w-full max-w-[1400px] items-center gap-3
+           px-4 xl:gap-4 xl:px-8;
+  }
+  .topnav-brand {
+    @apply flex shrink-0 items-center gap-2 text-ink-900 hover:text-brand-700;
+  }
+  .topnav-links {
+    @apply flex min-w-0 items-center gap-0.5;
+  }
+  .topnav-link {
+    @apply flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-[13px]
+           font-medium text-ink-600 transition hover:bg-slate-100 hover:text-ink-900
+           xl:px-3;
+  }
+  .topnav-link.is-active {
+    @apply bg-mint-100 font-semibold text-brand-700 hover:bg-mint-100 hover:text-brand-700;
+  }
+  .topnav-right {
+    @apply ml-auto flex min-w-0 items-center gap-1.5 xl:gap-2.5;
+  }
+  .topnav-search {
+    @apply flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg border border-hairline
+           bg-canvas px-2.5 text-ink-700 lg:max-w-[15rem] xl:max-w-[19rem];
+  }
+  .topnav-branch {
+    @apply h-9 max-w-[9rem] shrink-0 cursor-pointer truncate rounded-lg border
+           border-hairline bg-white px-2 text-[12px] text-ink-700;
+  }
+  .topnav-icon {
+    @apply relative flex h-9 w-9 shrink-0 items-center justify-center rounded-lg
+           text-ink-500 transition hover:bg-slate-100 hover:text-ink-900;
+  }
+  .topnav-badge {
+    @apply absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center
+           rounded-full bg-brand-600 px-1 text-[9px] font-bold text-white;
+  }
+  .topnav-user {
+    @apply flex shrink-0 items-center gap-2 rounded-lg px-1.5 py-1 transition hover:bg-slate-100;
+  }
+
+  .topnav-more { @apply relative shrink-0; }
+  .topnav-menu {
+    @apply absolute right-0 top-full z-50 mt-1.5 w-64 rounded-xl border border-hairline
+           bg-white p-1.5 shadow-pop;
+  }
+  .topnav-menu[hidden] { display: none; }
+  .topnav-menu-label {
+    @apply px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.09em] text-ink-400
+           first:pt-1;
+  }
+  .topnav-menu-item {
+    @apply flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-[13px] font-medium
+           text-ink-700 transition hover:bg-slate-50 hover:text-ink-900;
+  }
+  .topnav-menu-item.is-active { @apply bg-mint-100 font-semibold text-brand-700; }
+
   .page {
     @apply mx-auto w-full max-w-[1400px] flex-1 px-3 py-4 sm:px-6 sm:py-6 lg:px-8;
   }
@@ -929,6 +1033,18 @@
   .st-details-body {
     @apply absolute right-0 top-full z-20 mt-1.5 w-72 rounded-xl border border-hairline
            bg-white p-3 shadow-lg;
+  }
+
+  /* An inline editor panel, not a dropdown.
+     The rule above is an 18rem popover sized for the "Clear data"
+     confirmation. A settings form dropped into it is clipped: "Edit profile"
+     rendered six fields and a save button into 288px, so the grid collapsed
+     and the button fell out of sight. This variant stays in normal flow and
+     spans the card instead. */
+  .st-details.st-details-panel { @apply w-full; }
+  .st-details-panel > .st-details-body {
+    @apply static right-auto top-auto z-auto mt-3 w-full max-w-none
+           rounded-lg border-0 bg-slate-50 p-3 shadow-none;
   }
 
   /* Rail field captions: sentence case, unlike the uppercase .label. */

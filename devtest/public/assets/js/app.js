@@ -96,6 +96,167 @@
     };
   }
 
+  /* ------------------------------------------------------------- dialogs
+     The console runs inside an iframe on the preview host, so every native
+     confirm()/prompt() the browser opens is labelled "An embedded page at
+     <host> says". That reads like a phishing prompt, cannot be styled, and
+     cannot be driven by a test. These are the in-page replacements. They
+     return promises, so the call sites read the same way they did before. */
+  const dialogHost = document.createElement('div');
+  dialogHost.className = 'qp-dialog-host';
+  dialogHost.hidden = true;
+  document.body.appendChild(dialogHost);
+
+  let dialogOpen = null;
+
+  function dialogKeydown(ev) {
+    if (!dialogOpen) return;
+    if (ev.key === 'Escape') {
+      ev.preventDefault();
+      dialogOpen.close(dialogOpen.nullish);
+      return;
+    }
+    if (ev.key !== 'Tab') return;
+    // Focus trap. A dialog that lets Tab walk out from behind itself is
+    // unusable from the keyboard, and this app is worked on a reception
+    // desk all day.
+    const items = dialogHost.querySelectorAll('button, [href], input, textarea, select');
+    if (items.length === 0) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (ev.shiftKey && document.activeElement === first) {
+      ev.preventDefault();
+      last.focus();
+    } else if (!ev.shiftKey && document.activeElement === last) {
+      ev.preventDefault();
+      first.focus();
+    }
+  }
+
+  /**
+   * @returns {Promise<boolean>} with an input field, Promise<string|null>
+   */
+  function openDialog(opts) {
+    return new Promise((resolve) => {
+      // A second dialog over an open one would strand the first promise.
+      if (dialogOpen) dialogOpen.close(dialogOpen.nullish);
+
+      const withInput = Boolean(opts.input);
+      const nullish = withInput ? null : false;
+      const returnFocus = document.activeElement;
+
+      const close = (value) => {
+        dialogOpen = null;
+        dialogHost.hidden = true;
+        dialogHost.innerHTML = '';
+        document.removeEventListener('keydown', dialogKeydown, true);
+        document.body.classList.remove('qp-dialog-locked');
+        if (returnFocus && returnFocus.focus) returnFocus.focus();
+        resolve(value);
+      };
+
+      dialogHost.innerHTML = '';
+      dialogHost.hidden = false;
+
+      const card = document.createElement('div');
+      card.className = 'qp-dialog';
+      card.setAttribute('role', 'dialog');
+      card.setAttribute('aria-modal', 'true');
+
+      const heading = document.createElement('h2');
+      heading.className = 'qp-dialog-title';
+      heading.textContent = opts.title || 'Are you sure?';
+      card.appendChild(heading);
+
+      if (opts.message) {
+        const body = document.createElement('p');
+        body.className = 'qp-dialog-text';
+        body.textContent = opts.message;
+        card.appendChild(body);
+      }
+
+      let field = null;
+      if (withInput) {
+        const spec = opts.input;
+        const wrap = document.createElement('label');
+        wrap.className = 'qp-dialog-field';
+        const caption = document.createElement('span');
+        caption.textContent = spec.label || '';
+        wrap.appendChild(caption);
+
+        if (spec.kind === 'select') {
+          // Picking a destination by typing "2" into a prompt is how a
+          // patient gets transferred to the wrong doctor. Show the names.
+          field = document.createElement('select');
+          field.className = 'input';
+          (spec.choices || []).forEach((choice) => {
+            const option = document.createElement('option');
+            option.value = String(choice.value);
+            option.textContent = choice.label;
+            if (String(choice.value) === String(spec.value)) option.selected = true;
+            field.appendChild(option);
+          });
+        } else {
+          field = document.createElement(spec.multiline ? 'textarea' : 'input');
+          if (!spec.multiline) field.type = 'text';
+          field.className = 'input';
+          field.placeholder = spec.placeholder || '';
+          field.value = spec.value || '';
+          if (spec.readonly) {
+            field.readOnly = true;
+            field.className += ' font-mono text-[12px]';
+          }
+        }
+        wrap.appendChild(field);
+        card.appendChild(wrap);
+      }
+
+      const actions = document.createElement('div');
+      actions.className = 'qp-dialog-actions';
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'btn-secondary';
+      cancel.textContent = opts.cancelLabel || 'Cancel';
+      const confirm_ = document.createElement('button');
+      confirm_.type = 'button';
+      confirm_.className = opts.danger ? 'btn-danger' : 'btn-primary';
+      confirm_.textContent = opts.confirmLabel || (withInput ? 'Continue' : 'Confirm');
+      actions.appendChild(cancel);
+      actions.appendChild(confirm_);
+      card.appendChild(actions);
+      dialogHost.appendChild(card);
+
+      dialogOpen = { close, nullish };
+
+      cancel.addEventListener('click', () => close(nullish));
+      confirm_.addEventListener('click', () => close(withInput ? field.value : true));
+      // Backdrop press. mousedown, not click: a click that started inside
+      // the card and ended on the backdrop must not dismiss it.
+      dialogHost.addEventListener('mousedown', (ev) => {
+        if (ev.target === dialogHost) close(nullish);
+      });
+
+      document.addEventListener('keydown', dialogKeydown, true);
+      document.body.classList.add('qp-dialog-locked');
+
+      (field || confirm_).focus();
+      if (field && field.select) field.select();
+    });
+  }
+
+  /** Ask a yes/no question. Resolves true only on Confirm. */
+  const askConfirm = (message, opts = {}) => openDialog(Object.assign({ message }, opts));
+
+  /** Ask for a line of text. Resolves null when dismissed. */
+  const askText = (opts) => openDialog(Object.assign({}, opts, {
+    input: {
+      label: opts.label,
+      value: opts.value,
+      placeholder: opts.placeholder,
+      multiline: opts.multiline,
+    },
+  }));
+
   /* --------------------------------------- CSP-safe inline replacements
      The app sends `script-src 'self'`, which blocks inline event handlers
      exactly as it blocks inline <script>. Twenty-odd controls were written
@@ -114,15 +275,43 @@
     if (form) form.submit();
   });
 
+  // Opening-hours editor: a day marked Closed greys out its two time fields,
+  // so the row cannot be saved as both closed and open. The disabled state is
+  // also rendered server-side, so this works with JS off.
+  document.addEventListener('change', (e) => {
+    const box = e.target && e.target.closest ? e.target.closest('[data-hours-closed]') : null;
+    if (!box) return;
+    const dow = box.getAttribute('data-hours-closed');
+    const scope = box.closest('form') || document;
+    ['open', 'close'].forEach((key) => {
+      const field = scope.querySelector('[data-hours-' + key + '="' + dow + '"]');
+      if (field) field.disabled = box.checked;
+    });
+  });
+
   // Capture phase, so the guard runs before anything else can submit the form.
+  // The native confirm() this replaced was synchronous; a dialog is not, so
+  // the submit is always stopped here and re-issued once the answer arrives.
+  // The marker tells the re-issued submit to pass straight through.
   document.addEventListener('submit', (e) => {
     const form = e.target;
-    const msg = form && form.getAttribute ? form.getAttribute('data-confirm') : null;
-    if (!msg) return;
-    if (!window.confirm(msg)) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
+    if (!form || !form.getAttribute) return;
+    if (form.dataset.confirmed === '1') {
+      delete form.dataset.confirmed;
+      return;
     }
+    const msg = form.getAttribute('data-confirm');
+    if (!msg) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    askConfirm(msg, { danger: form.dataset.confirmDanger === '1' }).then((ok) => {
+      if (!ok) return;
+      form.dataset.confirmed = '1';
+      // requestSubmit, not submit: it runs validation and carries the
+      // submitter, so the handler that owns this form still sees it.
+      if (form.requestSubmit) form.requestSubmit();
+      else form.submit();
+    });
   }, true);
 
   document.addEventListener('click', (e) => {
@@ -153,6 +342,36 @@
     // character counter, a dirty flag) has to be told.
     area.dispatchEvent(new Event('input', { bubbles: true }));
   });
+
+  /* --------------------------------------------- desktop "More" menu */
+  const moreWrap = $('[data-nav-more]');
+  if (moreWrap) {
+    const toggle = $('[data-nav-more-toggle]', moreWrap);
+    const menu = $('#nav-more-menu', moreWrap);
+
+    const setMore = (open) => {
+      menu.hidden = !open;
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+
+    toggle.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      setMore(menu.hidden);
+    });
+    // A link inside is a navigation, not a menu toggle: let it through.
+    menu.addEventListener('click', (ev) => {
+      if (ev.target.closest('a')) setMore(false);
+    });
+    document.addEventListener('click', (ev) => {
+      if (!ev.target.closest('[data-nav-more]')) setMore(false);
+    });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && !menu.hidden) {
+        setMore(false);
+        toggle.focus();
+      }
+    });
+  }
 
   /* ------------------------------------------------- mobile nav drawer */
   /* Off-canvas, not an inline list. Locks the page behind it, closes on
@@ -233,10 +452,17 @@
     const btn = ev.target.closest('[data-confirm]');
     if (!btn) return;
     const text = btn.getAttribute('data-confirm') || 'Are you sure?';
-    if (!window.confirm(text)) {
-      ev.preventDefault();
-      ev.stopImmediatePropagation();
+    if (btn.dataset.confirmed === '1') {
+      delete btn.dataset.confirmed;
+      return;
     }
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    askConfirm(text, { danger: btn.dataset.confirmDanger === '1' }).then((ok) => {
+      if (!ok) return;
+      btn.dataset.confirmed = '1';
+      btn.click();
+    });
   }, true);
 
   /* --------------------------------------------------- queue row actions */
@@ -260,7 +486,12 @@
 
     // Clinical priority is the one action that must capture a reason (audit).
     if (action === 'priority') {
-      reason = window.prompt('Reason for clinical priority (recorded in the audit log):', '');
+      reason = await askText({
+        title: 'Reason for priority',
+        message: 'This is recorded in the audit log next to the token.',
+        label: 'Reason',
+        placeholder: 'e.g. chest pain, triaged by nurse',
+      });
       if (reason === null) return;
       if (!reason.trim()) {
         toast('A reason is required for priority.', 'warn');
@@ -270,10 +501,16 @@
     if (action === 'cancel' || action === 'hold') {
       // A hold without a reason is just a mystery row on the board, so the
       // prompt defaults to something a colleague can act on.
-      reason = window.prompt(
-        action === 'hold' ? 'Why is this patient on hold? (e.g. sent for X-ray)' : 'Reason (optional):',
-        action === 'hold' ? 'Stepped away' : ''
-      );
+      const hold = action === 'hold';
+      reason = await askText({
+        title: hold ? 'Why is this patient on hold?' : 'Reason for cancelling (optional)',
+        message: hold
+          ? 'Colleagues see this on the board, so it has to be something they can act on.'
+          : 'Optional. If you leave it blank the cancellation is still recorded.',
+        label: hold ? 'Reason' : 'Reason (optional)',
+        value: hold ? 'Stepped away' : '',
+        placeholder: 'e.g. sent for X-ray',
+      });
       if (reason === null) return;
     }
 
@@ -284,7 +521,12 @@
       const target = await pickTransferTarget();
       if (!target) return;
       toQueueId = target.id;
-      reason = window.prompt('Reason for transfer (recorded in the audit log):', '');
+      reason = await askText({
+        title: 'Reason for transfer',
+        message: 'This is recorded in the audit log against both tokens.',
+        label: 'Reason',
+        placeholder: 'e.g. moved to the dressing room',
+      });
       if (reason === null) return;
     }
 
@@ -325,15 +567,27 @@
       toast('There is no other queue open today to transfer to.', 'warn');
       return null;
     }
-    const list = queues.map((q, i) => `${i + 1}. ${q.name} (${q.waiting} waiting)`).join('\n');
-    const answer = window.prompt('Transfer to which queue?\n\n' + list, '1');
-    if (answer === null) return null;
-    const index = parseInt(answer, 10) - 1;
-    if (Number.isNaN(index) || !queues[index]) {
-      toast('Enter one of the listed numbers.', 'warn');
+    const chosen = await openDialog({
+      title: 'Transfer to which queue?',
+      message: 'The patient keeps their place in the queue they move to.',
+      confirmLabel: 'Transfer here',
+      input: {
+        kind: 'select',
+        label: 'Destination',
+        value: queues[0].id,
+        choices: queues.map((q) => ({
+          value: q.id,
+          label: `${q.name} (${q.waiting} waiting)`,
+        })),
+      },
+    });
+    if (chosen === null) return null;
+    const target = queues.find((q) => String(q.id) === String(chosen));
+    if (!target) {
+      toast('Pick one of the listed queues.', 'warn');
       return null;
     }
-    return queues[index];
+    return target;
   }
 
   /* ------------------------------------------------------- copy buttons */
@@ -356,7 +610,16 @@
       }
       toast('Link copied', 'success', 1800);
     } catch {
-      window.prompt('Copy this link:', value);
+      // Only reached when the clipboard API is unavailable (older Safari,
+      // an insecure origin). A prompt() here is prefaced by the browser
+      // with "an embedded page at <host> says", which nobody will trust.
+      await openDialog({
+        title: 'Copy this link',
+        message: 'Automatic copy is not available — select the text and copy it.',
+        confirmLabel: 'Done',
+        cancelLabel: 'Close',
+        input: { label: 'Link', value, readonly: true },
+      });
     }
   });
 
