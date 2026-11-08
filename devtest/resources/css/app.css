@@ -806,6 +806,127 @@
   .call-flash { animation: none; box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.35); }
 }
 
+/* ===================================================================
+   SETTINGS
+   -------------------------------------------------------------------
+   The settings screen is a summary first and a form second, so most of
+   its weight is in the card HEADER (a title with a leading icon and a
+   right-hand action) rather than in inputs.
+
+   `.st-label` exists because the shared `.label` is uppercase, which the
+   right-hand rail does not want: "Language" and "Timezone" sit next to
+   their values and read as field captions, not as table headings. Rather
+   than change `.label` for everyone, the rail opts out — the same
+   reasoning as `.pr-form` on the priority screen.
+   =================================================================== */
+@layer components {
+  /* ---------------------------------------------------------- tabs */
+  .st-tabs {
+    @apply flex flex-wrap items-center gap-1 border-b border-hairline;
+  }
+  .st-tab {
+    @apply -mb-px border-b-2 border-transparent px-3 py-2 text-[13px] font-semibold text-ink-500
+           hover:text-ink-900;
+  }
+  .st-tab.is-active {
+    @apply border-brand-600 text-brand-700;
+  }
+
+  /* --------------------------------------------------- card header */
+  .st-card-head {
+    @apply flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-slate-100 px-4 py-[22px];
+  }
+  .st-card-head > :last-child { @apply shrink-0; }
+  .st-card-title {
+    @apply flex items-center gap-2 text-[13px] font-bold text-ink-900;
+  }
+  /* The one-line explanation under a card title. It sits INSIDE the header,
+     above the divider, which is where the design puts it -- a subtitle below
+     the rule reads as body copy instead of as part of the heading. */
+  .st-card-sub {
+    @apply mt-1 pl-6 text-[11px] leading-relaxed text-ink-500;
+  }
+  .st-card-icon {
+    @apply h-4 w-4 shrink-0 text-ink-400;
+  }
+
+  /* --------------------------------------------------------- links */
+  .st-link {
+    @apply text-[11px] font-semibold text-brand-700 hover:text-brand-800 hover:underline;
+  }
+
+  /* ------------------------------------- summary field label/value */
+  .st-field-label {
+    @apply text-[11px] font-semibold uppercase tracking-wide text-ink-400;
+  }
+  .st-field-value {
+    @apply mt-0.5 text-[13px] text-ink-900;
+  }
+  .st-sub {
+    @apply mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-400;
+  }
+
+  /* ------------------------------------------------ "Show more" */
+  .st-more { @apply border-t border-slate-100; }
+  .st-more-summary {
+    @apply flex cursor-pointer items-center justify-center gap-1 px-4 py-2 text-[11px]
+           font-semibold text-ink-500 hover:bg-slate-50 hover:text-ink-700;
+  }
+  .st-more-summary svg { @apply transition-transform; }
+  .st-more[open] .st-more-summary svg { @apply rotate-180; }
+  .st-dl {
+    @apply grid gap-x-6 gap-y-2.5 border-t border-slate-100 px-4 py-3 sm:grid-cols-2;
+  }
+  .st-dl dt { @apply text-[10px] font-semibold uppercase tracking-wide text-ink-400; }
+  .st-dl dd { @apply mt-0.5 text-[12px] text-ink-800; }
+
+  /* --------------------------------------------- opening hours */
+  .st-hours { @apply space-y-1.5; }
+  .st-hours-row {
+    @apply flex items-baseline justify-between gap-3 text-[12px];
+  }
+  .st-hours-row dt { @apply text-ink-700; }
+  .st-hours-row dd { @apply tabular text-ink-900; }
+
+  .st-holidays { @apply space-y-1.5; }
+  .st-holidays li {
+    @apply flex items-baseline justify-between gap-3 text-[12px];
+  }
+
+  /* --------------------------------------- system & data rows */
+  .st-row {
+    @apply flex items-start gap-3 px-4 py-3 hover:bg-slate-50;
+  }
+
+  /* Summary table: tighter rows than the console default. The settings staff
+     list is glanced at, not scanned, so the row height buys readability
+     elsewhere but only costs space here. */
+  .st-table thead th { @apply py-1.5; }
+  .st-table tbody td { @apply py-1; }
+  .st-row-icon {
+    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-ink-500;
+  }
+
+  /* ------------------------------- inline "Edit profile" popovers
+     A <details> used as a disclosure: the summary is a link-styled
+     control, the body is absolutely positioned so opening the form does
+     not reflow the card underneath it. */
+  .st-details { @apply relative; }
+  .st-details > summary {
+    @apply cursor-pointer list-none;
+  }
+  .st-details > summary::-webkit-details-marker { display: none; }
+  .st-details-body {
+    @apply absolute right-0 top-full z-20 mt-1.5 w-72 rounded-xl border border-hairline
+           bg-white p-3 shadow-lg;
+  }
+
+  /* Rail field captions: sentence case, unlike the uppercase .label. */
+  .st-label {
+    @apply mb-1.5 block text-[11px] font-semibold text-ink-700;
+  }
+}
+
 /* Print: reports should print clean, without chrome */
 @media print {
   .sidebar, .nav-drawer, .nav-overlay, .bottom-tabs, .no-print, .btn, .act { display: none !important; }

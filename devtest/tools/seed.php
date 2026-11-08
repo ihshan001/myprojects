@@ -386,6 +386,51 @@ Db::transaction(function () use ($planIds, $today) {
         ['super_admin', 'Platform Admin', 'owner@queuepilot.app', password_hash('QueuePilot#2026', PASSWORD_DEFAULT), 'en', Db::now()]
     );
 
+    /* ---------- holidays ----------
+       The settings screen shows "upcoming holidays", so they have to be in
+       the FUTURE relative to the demo day. Seeding last year's dates would
+       make the panel permanently empty on a fresh install, which reads as a
+       bug rather than as "nothing scheduled". */
+    // Month-day only, so the year can be rolled forward. Sri Lankan public
+    // holidays: the two fixed national dates plus Good Friday, which is
+    // seeded as a fixed date because its real date is computed.
+    $holidaySeed = [
+        [$c1, '01-01', "New Year's Day"],
+        [$c1, '02-04', 'Independence Day'],
+        [$c1, '04-18', 'Good Friday'],
+        [$c2, '01-01', "New Year's Day"],
+        [$c2, '02-04', 'Independence Day'],
+    ];
+    $year = (int) date('Y');
+    foreach ($holidaySeed as [$cid, $md, $label]) {
+        // Already past this year? Roll to next year, so the list is always
+        // upcoming no matter when the demo is installed.
+        $date = $year . '-' . $md;
+        if ($date < Db::today()) {
+            $date = ($year + 1) . '-' . $md;
+        }
+        Db::insert(
+            'INSERT INTO holidays (clinic_id, date, name, created_by, created_at) VALUES (?,?,?,NULL,?)',
+            [$cid, $date, $label, Db::now()]
+        );
+    }
+
+    /* ---------- a pending staff invite ----------
+       The staff table on the settings screen lists people AND outstanding
+       invitations. With no pending invite the table has no "Invited" row and
+       the viewer never learns that state exists. */
+    Db::insert(
+        'INSERT INTO staff_invites (clinic_id, email, role, token_hash, invited_by, expires_at, created_at)
+         VALUES (?,?,?,?,?,?,?)',
+        [
+            $c1, 'kavindi.perera@serenity.lk', 'receptionist',
+            hash('sha256', 'demo-invite-token'),
+            (int) Db::scalar('SELECT id FROM users WHERE clinic_id = ? ORDER BY id LIMIT 1', [$c1]),
+            date('Y-m-d H:i:s', strtotime('+3 days')),
+            Db::now(),
+        ]
+    );
+
     /* ---------- invoices ---------- */
     foreach ([[$c1, 'INV-2026-0001', 7900, 'paid'], [$c2, 'INV-2026-0002', 3500, 'unpaid'], [$c3, 'INV-2026-0003', 3500, 'unpaid']] as [$cid, $no, $amt, $st]) {
         Db::insert(

@@ -4989,6 +4989,87 @@ Assert::test('read-only roles get the policy without dead controls', function ()
         'and says why the list is read-only instead of silently omitting drag');
 });
 
+Assert::test('settings tabs are real, and an unknown tab falls back', function (): void {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/index.php');
+    // The clinic tab is the page's default and lives inline; the other four
+    // are partials. Either way each one has to render something real -- a tab
+    // that silently shows nothing is worse than no tab at all.
+    $index = $view;
+    foreach (['team', 'notifications', 'integrations', 'billing'] as $tab) {
+        Assert::true(is_file(QP_ROOT . '/resources/views/pages/settings/_' . $tab . '.php'),
+            'tab "' . $tab . '" has a real view behind it');
+        Assert::contains('views/pages/settings/_', $index, 'and index.php actually includes it');
+    }
+    Assert::contains("'clinic'", $index, 'the clinic tab is the inline default');
+    Assert::contains("SETTINGS_TABS", (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/ClinicController.php'),
+        'and the controller whitelists them');
+    Assert::contains('if (!in_array($tab, self::SETTINGS_TABS, true))', (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/ClinicController.php'),
+        'so a renamed or bogus ?tab= opens somewhere sensible instead of erroring');
+});
+
+Assert::test('clearing clinic data is owner-only, phrase-confirmed, and keeps the accounts', function (): void {
+    $c = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/ClinicController.php');
+
+    // 1. Owner only. The route's ability is a floor; the real check has to sit
+    //    next to the deletion so it cannot be dropped by editing routes alone.
+    Assert::contains("Auth::role() !== 'clinic_admin'", $c, 're-checks the owner role itself');
+
+    // 2. The phrase is compared against the server's copy of the name. Reading
+    //    it from the request would let a crafted POST confirm itself.
+    Assert::contains('$clinic[\'name\']', $c, 'compares against the clinic name from the database');
+    Assert::false(strpos($c, "hash_equals(Request::string('confirm_phrase')") !== false,
+        'and never compares the phrase against a client-supplied name');
+
+    // 3. Accounts survive: deleting them would lock the owner out of an empty
+    //    clinic, which is a support ticket rather than a feature.
+    Assert::false(strpos($c, "'users',") !== false, 'the users table is not in the purge list');
+
+    // 4. The audit log survives, so the purge is itself on the record.
+    Assert::false(strpos($c, "'audit_logs',") !== false, 'the audit log is not in the purge list');
+});
+
+Assert::test('the purge reaches every table it names without breaking', function (): void {
+    // The original list included `incident_entries`, which has no clinic_id —
+    // the purge 500'd halfway through. Anything in the list must be
+    // deletable by clinic_id, or handled through its parent.
+    $c = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/ClinicController.php');
+    $start = strpos($c, 'private function purgeOperationalData');
+    $body = substr($c, (int) $start, 2600);
+    preg_match('/\$tables = \[([^\]]+)\]/s', (string) $body, $m);
+    Assert::true(isset($m[1]), 'the purge declares its tables explicitly');
+    preg_match_all("/'([a-z_]+)'/", (string) $m[1], $names);
+
+    $db = new PDO('sqlite:' . QP_ROOT . '/storage/db/queuepilot.sqlite');
+    foreach ($names[1] as $table) {
+        $cols = $db->query('PRAGMA table_info(' . $table . ')')->fetchAll(PDO::FETCH_COLUMN, 1);
+        Assert::true(in_array('clinic_id', $cols, true), 'table "' . $table . '" is deletable by clinic_id');
+    }
+    // incident_entries has no clinic_id, so it must be reached via incidents.
+    Assert::contains('incident_id IN (SELECT id FROM incidents', $c,
+        'and the one table that hangs off a parent is reached through it');
+});
+
+Assert::test('integrations never store credentials and only accept known fields', function (): void {
+    $s = (string) file_get_contents(QP_ROOT . '/app/Services/IntegrationService.php');
+    Assert::contains('function configFields(', $s, 'a provider exposes an explicit field list');
+    Assert::contains('$this->configFields($provider)', $s, 'and connect() writes only those fields');
+    // The table is queried by support and exported in archives; a secret
+    // landing in it would leak through a path nobody reviews.
+    Assert::contains('Credentials are never stored here', $s, 'the class states the rule');
+
+    // Unknown providers must be refused, not written.
+    Assert::contains('if (!$this->known($provider))', $s, 'unknown providers are rejected');
+});
+
+Assert::test('an unavailable integration cannot be switched on', function (): void {
+    $v = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/_integrations.php');
+    // "Connected" collapsing "not configured on this server" into one badge
+    // would send an owner hunting through their own settings for a problem
+    // that lives in the deployment.
+    Assert::contains('Not configured on this server', $v, 'the two states are shown separately');
+    Assert::contains('$i[\'available\'] ? \'\' : \'disabled', $v, 'and Connect is disabled when the server cannot use it');
+});
+
 /* ------------------------------------------------------------------ */
 
 $code = Assert::summary();

@@ -180,6 +180,18 @@ Router::post('/settings/hours', [ClinicController::class, 'saveHours'], ['auth' 
 // 90-day retention window rather than deleting anything on the spot.
 Router::post('/settings/closure', [AdminController::class, 'requestClosure'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/settings/staff', [ClinicController::class, 'storeStaff'], ['auth' => true, 'ability' => 'staff.manage']);
+// Language + timezone from the settings rail.
+Router::post('/settings/preferences', [ClinicController::class, 'savePreferences'], ['auth' => true, 'ability' => 'clinic.manage']);
+// Which of the three notification switches are on. Any clinic manager may
+// change these: they only control what the clinic is told about, not who may
+// see patient data.
+Router::post('/settings/notifications', [ClinicController::class, 'saveNotifications'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/settings/integrations/connect', [ClinicController::class, 'connectIntegration'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/settings/integrations/disconnect', [ClinicController::class, 'disconnectIntegration'], ['auth' => true, 'ability' => 'clinic.manage']);
+// Destructive. The route declares `clinic.manage` as a floor, but
+// purgeClinicData() re-checks for the owner role itself, so the real gate
+// lives next to the deletion rather than only in this file.
+Router::post('/settings/purge', [ClinicController::class, 'purgeClinicData'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::get('/settings/templates', [ClinicController::class, 'templates'], ['auth' => true]);
 Router::post('/settings/templates', [ClinicController::class, 'saveTemplate'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/settings/templates/reset', [ClinicController::class, 'resetTemplate'], ['auth' => true, 'ability' => 'clinic.manage']);

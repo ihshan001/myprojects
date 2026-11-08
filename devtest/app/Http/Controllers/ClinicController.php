@@ -156,17 +156,61 @@ final class ClinicController
         redirect('/doctors');
     }
 
+    /** The settings tabs, in the order the strip shows them. */
+    private const SETTINGS_TABS = ['clinic', 'team', 'notifications', 'integrations', 'billing'];
+
     public function settings(): void
     {
         $clinicId = $this->clinicId();
         $clinic = Auth::clinic();
 
+        // Unknown tabs fall back to the first one rather than erroring: a
+        // bookmarked ?tab=… that a later release renamed should still open
+        // somewhere sensible.
+        $tab = Request::string('tab', 'clinic');
+        if (!in_array($tab, self::SETTINGS_TABS, true)) {
+            $tab = 'clinic';
+        }
+
+        $prefs = new \App\Services\PreferenceService();
+        $integrations = new \App\Services\IntegrationService();
+
         view('settings/index', [
             'title' => 'Settings',
+            'tab' => $tab,
             'clinicRecord' => $clinic,
             'staff' => Db::all(
                 'SELECT id, name, email, role, is_active, last_login_at FROM users WHERE clinic_id = ? ORDER BY role, name',
                 [$clinicId]
+            ),
+            // Pending invitations are staff that do not exist yet, so they are
+            // not in `users`. Showing them in the same table as real accounts
+            // is the point: "we invited a receptionist" is a staffing fact.
+            'invites' => Db::all(
+                'SELECT email, role, created_at, expires_at FROM staff_invites
+                 WHERE clinic_id = ? AND accepted_at IS NULL AND expires_at > ?
+                 ORDER BY created_at DESC',
+                [$clinicId, Db::now()]
+            ),
+            'notifications' => $prefs->notifications($clinicId),
+            'timezones' => $prefs->timezones(),
+            'locales' => $prefs->locales(),
+            'integrations' => $integrations->listFor($clinicId),
+            'connectedCount' => $integrations->connectedCount($clinicId),
+            // The purge form must not post the clinic name from the client:
+            // the confirmation phrase is checked against the SERVER's copy.
+            'purgePhrase' => (string) $clinic['name'],
+            'clinicId' => $clinicId,
+            // Only holidays that have not happened yet belong under the
+            // "upcoming" heading — a list of last year's closures reads as a
+            // stale page rather than as a schedule.
+            'holidays' => Db::all(
+                'SELECT date, name FROM holidays WHERE clinic_id = ? AND date >= ? ORDER BY date ASC LIMIT 4',
+                [$clinicId, Db::today()]
+            ),
+            'holidayTotal' => (int) Db::scalar(
+                'SELECT COUNT(*) FROM holidays WHERE clinic_id = ? AND date >= ?',
+                [$clinicId, Db::today()]
             ),
             'displayToken' => (string) Db::scalar(
                 "SELECT value FROM settings WHERE scope='clinic' AND owner_id=? AND key_name='display_token'",
@@ -175,7 +219,6 @@ final class ClinicController
             'canManage' => Auth::can('clinic.manage'),
             'plan' => (new ClinicService())->plan($clinic['plan_id'] !== null ? (int) $clinic['plan_id'] : null),
             'notifStats' => (new \App\Services\NotificationService())->stats($clinicId),
-            'invites' => [],
             // When no mail transport is configured the invitation link is the
             // only way the invite reaches the person, so it is shown once,
             // here, to the administrator who created it.
@@ -231,6 +274,190 @@ final class ClinicController
      * seven rows, and a half-filled grid should be rejected as a whole rather
      * than silently saving three days of a four-day change.
      */
+    /**
+     * Save language and timezone from the right-hand rail.
+     */
+    public function savePreferences(): void
+    {
+        $clinicId = $this->clinicId();
+
+        $errors = (new \App\Services\PreferenceService())->saveRegion(
+            $clinicId,
+            Request::string('locale', 'en'),
+            Request::string('timezone', 'Asia/Colombo')
+        );
+
+        if ($errors !== []) {
+            flash('error', implode(' ', $errors));
+            redirect('/settings?tab=clinic');
+            return;
+        }
+
+        (new AuditService())->log($clinicId, 'clinic.preferences_updated', 'clinic', $clinicId, [
+            'locale' => Request::string('locale', 'en'),
+            'timezone' => Request::string('timezone', 'Asia/Colombo'),
+        ]);
+        flash('success', 'Preferences saved.');
+        redirect('/settings?tab=clinic');
+    }
+
+    /**
+     * Save the three notification switches.
+     */
+    public function saveNotifications(): void
+    {
+        $clinicId = $this->clinicId();
+
+        $on = (new \App\Services\PreferenceService())->saveNotifications($clinicId, $_POST);
+
+        (new AuditService())->log($clinicId, 'clinic.notifications_updated', 'clinic', $clinicId, ['on' => $on]);
+        flash('success', $on === 0
+            ? 'Notifications saved. All three are switched off.'
+            : 'Notifications saved. ' . $on . ' of 3 switched on.');
+        redirect('/settings?tab=notifications');
+    }
+
+    /**
+     * Switch an integration on for this clinic.
+     */
+    public function connectIntegration(): void
+    {
+        $clinicId = $this->clinicId();
+        $provider = Request::string('provider');
+
+        if (!(new \App\Services\IntegrationService())->connect($clinicId, $provider, (array) Request::input('config'))) {
+            flash('error', 'That integration is not available.');
+            redirect('/settings?tab=integrations');
+            return;
+        }
+
+        (new AuditService())->log($clinicId, 'integration.connected', 'integration', null, ['provider' => $provider]);
+        flash('success', 'Integration connected.');
+        redirect('/settings?tab=integrations');
+    }
+
+    /**
+     * Switch an integration off, keeping its settings.
+     */
+    public function disconnectIntegration(): void
+    {
+        $clinicId = $this->clinicId();
+        $provider = Request::string('provider');
+
+        (new \App\Services\IntegrationService())->disconnect($clinicId, $provider);
+        (new AuditService())->log($clinicId, 'integration.disconnected', 'integration', null, ['provider' => $provider]);
+        flash('success', 'Integration switched off.');
+        redirect('/settings?tab=integrations');
+    }
+
+    /**
+     * Delete this clinic's operational data. Owner only, double-confirmed.
+     *
+     * Three things make this safe enough to ship:
+     *
+     *  1. Only a clinic owner can reach it (`clinic_admin`), not any manager.
+     *  2. The confirmation phrase is compared against the clinic name read
+     *     from the database, never against anything the browser supplied, so
+     *     a crafted POST cannot talk its way past the check.
+     *  3. Staff accounts and the clinic record survive. Deleting those would
+     *     lock the owner out of an empty clinic, which is a support ticket
+     *     rather than a feature.
+     *
+     * Everything else that belongs to the clinic — patients, tokens,
+     * appointments, notifications, audit history — goes.
+     */
+    public function purgeClinicData(): void
+    {
+        $clinicId = $this->clinicId();
+
+        if (Auth::role() !== 'clinic_admin') {
+            abort(403, 'Only the clinic owner can clear clinic data.');
+        }
+
+        $clinic = Auth::clinic();
+        $phrase = Request::string('confirm_phrase');
+
+        // Trim and collapse whitespace, and compare case-insensitively: the
+        // point is that the human typed the name, not that they matched its
+        // capitalisation exactly.
+        $normalise = static fn (string $s): string => mb_strtolower(trim(preg_replace('/\s+/', ' ', $s) ?? ''));
+
+        if ($phrase === '' || !hash_equals($normalise((string) $clinic['name']), $normalise($phrase))) {
+            flash('error', 'Type the clinic name exactly to confirm. Nothing was deleted.');
+            redirect('/settings?tab=clinic');
+            return;
+        }
+
+        $deleted = $this->purgeOperationalData($clinicId);
+
+        (new AuditService())->log($clinicId, 'clinic.data_purged', 'clinic', $clinicId, ['rows' => $deleted]);
+        flash('success', 'Clinic data cleared — ' . number_format($deleted) . ' rows removed. Staff accounts were kept.');
+        redirect('/settings?tab=clinic');
+    }
+
+    /**
+     * Remove every clinic-scoped operational row.
+     *
+     * Tables are listed explicitly rather than discovered, so that adding a
+     * table to the schema cannot silently add it to a destructive path. A new
+     * table is kept here on purpose, by someone who has thought about whether
+     * it holds patient data.
+     *
+     * @return int total rows removed
+     */
+    private function purgeOperationalData(int $clinicId): int
+    {
+        // WHAT GOES: the clinic's day-to-day history — patients, tokens,
+        // appointments, and the notifications and feedback attached to them.
+        //
+        // WHAT STAYS, deliberately:
+        //   - staff accounts and pending invites (otherwise the owner is
+        //     locked out of an empty clinic);
+        //   - configuration the clinic set up on purpose — priority rules,
+        //     departments, rooms, doctors, holidays, break schedules;
+        //   - the audit log. Deleting the audit log would erase the only
+        //     record that a purge happened, which is exactly the trail an
+        //     owner needs if this was a mistake.
+        // A purge that destroyed its own evidence would be indistinguishable
+        // from one that never happened.
+        //
+        // Ordered children-first so even SQLite, which does not enforce the
+        // foreign keys here, stays consistent, and so a partial failure
+        // cannot leave parents pointing at nothing.
+        $tables = [
+            'queue_events', 'entry_step_done', 'queue_entries', 'queues',
+            'appointments', 'patients', 'notifications', 'staff_notifications',
+            // `incidents` is NOT in this list: it is handled below, because
+            // its child rows have to be removed first.
+            'visit_feedback',
+            'offline_reservations', 'offline_blocks', 'sms_usage',
+        ];
+
+        $deleted = 0;
+        Db::transaction(static function () use ($clinicId, $tables, &$deleted): void {
+            foreach ($tables as $table) {
+                // run() hands back the statement, so the affected-row count
+                // has to be asked for. Tables that hold nothing for this
+                // clinic simply contribute zero.
+                $deleted += Db::run('DELETE FROM ' . $table . ' WHERE clinic_id = ?', [$clinicId])->rowCount();
+            }
+
+            // incident_entries hangs off incidents rather than the clinic, so
+            // it is reached through its parent. Left as orphans these rows
+            // would be invisible in the UI but still patient-adjacent data.
+            $deleted += Db::run(
+                'DELETE FROM incident_entries WHERE incident_id IN (SELECT id FROM incidents WHERE clinic_id = ?)',
+                [$clinicId]
+            )->rowCount();
+            $deleted += Db::run(
+                'DELETE FROM incidents WHERE clinic_id = ?',
+                [$clinicId]
+            )->rowCount();
+        });
+
+        return $deleted;
+    }
+
     public function saveHours(): void
     {
         $clinicId = $this->clinicId();
