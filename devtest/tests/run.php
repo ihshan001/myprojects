@@ -5464,6 +5464,41 @@ Assert::test('desktop navigation lives in a header, not a side rail', function (
 });
 
 /* ------------------------------------------------------------------ */
+/* Controls that must stay inside the box they are drawn in.           */
+/* ------------------------------------------------------------------ */
+
+Assert::test('no control uses a negative margin to escape its container', function (): void {
+    // The dashboard's "Refresh now" button carried -m-2 to widen its tap
+    // target without moving the text. It also pushed the button 7px past
+    // the right and bottom of the paragraph it sits in, at every width,
+    // with overflow: visible -- so it drew over whatever was beside it.
+    $files = [];
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($it as $f) {
+        if ($f->isFile() && $f->getExtension() === 'php') {
+            $files[$f->getPathname()] = (string) file_get_contents($f->getPathname());
+        }
+    }
+    Assert::true(count($files) > 30, 'the view directory is actually scanned');
+
+    $bad = [];
+    foreach ($files as $path => $src) {
+        // A negative margin in a class attribute. Tailwind writes these as
+        // -m-2, -mt-1, -mx-3 and friends; match the utility, not a `-margin`
+        // inside some other word.
+        if (preg_match('/class="[^"]*(?<![-\w])-m[trblxy]?-\d/', $src, $m)) {
+            $bad[] = basename($path) . ' ' . trim($m[0]);
+        }
+    }
+    Assert::same([], $bad, 'no negative margin utilities: ' . implode('; ', $bad));
+
+    $dash = (string) file_get_contents(QP_ROOT . '/resources/views/pages/dashboard/index.php');
+    Assert::contains('data-refresh-now', $dash, 'the refresh button is still there');
+    Assert::same(0, preg_match('/data-refresh-now[^>]*-m-2/', $dash), 'without the negative margin');
+    Assert::contains('h-8 w-8 shrink-0', $dash, 'it keeps a 32px target and is not squeezed');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);
