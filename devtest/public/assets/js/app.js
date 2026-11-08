@@ -896,6 +896,92 @@
     setTimeout(() => window.location.reload(), secs * 1000);
   }
 
+  /* ------------------------------------------- priority rule drag order */
+  /* The list on screen IS the evaluation order, so dragging it has to change
+     what the engine does, not just what the manager sees. Rows are moved in
+     the DOM, the hidden `order` field is rewritten, and the existing form
+     posts it - the same endpoint a no-JS submit would use, so there is one
+     code path to keep correct.
+
+     Progressive enhancement: the grips and the hint are `hidden` in the
+     markup and only revealed here. With JS off the page is a plain ranked
+     list, which is still the truth about the order.
+
+     Keyboard parity matters on a page about fairness: a focused grip moves
+     its row with the arrow keys, because drag-only reordering locks out
+     anyone not using a mouse. */
+  const orderForm = $('#rule-order-form[data-reorderable]');
+  if (orderForm) {
+    const rowsRoot = $('#rule-rows', orderForm);
+    const rowsOf = () => $$('.pr-rule', rowsRoot);
+    if (rowsRoot && rowsOf().length > 1) {
+      const saveBtn = $('#pr-save-order');
+      const orderField = $('#rule-order');
+      const hint = $('#pr-drag-hint');
+      const original = rowsOf().map((r) => r.dataset.ruleId).join(',');
+      let dragged = null;
+
+      $$('.pr-grip', rowsRoot).forEach((g) => g.classList.remove('hidden'));
+      if (hint) hint.classList.remove('hidden');
+      rowsOf().forEach((r) => { r.draggable = true; });
+
+      const sync = () => {
+        const now = rowsOf();
+        now.forEach((r, i) => {
+          const badge = $('.pr-pos', r);
+          if (badge) badge.textContent = String(i + 1);
+        });
+        // The built-in default always sits below the last real rule.
+        const sysPos = $('[data-system-pos]', rowsRoot);
+        if (sysPos) sysPos.textContent = String(now.length + 1);
+        const ids = now.map((r) => r.dataset.ruleId).join(',');
+        if (orderField) orderField.value = ids;
+        if (saveBtn) saveBtn.classList.toggle('hidden', ids === original);
+      };
+
+      const place = (row, target, after) => {
+        if (!target || target === row) return;
+        rowsRoot.insertBefore(row, after ? target.nextSibling : target);
+        sync();
+      };
+
+      rowsRoot.addEventListener('dragstart', (e) => {
+        const row = e.target.closest?.('.pr-rule');
+        if (!row) return;
+        dragged = row;
+        row.classList.add('pr-dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', row.dataset.ruleId);
+      });
+      rowsRoot.addEventListener('dragend', () => {
+        if (dragged) dragged.classList.remove('pr-dragging');
+        dragged = null;
+      });
+      rowsRoot.addEventListener('dragover', (e) => {
+        if (!dragged) return;
+        e.preventDefault();
+        const row = e.target.closest?.('.pr-rule');
+        if (!row || row === dragged) return;
+        const box = row.getBoundingClientRect();
+        place(dragged, row, e.clientY > box.top + box.height / 2);
+      });
+      rowsRoot.addEventListener('drop', (e) => { if (dragged) e.preventDefault(); });
+
+      $$('.pr-grip', rowsRoot).forEach((grip) => {
+        grip.addEventListener('keydown', (e) => {
+          if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+          e.preventDefault();
+          const row = grip.closest('.pr-rule');
+          const all = rowsOf();
+          const next = all.indexOf(row) + (e.key === 'ArrowUp' ? -1 : 1);
+          if (next < 0 || next >= all.length) return;
+          place(row, all[next], e.key === 'ArrowDown');
+          grip.focus();
+        });
+      });
+    }
+  }
+
   /* ------------------------------------------------------------- PWA */
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {

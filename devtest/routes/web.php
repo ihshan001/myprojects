@@ -108,6 +108,7 @@ Router::post('/queues/{id}/prefix', [QueueConfigController::class, 'prefix'], ['
 // Priority rules — the standing clinical decisions the desk used to retype.
 Router::get('/queues/priority-rules', [PriorityRuleController::class, 'index'], ['auth' => true]);
 Router::post('/queues/priority-rules', [PriorityRuleController::class, 'save'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/queues/priority-rules/reorder', [PriorityRuleController::class, 'reorder'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/queues/priority-rules/{id}/toggle', [PriorityRuleController::class, 'toggle'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/queues/priority-rules/{id}/delete', [PriorityRuleController::class, 'delete'], ['auth' => true, 'ability' => 'clinic.manage']);
 

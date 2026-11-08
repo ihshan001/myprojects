@@ -167,6 +167,16 @@ $selectedPatient = (int) ($preselect ?? 0);
       </div>
 
       <div>
+        <label class="label" for="temperature">Temperature °C <span class="normal-case text-ink-400">(optional)</span></label>
+        <input class="input" id="temperature" name="temperature" type="number" step="0.1"
+               min="30" max="45" inputmode="decimal" placeholder="e.g. 39.4">
+        <p class="help">
+          Leave blank if no reading was taken — blank is not the same as normal, so a fever
+          rule will not match this patient. Used only by your clinic's temperature rules.
+        </p>
+      </div>
+
+      <div>
         <label class="label" for="note">Note for the doctor <span class="normal-case text-ink-400">(optional)</span></label>
         <input class="input" id="note" name="note" maxlength="200" placeholder="e.g. recheck of blood report">
         <p class="help">Kept internal — never shown on the public tracking page.</p>

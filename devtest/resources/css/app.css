@@ -461,6 +461,31 @@
   .prow-name { @apply truncate text-[13px] font-semibold text-ink-900; }
   .prow-meta { @apply truncate text-[11px] text-ink-500; }
 
+  /* Priority rules. The reference design sets this page's labels in sentence
+     case and its stat icons in circles, where the rest of the console uses
+     uppercase labels and rounded squares. Scoped to the two wrappers rather
+     than changing `.label` / `.stat-ico` globally, so every other page keeps
+     the shared treatment. */
+  .pr-stats .stat-label {
+    @apply text-[11px] font-medium normal-case tracking-normal text-ink-500;
+  }
+  .pr-stats .stat-ico { @apply h-12 w-12 rounded-full; }
+  .pr-stats .stat-value { @apply text-[20px]; }
+  .pr-form .label {
+    @apply text-[11px] font-medium normal-case tracking-normal text-ink-700;
+  }
+
+  /* The row being dragged. The list is the evaluation order, so the row in
+     flight is dimmed rather than hidden — the manager needs to see the rank
+     it is about to land in. */
+  .pr-dragging { @apply opacity-40; }
+  .pr-rule { @apply bg-white; }
+  .pr-grip:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
   /* Right rail rows: label left, value right, hairline between. */
   .glance-row {
     @apply flex items-center justify-between border-b border-slate-100 py-2

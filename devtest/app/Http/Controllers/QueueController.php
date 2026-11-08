@@ -65,6 +65,21 @@ final class QueueController
         $queueId = Request::int('queue_id');
         $patientId = Request::int('patient_id');
 
+        // Validate the reading BEFORE findOrCreate. issueToken validates it too,
+        // but by then a walk-in has already been written, so a mistyped "390"
+        // would leave a stray patient record behind every time it was refused.
+        // Nothing should be persisted for a form the server is going to reject.
+        $rawTemp = Request::string('temperature');
+        if (\App\Services\PriorityRuleService::tempToTenths($rawTemp) === false) {
+            flash('error', sprintf(
+                'That temperature is not a readable value. Enter %s to %s °C, or leave it blank.',
+                number_format(\App\Services\PriorityRuleService::TEMP_MIN_C, 1),
+                number_format(\App\Services\PriorityRuleService::TEMP_MAX_C, 1)
+            ));
+            redirect('/queue/new');
+            return;
+        }
+
         try {
             if ($patientId === 0) {
                 $name = Request::string('full_name');
@@ -107,6 +122,10 @@ final class QueueController
                 'source' => $source,
                 'appointment_id' => $appointmentId > 0 ? $appointmentId : null,
                 'note' => Request::string('note'),
+                // Blank means "not measured", which is deliberately different
+                // from "normal": a fever rule must not match a patient nobody
+                // took a reading from. QueueService rejects implausible values.
+                'temperature' => Request::string('temperature'),
             ]);
 
             if ($appointmentId > 0) {

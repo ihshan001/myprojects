@@ -2797,14 +2797,201 @@ Assert::test('a standing rule reorders a new token and records its reason', func
         'the later child sorts ahead of the earlier adult');
 });
 
-Assert::test('the strongest boost wins and boosts never stack', function (): void {
+Assert::test('two matching rules never stack', function (): void {
     $rules = new App\Services\PriorityRuleService();
     $rules->create(81, ['name' => 'Morning boost', 'effect' => 3, 'max_age' => 5,
         'from_hour' => 0, 'to_hour' => 24, 'reason' => 'Morning squeeze'], null);
 
     $match = $rules->evaluate(81, ['source' => 'walkin', 'kind' => 'consultation', 'age' => 4, 'hour' => 9]);
-    Assert::same(5, $match['priority'], 'two matching boosts resolve to the stronger one, not their sum');
+    Assert::same(5, $match['priority'], 'two matching rules resolve to one of them, never their sum');
     Assert::contains('Child under five', $match['reason'], 'and the winning rule supplies the reason');
+});
+
+Assert::test('the first rule in the list wins even when a later rule is stronger', function (): void {
+    seedTenant(204, 'rule-order', 'Rule Order Clinic');
+    $rules = new App\Services\PriorityRuleService();
+
+    // Deliberately weak first, strong second. Under the old strongest-wins
+    // engine the 9 would decide; the ranked list must let the 2 decide.
+    $weak = $rules->create(204, ['name' => 'Slight nudge', 'effect' => 2, 'reason' => 'Booked ahead'], null);
+    $strong = $rules->create(204, ['name' => 'Big nudge', 'effect' => 9, 'reason' => 'Very urgent'], null);
+
+    $match = $rules->evaluate(204, ['source' => 'walkin']);
+    Assert::same(2, $match['priority'], 'position decides, not magnitude');
+    Assert::same($weak, $match['rule_id'], 'and the first rule is credited');
+
+    // Dragging the strong rule to the top must flip the outcome. This is the
+    // assertion that would have failed before sort_order existed.
+    Assert::true($rules->reorder(204, [$strong, $weak], null), 'the new order is accepted');
+    $flipped = $rules->evaluate(204, ['source' => 'walkin']);
+    Assert::same(9, $flipped['priority'], 'after reordering, the promoted rule decides');
+    Assert::same($strong, $flipped['rule_id'], 'and it is credited instead');
+
+    Assert::same([$strong, $weak], array_map('intval', array_column($rules->rules(204, false), 'id')),
+        'the list reads back in the dragged order');
+});
+
+Assert::test('a new rule appends at the bottom instead of overruling the list', function (): void {
+    $rules = new App\Services\PriorityRuleService();
+    $before = array_map('intval', array_column($rules->rules(204, false), 'id'));
+    $added = $rules->create(204, ['name' => 'Appended', 'effect' => 8, 'reason' => 'Added last'], null);
+    $after = array_map('intval', array_column($rules->rules(204, false), 'id'));
+    Assert::same(array_merge($before, [$added]), $after, 'saving a rule does not silently promote it');
+    $still = $rules->evaluate(204, ['source' => 'walkin']);
+    Assert::same(9, $still['priority'], 'the rule already at the top still decides');
+    Assert::true($still['rule_id'] !== $added, 'and the appended rule is not credited');
+});
+
+Assert::test('a partial, duplicated or foreign order is refused whole', function (): void {
+    $rules = new App\Services\PriorityRuleService();
+    $ids = array_map('intval', array_column($rules->rules(204, false), 'id'));
+    $before = $ids;
+
+    Assert::false($rules->reorder(204, [$ids[0]], null), 'a partial list is refused');
+    Assert::false($rules->reorder(204, [$ids[0], $ids[0], $ids[1]], null), 'a duplicate is refused');
+    Assert::false($rules->reorder(204, array_merge($ids, [999999]), null), 'an unknown id is refused');
+    Assert::false($rules->reorder(204, [], null), 'an empty list is refused');
+
+    // A rule belonging to another clinic must not be reorderable from here.
+    $foreign = (int) Db::scalar('SELECT id FROM priority_rules WHERE clinic_id = 81 LIMIT 1');
+    Assert::false($rules->reorder(204, array_merge($ids, [$foreign]), null), "another clinic's rule is refused");
+
+    Assert::same($before, array_map('intval', array_column($rules->rules(204, false), 'id')),
+        'and none of the refusals moved anything');
+});
+
+Assert::test('a temperature rule needs a reading and compares its threshold exactly', function (): void {
+    seedTenant(205, 'rule-fever', 'Fever Clinic');
+    $rules = new App\Services\PriorityRuleService();
+    $rules->create(205, ['name' => 'High fever', 'effect' => 6, 'min_temp' => '39.0',
+        'reason' => 'Febrile — assess promptly'], null);
+
+    $ctx = ['source' => 'walkin'];
+    Assert::same(0, $rules->evaluate(205, $ctx)['priority'],
+        'an unmeasured patient is not treated as afebrile, and does not match');
+    Assert::same(0, $rules->evaluate(205, $ctx + ['temp_c_x10' => 389])['priority'], '38.9 is below the threshold');
+    Assert::same(6, $rules->evaluate(205, $ctx + ['temp_c_x10' => 390])['priority'], '39.0 matches exactly');
+    Assert::same(6, $rules->evaluate(205, $ctx + ['temp_c_x10' => 401])['priority'], '40.1 matches');
+
+    // Tenths, not floats: 38.7 must round-trip without drifting past a boundary.
+    Assert::same(387, App\Services\PriorityRuleService::tempToTenths('38.7'), '38.7 stores as 387');
+    Assert::same('38.7', App\Services\PriorityRuleService::tenthsToText(387), 'and reads back as 38.7');
+    Assert::same(null, $rules::tempToTenths(''), 'blank means not measured');
+    Assert::false($rules::tempToTenths('390'), '390 is a typo, not a temperature');
+    Assert::false($rules::tempToTenths('hot'), 'and so is prose');
+});
+
+Assert::test('a temperature outside the readable band cannot be saved or issued', function (): void {
+    $rules = new App\Services\PriorityRuleService();
+    $threw = false;
+    try {
+        $rules->create(205, ['name' => 'Impossible', 'effect' => 3, 'min_temp' => '390', 'reason' => 'Typo'], null);
+    } catch (\InvalidArgumentException $e) {
+        $threw = true;
+        Assert::contains('temperature', $e->getMessage(), 'the error names the field');
+    }
+    Assert::true($threw, 'a rule keyed to an impossible reading is refused');
+
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 205');
+    $patient = Db::insert('INSERT INTO patients (clinic_id, code, full_name, created_at) VALUES (205,?,?,?)',
+        ['TF1', 'Typo One', Db::now()]);
+    $queue = new App\Domain\Queue\QueueService();
+    $threw = false;
+    try {
+        $queue->issueToken(205, $queueId, $patient, ['temperature' => '390']);
+    } catch (\RuntimeException $e) {
+        $threw = true;
+    }
+    Assert::true($threw, 'and the desk cannot record one either');
+    Assert::same(0, (int) Db::scalar('SELECT COUNT(*) FROM queue_entries WHERE clinic_id = 205'),
+        'the refused reading issued no token');
+});
+
+Assert::test('a recorded reading decides a token and travels with the entry', function (): void {
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 205');
+    $patient = Db::insert('INSERT INTO patients (clinic_id, code, full_name, created_at) VALUES (205,?,?,?)',
+        ['TF2', 'Febrile One', Db::now()]);
+    $queue = new App\Domain\Queue\QueueService();
+    $issued = $queue->issueToken(205, $queueId, $patient, ['temperature' => '39.4']);
+
+    $row = Db::one('SELECT priority, priority_reason, priority_rule_id, temp_c_x10 FROM queue_entries WHERE id = ?',
+        [$issued['entry_id']]);
+    Assert::same(6, (int) $row['priority'], 'the fever rule decided it');
+    Assert::same(394, (int) $row['temp_c_x10'], 'the reading it was judged on is stored');
+    Assert::contains('Febrile', (string) $row['priority_reason'], 'and the reason is copied onto the entry');
+    Assert::true($row['priority_rule_id'] !== null, 'the rule is credited');
+});
+
+Assert::test('every rule change is written to history with its actor', function (): void {
+    $rules = new App\Services\PriorityRuleService();
+    $id = $rules->create(205, ['name' => 'Traced', 'effect' => 1, 'reason' => 'For the trail'], 7);
+    $rules->setActive(205, $id, false);
+    $rules->setActive(205, $id, true);
+    $rules->delete(205, $id);
+
+    $actions = array_column(
+        Db::all("SELECT action FROM priority_rule_history WHERE clinic_id = 205 AND rule_name = 'Traced' ORDER BY id"),
+        'action'
+    );
+    Assert::same(['created', 'disabled', 'enabled', 'deleted'], $actions, 'the whole life of the rule is recorded');
+
+    $created = Db::one("SELECT * FROM priority_rule_history WHERE clinic_id = 205 AND rule_name = 'Traced' AND action = 'created'");
+    Assert::same(7, (int) $created['actor_id'], 'the actor is kept');
+
+    // History has to outlive the rule, and still say what it was.
+    $deleted = Db::one("SELECT * FROM priority_rule_history WHERE clinic_id = 205 AND rule_name = 'Traced' AND action = 'deleted'");
+    Assert::same('Traced', (string) $deleted['rule_name'], 'a deleted rule is still named');
+    Assert::contains('For the trail', (string) $deleted['before_json'], 'and its definition is recoverable');
+    Assert::same(null, Db::scalar('SELECT id FROM priority_rules WHERE id = ?', [$id]), 'the rule itself is gone');
+});
+
+Assert::test('wait impact is measured, floored and allowed to be unflattering', function (): void {
+    seedTenant(206, 'rule-impact', 'Impact Clinic');
+    $impact = new App\Services\PriorityImpactService();
+    $today = Db::today();
+
+    $mk = static function (int $priority, ?int $ruleId, ?int $wait) use ($today): void {
+        $q = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 206');
+        static $pn = 0;
+        $pn++;
+        $p = Db::insert('INSERT INTO patients (clinic_id, code, full_name, created_at) VALUES (206,?,?,?)',
+            ['IP' . $pn, 'Impact Patient', Db::now()]);
+        // token_label is UNIQUE per queue, so each fixture row needs its own.
+        static $n = 0;
+        $n++;
+        Db::insert(
+            'INSERT INTO queue_entries
+               (clinic_id, queue_id, patient_id, token_no, token_label, status, priority, priority_rule_id,
+                sort_weight, source, joined_at, finished_at, wait_minutes, track_token, track_expires_at, version)
+             VALUES (206,?,?,?,?,"completed",?,?,1,"walkin",?,?,?,?,"2099-01-01",0)',
+            [$q, $p, $n, 'I' . str_pad((string) $n, 3, '0', STR_PAD_LEFT), $priority, $ruleId,
+             Db::now(), $today . ' 10:00:00', $wait, 'tok206-' . $n]
+        );
+    };
+
+    // Four baseline visits is below the floor: nothing may be claimed yet.
+    for ($i = 0; $i < 4; $i++) { $mk(0, null, 30); }
+    for ($i = 0; $i < 6; $i++) { $mk(5, 1, 15); }
+    $thin = $impact->measure(206, $today, $today);
+    Assert::same(4, $thin['baseline']['n'], 'the sample size is reported');
+    Assert::same(null, $thin['baseline']['mean'], 'but four visits is below the floor, so no mean');
+    Assert::same(null, $thin['rule']['pct'], 'and therefore no percentage is claimed');
+    Assert::false($thin['enough'], 'the screen is told to print a dash');
+
+    // Cross the floor: 30 -> 15 is a real, computable 50%.
+    $mk(0, null, 30);
+    $ok = $impact->measure(206, $today, $today);
+    Assert::same(30.0, $ok['baseline']['mean'], 'baseline mean');
+    Assert::same(15.0, $ok['rule']['mean'], 'prioritised mean');
+    Assert::same(15.0, $ok['rule']['diff'], 'the difference in minutes');
+    Assert::same(50.0, $ok['rule']['pct'], 'and as a percentage');
+    Assert::true($ok['enough'], 'now the screen may show it');
+
+    // A group that waited LONGER must report a negative, not a clamped zero.
+    for ($i = 0; $i < 6; $i++) { $mk(4, null, 45); }
+    $worse = $impact->measure(206, $today, $today);
+    Assert::same(-15.0, $worse['manual']['diff'], 'a slower group is reported as slower');
+    Assert::true($worse['manual']['pct'] < 0, 'and the percentage is negative too');
 });
 
 Assert::test('a hand-set priority and a penalty both behave', function (): void {
@@ -4712,6 +4899,94 @@ Assert::test('controller flash messages actually reach the screen', function ():
     // script, and grepping the raw file matches that explanation.
     $toastCode = preg_replace('~/\*.*?\*/~s', '', $toast);
     Assert::same(0, preg_match_all('/<script(?![^>]*\bsrc=)[^>]*>/i', (string) $toastCode), 'no inline script (CSP is script-src self)');
+});
+
+/* ---------------------------------------------- priority rules screen -- */
+
+Assert::test('the shipped .env.example does not point sessions at an unwritable path', function (): void {
+    // docs/OPERATIONS.md warns that SESSION_PATH=/var/lib/php/sessions on a host
+    // without that directory makes every POST fail with a 419 that looks like a
+    // CSRF bug. The example file shipped exactly that value, so every fresh
+    // checkout inherited it: the rule form, the toggle and every other native
+    // POST were dead on arrival. It must stay commented out.
+    $env = file_get_contents(QP_ROOT . '/.env.example');
+    Assert::same(0, preg_match('/^\s*SESSION_PATH\s*=/m', (string) $env),
+        'SESSION_PATH is left unset so the app falls back to storage/sessions');
+});
+
+Assert::test('a filtered rule list never offers to reorder, and keeps true ranks', function (): void {
+    $ctrl = file_get_contents(QP_ROOT . '/app/Http/Controllers/PriorityRuleController.php');
+    $view = file_get_contents(QP_ROOT . '/resources/views/pages/queues/priority-rules.php');
+
+    // reorder() refuses a partial order, so offering drag on a filtered list
+    // would hand the manager a control that always fails.
+    Assert::contains("'filtering' =>", $ctrl, 'the controller reports whether a filter is active');
+    Assert::contains('($filtering || !$canManage) ? \'\' : \'data-reorderable\'', $view,
+        'and the view only arms dragging when the whole list is visible');
+
+    // Rank is the engine's evaluation position, not the index in the visible
+    // subset: searching for the third rule must still show it as 3.
+    // Single-quoted needles: PHP would interpolate $rule[...] inside "...".
+    $assign = strpos((string) $ctrl, '= ++$position;');
+    $skip = strpos((string) $ctrl, '&& !$isActive');
+    Assert::true($assign !== false && $skip !== false && $assign < $skip,
+        'position is assigned before any filtering, so a filtered row keeps its real rank');
+});
+
+Assert::test('rule status filters are links, not a second field named status', function (): void {
+    $view = file_get_contents(QP_ROOT . '/resources/views/pages/queues/priority-rules.php');
+    // A submit button named `status` next to the hidden `status` input sends the
+    // key twice; PHP keeps the last, so choosing "Turned off" silently did
+    // nothing. The options must be links carrying one unambiguous value.
+    Assert::same(0, preg_match('/<button[^>]*name="status"/', (string) $view),
+        'no submit button competes with the hidden status field');
+    Assert::contains("'status' => " . '$val', $view, 'each option is a link with a single status value');
+});
+
+Assert::test('the drag grip is a grip icon, not the filter funnel', function (): void {
+    $icons = file_get_contents(QP_ROOT . '/resources/views/partials/icons.php');
+    $view = file_get_contents(QP_ROOT . '/resources/views/pages/queues/priority-rules.php');
+    Assert::contains("'grip'", $icons, 'a dedicated six-dot grip exists');
+    Assert::contains('#i-grip', $view, 'and the rule row uses it');
+    // `filter` is a funnel path; the stale comment above it claimed otherwise.
+    Assert::contains("'filter'      => '<path d=\"M3 5h18", $icons, 'filter is still the funnel, used by the Filters button');
+});
+
+Assert::test('an unmeasured temperature is never treated as normal', function (): void {
+    $view = file_get_contents(QP_ROOT . '/resources/views/pages/queue/new.php');
+    $ctrl = file_get_contents(QP_ROOT . '/app/Http/Controllers/QueueController.php');
+    Assert::contains("name=\"temperature\"", $view, 'the desk can record a reading');
+    Assert::contains("'temperature' => Request::string('temperature')", $ctrl, 'and it reaches the service');
+    // Blank must stay blank. Defaulting it to 36.6 would let a fever rule's
+    // absence of a match look like a measured, afebrile patient.
+    Assert::same(null, \App\Services\PriorityRuleService::tempToTenths(''), 'a blank reading is null, not a number');
+    Assert::same(false, \App\Services\PriorityRuleService::tempToTenths('390'), 'and a mistyped 390 is refused');
+});
+
+Assert::test('a refused temperature never leaves a stray patient record', function (): void {
+    $ctrl = file_get_contents(QP_ROOT . '/app/Http/Controllers/QueueController.php');
+    // findOrCreate runs before issueToken, so validating the reading only inside
+    // issueToken meant every mistyped "390" registered a walk-in and then
+    // refused the token -- a patient record nobody asked for. The controller
+    // must reject the reading before anything is written.
+    $guard = strpos((string) $ctrl, 'tempToTenths($rawTemp) === false');
+    $create = strpos((string) $ctrl, '$patients->findOrCreate(');
+    Assert::true($guard !== false, 'the controller validates the reading itself');
+    Assert::true($create !== false && $guard < $create,
+        'and does it before findOrCreate, so a refused form persists nothing');
+});
+
+Assert::test('read-only roles get the policy without dead controls', function (): void {
+    $view = file_get_contents(QP_ROOT . '/resources/views/pages/queues/priority-rules.php');
+    // The index route is auth-only but every mutation is clinic.manage, so a
+    // receptionist used to see New rule, drag grips and delete menus that all
+    // returned 403. The screen now decides once and hides what it cannot do.
+    Assert::contains("Auth::can('clinic.manage')", (string) $view, 'the view asks for the ability once');
+    Assert::contains('!$canManage', (string) $view, 'and disarms drag when it is absent');
+    Assert::contains('$canManage ? $rules : []', (string) $view,
+        'so the toggle/delete forms are not rendered for a role that cannot post them');
+    Assert::contains('ask a clinic admin', (string) $view,
+        'and says why the list is read-only instead of silently omitting drag');
 });
 
 /* ------------------------------------------------------------------ */
