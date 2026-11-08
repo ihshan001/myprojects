@@ -27,7 +27,7 @@ $payload = htmlspecialchars(json_encode([
 <div class="prow" data-entry-row data-prow data-entry='<?= $payload ?>'>
   <span class="token-chip shrink-0"><?= e($row['token_label']) ?></span>
 
-  <div class="min-w-0 flex-1">
+  <div class="prow-main min-w-0 flex-1">
     <p class="prow-name" title="<?= e($row['full_name']) ?>"><?= e($row['full_name']) ?></p>
     <p class="prow-meta"><?= e($bits !== [] ? implode(' · ', $bits) : (string) ($row['patient_code'] ?? '')) ?></p>
   </div>

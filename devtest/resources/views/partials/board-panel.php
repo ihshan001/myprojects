@@ -118,7 +118,7 @@ $verbsFor = static function (string $status) use ($canPriority): array {
               <p class="text-[11px] text-ink-500 tabular"><?= e(fmt_time($inRoom['started_at'] ?? $inRoom['joined_at'], 'g:i A')) ?></p>
             </div>
             <?php if ($acts !== []): ?>
-              <div class="flex w-full shrink-0 flex-wrap justify-end gap-1.5 sm:w-auto">
+              <div class="flex w-full shrink-0 flex-wrap justify-end gap-1.5 md:w-auto">
                 <?php foreach ($acts as $a):
                   $tone = $a === 'complete' ? 'act-done' : ($a === 'cancel' ? 'act-stop' : 'act-mute');
                   $word = ['complete' => 'Completed', 'transfer' => 'Transfer', 'cancel' => 'Cancel'][$a] ?? ucfirst($a); ?>
@@ -151,7 +151,7 @@ $verbsFor = static function (string $status) use ($canPriority): array {
               <p class="truncate text-[15px] font-bold text-ink-900 sm:text-[17px]"><?= e($nextUp['full_name']) ?></p>
               <p class="truncate text-[12px] text-ink-500"><?= e(implode(' · ', $bits)) ?></p>
             </div>
-            <div class="flex w-full shrink-0 flex-col items-end gap-2 sm:w-auto">
+            <div class="flex w-full shrink-0 flex-col items-end gap-2 md:w-auto">
               <div class="flex w-full items-center justify-end gap-3">
                 <div class="text-center">
                   <p class="text-[10px] leading-tight text-ink-500">Est. wait</p>

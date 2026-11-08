@@ -5296,6 +5296,53 @@ Assert::test('the settings page is sent the opening hours it displays', function
 });
 
 /* ------------------------------------------------------------------ */
+/* Rows that must not crush the patient's name.                        */
+/* ------------------------------------------------------------------ */
+
+Assert::test('the queue row keeps its actions off the name until there is room', function (): void {
+    // `sm` is 576px in this build (the whole console is drawn at 0.9 zoom),
+    // but the action cluster for one row measures ~433px. Switching it inline
+    // at 576px left the patient name 25px wide: "Sunil Rathnayake" rendered
+    // as a couple of characters and P-00003 overlapped the Skip button. It
+    // only fits from md (691px), where the name still gets ~217px.
+    $row = (string) file_get_contents(QP_ROOT . '/resources/views/components/queue-row.php');
+    Assert::contains('md:w-auto md:border-0 md:pt-0', $row, 'the action cluster goes inline at md');
+    Assert::same(0, preg_match('/sm:w-auto sm:border-0 sm:pt-0/', $row), 'and not at sm, where it does not fit');
+
+    // rowHtml() mirrors this file. When the two drift, the 5s poller repaints
+    // the row the old way and the overlap returns five seconds after load --
+    // which is exactly how a layout bug survives a review of the PHP.
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+    Assert::contains('md:w-auto md:border-0 md:pt-0', $js, 'the poller template matches the PHP row');
+    Assert::same(0, preg_match('/sm:w-auto sm:border-0 sm:pt-0/', $js), 'and has no stale sm: copy of it');
+});
+
+Assert::test('the waiting row wraps instead of squeezing the name to nothing', function (): void {
+    // On the dashboard the live-queue panel is sized by the page grid, not the
+    // viewport -- 431px wide at xl. A viewport breakpoint cannot fix that, so
+    // the row wraps instead, which makes it a container problem.
+    $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+    Assert::true(
+        (bool) preg_match('/\.prow\s*\{[^}]*flex-wrap/s', $css),
+        '.prow wraps rather than shrinking its children to zero'
+    );
+
+    // The blanket `main .flex > * { min-width: 0 }` rule that stops wide
+    // children stretching the page also let the fixed-width action cluster
+    // push the name column to 0px. Two classes outrank it.
+    Assert::true(
+        (bool) preg_match('/\.prow\s*>\s*\.prow-main\s*\{\s*min-width:\s*8rem/s', $css),
+        'the name column has a floor that beats the global min-width:0 rule'
+    );
+    $row = (string) file_get_contents(QP_ROOT . '/resources/views/components/board/patient-row.php');
+    Assert::contains('prow-main', $row, 'and the row carries it');
+    Assert::true(
+        strpos($row, 'prow-main') < strpos($row, 'prow-name'),
+        'on the column that holds the name, not a later element'
+    );
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

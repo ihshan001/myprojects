@@ -614,7 +614,7 @@
             <span class="ml-1 text-xs font-normal text-ink-400">${esc(r.patient_code || '')}</span></p>
           <p class="text-[11px] text-ink-500 tabular">joined ${esc(r.joined)}${Number(r.call_count) > 1 ? ` · called ${r.call_count}×` : ''}</p>
         </div>
-        ${actions ? `<div class="flex w-full flex-wrap items-center gap-1.5 border-t border-hairline pt-2 sm:w-auto sm:border-0 sm:pt-0">
+        ${actions ? `<div class="flex w-full flex-wrap items-center gap-1.5 border-t border-hairline pt-2 md:w-auto md:border-0 md:pt-0">
           ${actions}
           <a class="act-mute" href="/queue/entry?id=${encodeURIComponent(r.id)}" title="Open details">
             <svg class="h-3.5 w-3.5"><use href="#i-chevron-right"/></svg>

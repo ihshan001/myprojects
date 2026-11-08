@@ -456,8 +456,18 @@
 
   /* One waiting patient. Columns collapse rather than scroll on a phone. */
   .prow {
-    @apply flex items-center gap-2.5 border-b border-slate-100 px-2.5 py-1.5 last:border-0;
+    /* Wraps rather than crushing the name: the action cluster is fixed
+       width, so on a narrow panel the buttons drop to their own line
+       instead of squeezing the patient's name down to nothing. */
+    @apply flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-slate-100 px-2.5 py-1.5 last:border-0;
   }
+  /* The blanket `main .flex > * { min-width: 0 }` further up stops a wide
+     child stretching the page, but on this row it also let the fixed-width
+     action cluster squeeze the patient's name down to 0px -- measured 0 at
+     xl, where the dashboard grid makes the panel only 431px wide. Two
+     classes beat that rule's specificity, so the name keeps a floor and
+     the row wraps the buttons to a second line instead. */
+  .prow > .prow-main { min-width: 8rem; }
   .prow-name { @apply truncate text-[13px] font-semibold text-ink-900; }
   .prow-meta { @apply truncate text-[11px] text-ink-500; }
 
