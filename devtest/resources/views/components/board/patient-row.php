@@ -99,7 +99,7 @@ $payload = htmlspecialchars(json_encode([
               Copy patient link
             </button>
           <?php endif; ?>
-          <a href="/queue/<?= $eid ?>" class="block rounded px-2 py-1.5 text-[12px] font-medium text-ink-700 hover:bg-slate-50">Open visit</a>
+          <a href="/queue/entry?id=<?= $eid ?>" class="block rounded px-2 py-1.5 text-[12px] font-medium text-ink-700 hover:bg-slate-50">Open visit</a>
         </span>
       </span>
     </div>

@@ -5129,6 +5129,173 @@ Assert::test('the search tells the desk when a patient is already queued', funct
 });
 
 /* ------------------------------------------------------------------ */
+/* Dead ends: links that 404, buttons that cannot run, data never sent.  */
+/* ------------------------------------------------------------------ */
+
+Assert::test('no view carries an inline event handler the CSP would block', function (): void {
+    // `script-src 'self'` drops inline handlers exactly as it drops inline
+    // <script>. Twenty-three of them shipped: filter selects that never
+    // submitted, `return confirm(...)` guards that silently did not guard
+    // (so deleting a room went through with no prompt), and two Print
+    // buttons that did nothing. None of it logged anything visible.
+    $files = [];
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($it as $f) {
+        if ($f->isFile() && $f->getExtension() === 'php') {
+            $files[] = $f->getPathname();
+        }
+    }
+    Assert::true(count($files) > 30, 'the view directory is actually scanned');
+
+    $offenders = [];
+    foreach ($files as $file) {
+        $src = (string) file_get_contents($file);
+        if (preg_match('/\son(?:click|change|submit|input|keydown|keyup|load|focus|blur|mouseover|mouseenter)\s*=/i', $src, $m)) {
+            $offenders[] = basename($file) . ' -> ' . trim($m[0]);
+        }
+    }
+    Assert::same([], $offenders, 'every view is free of inline handlers: ' . implode('; ', array_slice($offenders, 0, 5)));
+});
+
+Assert::test('the four behaviours those handlers provided still exist, CSP-safe', function (): void {
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+    Assert::contains("[data-autosubmit]", $js, 'selects that submit on change declare data-autosubmit');
+    Assert::contains("form.submit();", $js, 'and app.js submits their form');
+    Assert::contains("[data-confirm]", $js, 'destructive forms declare data-confirm');
+    Assert::contains("window.confirm(msg)", $js, 'and app.js actually asks');
+    Assert::contains("e.preventDefault();", $js, 'declining the prompt cancels the submit');
+    Assert::contains("}, true);", $js, 'the confirm guard runs in the capture phase, before anything else submits');
+    Assert::contains("[data-print]", $js, 'print buttons declare data-print');
+    Assert::contains("[data-insert]", $js, 'placeholder chips declare data-insert');
+    Assert::contains("setSelectionRange(caret, caret)", $js, 'and insert at the caret rather than appending to the end');
+});
+
+Assert::test('the board opens a visit through the route that exists', function (): void {
+    $row = (string) file_get_contents(QP_ROOT . '/resources/views/components/board/patient-row.php');
+    Assert::contains('/queue/entry?id=', $row, '"Open visit" uses /queue/entry?id=');
+    // /queue/{id} was never a route. Every row on the board offered it.
+    Assert::same(0, preg_match('~href="/queue/\d+["\?]~', $row), 'no link to a bare /queue/{id}');
+
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    Assert::contains("Router::get('/queue/entry'", $routes, '/queue/entry is a real route');
+});
+
+Assert::test('links are pointed at routes that exist', function (): void {
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    $views = [];
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($it as $f) {
+        if ($f->isFile() && $f->getExtension() === 'php') {
+            $views[$f->getPathname()] = (string) file_get_contents($f->getPathname());
+        }
+    }
+    Assert::true(count($views) > 30, 'the view directory is actually scanned');
+
+    // /schedules never existed; the real route is /calendar.
+    $bad = [];
+    foreach ($views as $path => $src) {
+        if (strpos($src, 'href="/schedules"') !== false) {
+            $bad[] = basename($path) . ' links /schedules';
+        }
+    }
+    Assert::same([], $bad, 'nothing links /schedules: ' . implode('; ', $bad));
+    Assert::contains("Router::get('/calendar'", $routes, '/calendar is the real schedules route');
+});
+
+Assert::test('the platform health page exists and is reachable by its audience', function (): void {
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    Assert::contains("Router::get('/admin/monitor'", $routes, '/admin/monitor is a route');
+    Assert::true(
+        (bool) preg_match("~Router::get\('/admin/monitor'.*?'roles' => \['super_admin'\]~", $routes),
+        'and is super-admin only -- the checks name tenants and staff'
+    );
+
+    $ctrl = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/AdminController.php');
+    Assert::contains('public function monitor(): void', $ctrl, 'AdminController serves it');
+    Assert::contains("view('admin/monitor'", $ctrl, 'through the admin/monitor view');
+    Assert::true((bool) file_exists(QP_ROOT . '/resources/views/pages/admin/monitor.php'), 'which exists');
+
+    // The link used to sit on the Incidents page, which 403s for a super
+    // admin ("Incidents belong to a clinic"), so it could be reached by
+    // nobody. It now lives in the super admin nav.
+    $nav = (string) file_get_contents(QP_ROOT . '/resources/views/layouts/app.php');
+    Assert::contains("'/admin/monitor', 'activity'", $nav, 'Platform health is in the super admin nav');
+    $incidents = (string) file_get_contents(QP_ROOT . '/resources/views/pages/incidents/index.php');
+    Assert::same(0, preg_match('~href="/admin/monitor"~', $incidents), 'and no longer on the incidents page it could not be seen from');
+});
+
+Assert::test('links to owner-only pages are hidden from roles that cannot open them', function (): void {
+    // Ungated, these 403 for receptionists and doctors. A link that can only
+    // fail is a dead end, so the row is not rendered at all.
+    $settings = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/index.php');
+    Assert::contains("Auth::can('clinic.manage')", $settings, 'the settings rail checks the ability');
+    Assert::same(
+        1,
+        substr_count($settings, "Auth::can('clinic.manage')"),
+        'once, wrapping both the export and audit rows'
+    );
+    // Byte offsets are useless here -- the file's first `endif;` is 200 lines
+    // earlier, so "before the endif" would pass or fail by accident. Compare
+    // line numbers instead, which is what "inside the guard" actually means.
+    $lines = explode("\n", $settings);
+    $lineOf = static function (string $needle) use ($lines): int {
+        foreach ($lines as $i => $line) {
+            if (strpos($line, $needle) !== false) {
+                return $i + 1;
+            }
+        }
+        return 0;
+    };
+    $guard  = $lineOf("Auth::can('clinic.manage')");
+    $export = $lineOf('href="/settings/export"');
+    $audit  = $lineOf('href="/audit"');
+    Assert::true($guard > 0 && $export > 0 && $audit > 0, 'guard, export row and audit row all present');
+    Assert::true($guard < $export, "the guard (line $guard) opens before the export row (line $export)");
+    Assert::true($export < $audit, "the export row (line $export) precedes the audit row (line $audit)");
+    // The first endif at or after the guard closes it; both rows must sit above it.
+    $end = 0;
+    for ($i = $guard; $i < count($lines); $i++) {
+        if (strpos($lines[$i - 1], '<?php endif; ?>') !== false) {
+            $end = $i;
+            break;
+        }
+    }
+    Assert::true($end > $audit, "the guard closes at line $end, after the audit row (line $audit)");
+
+    $rules = (string) file_get_contents(QP_ROOT . '/resources/views/pages/queues/priority-rules.php');
+    Assert::contains("Auth::can('clinic.manage')", $rules, 'the priority rules audit link is guarded too');
+
+    // Issuing a token needs queue.issue, which a doctor does not have.
+    $board = (string) file_get_contents(QP_ROOT . '/resources/views/pages/queue/board.php');
+    Assert::contains("Auth::can('queue.issue')", $board, '"New patient" on the board checks the ability');
+    Assert::true(
+        strpos($board, "Auth::can('queue.issue')") < strpos($board, '/queue/new?queue='),
+        'the guard comes before the link'
+    );
+});
+
+Assert::test('the settings page is sent the opening hours it displays', function (): void {
+    // The view reads $weekHours[$dow] ?? [...], and that fallback is
+    // 'closed' => true. So if this key is ever dropped the page does not
+    // crash and does not warn -- it quietly renders all seven days as
+    // "Closed", which reads as a choice the owner made. Guarding the key is
+    // guarding against silently wrong data, not against an exception.
+    // (Verified: it is passed; this test holds the line, it does not fix
+    // a live defect.)
+    $ctrl = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/ClinicController.php');
+    $viewCall = substr($ctrl, strpos($ctrl, 'public function settings(): void'));
+    $viewCall = substr($viewCall, 0, strpos($viewCall, "\n    }"));
+    Assert::contains("'weekHours' =>", $viewCall, 'settings() passes weekHours');
+    Assert::contains('$this->weekHours($clinicId)', $viewCall, 'built by the existing helper');
+    Assert::contains('private function weekHours(int $clinicId): array', $ctrl, 'which returns the shape the view reads');
+
+    // Sunday-first on both sides, or every row is off by one day.
+    Assert::contains("strtotime('next sunday +'", $ctrl, 'the helper is Sunday-first');
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/index.php');
+    Assert::contains("\$dayNames = ['Sunday', 'Monday'", $view, 'and so is the day list it loops over');
+});
+
+/* ------------------------------------------------------------------ */
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

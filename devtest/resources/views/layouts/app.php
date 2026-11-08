@@ -20,6 +20,7 @@ if ($u) {
         $navSections = [
             'Main' => [
                 ['/admin', 'grid', 'Overview', $isActive('/admin')],
+                ['/admin/monitor', 'activity', 'Platform health', $isActive('/admin/monitor')],
             ],
             'Tenants' => [
                 ['/admin/clinics', 'building', 'Clinics', $isActive('/admin/clinics')],
@@ -136,7 +137,7 @@ $searchAction = $u ? ($u['role'] === 'super_admin' ? '/admin/clinics' : ($u['rol
         <?= csrf_field() ?>
         <input type="hidden" name="back" value="<?= e($path ?? '/app') ?>">
         <label class="sr-only" for="branch-switch">Working in branch</label>
-        <select id="branch-switch" name="clinic_id" onchange="this.form.submit()"
+        <select id="branch-switch" name="clinic_id" data-autosubmit
                 class="w-full rounded-lg border border-hairline bg-white px-2 py-1.5 text-[11px] text-ink-700">
           <?php foreach ($choices as $b): ?>
             <option value="<?= (int) $b['id'] ?>" <?= (int) $b['id'] === (int) ($activeBranchId ?? 0) ? 'selected' : '' ?>>

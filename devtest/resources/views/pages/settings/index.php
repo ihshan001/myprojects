@@ -1,4 +1,5 @@
 <?php
+use App\Core\Auth;
 /**
  * Settings.
  *
@@ -197,7 +198,7 @@ $addr = trim(implode(', ', array_filter([
               <?php endforeach; ?>
             </ul>
           <?php endif; ?>
-          <a class="st-link mt-2 inline-block" href="/schedules">View all holidays</a>
+          <a class="st-link mt-2 inline-block" href="/calendar">View all holidays</a>
         </div>
       </div>
     </section>
@@ -248,6 +249,7 @@ $addr = trim(implode(', ', array_filter([
         <p class="st-card-sub">Manage system data, backups, and data retention.</p>
       </div>
       <ul class="divide-y divide-slate-100">
+        <?php if (Auth::can('clinic.manage')): ?>
         <li>
           <a class="st-row" href="/settings/export">
             <span class="st-row-icon"><svg class="h-4 w-4"><use href="#i-plus"/></svg></span>
@@ -266,6 +268,7 @@ $addr = trim(implode(', ', array_filter([
             </span>
           </a>
         </li>
+        <?php endif; ?>
         <li>
           <a class="st-row" href="/settings?tab=clinic#retention">
             <span class="st-row-icon"><svg class="h-4 w-4"><use href="#i-shield"/></svg></span>

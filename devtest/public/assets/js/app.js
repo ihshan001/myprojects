@@ -96,6 +96,64 @@
     };
   }
 
+  /* --------------------------------------- CSP-safe inline replacements
+     The app sends `script-src 'self'`, which blocks inline event handlers
+     exactly as it blocks inline <script>. Twenty-odd controls were written
+     as onchange=/onsubmit=/onclick= attributes and never ran:
+       - filter selects that were meant to submit on change simply did not;
+       - `return confirm(...)` guards on destructive forms were skipped, so
+         deleting a room or cancelling a day's bookings went through with no
+         confirmation whatsoever;
+       - Print buttons did nothing.
+     None of it logged an error the user would see. These three delegated
+     handlers replace them with attributes, which CSP allows. */
+  document.addEventListener('change', (e) => {
+    const el = e.target;
+    if (!el || !el.matches || !el.matches('[data-autosubmit]')) return;
+    const form = el.form;
+    if (form) form.submit();
+  });
+
+  // Capture phase, so the guard runs before anything else can submit the form.
+  document.addEventListener('submit', (e) => {
+    const form = e.target;
+    const msg = form && form.getAttribute ? form.getAttribute('data-confirm') : null;
+    if (!msg) return;
+    if (!window.confirm(msg)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }
+  }, true);
+
+  document.addEventListener('click', (e) => {
+    const btn = e.target && e.target.closest ? e.target.closest('[data-print]') : null;
+    if (!btn) return;
+    e.preventDefault();
+    window.print();
+  });
+
+  // Insert a merge placeholder into the nearest textarea. The inline version
+  // appended to the end, which is wrong the moment you are editing a sentence
+  // in the middle -- so this inserts at the caret and leaves it after the text.
+  document.addEventListener('click', (e) => {
+    const btn = e.target && e.target.closest ? e.target.closest('[data-insert]') : null;
+    if (!btn) return;
+    e.preventDefault();
+    const text = btn.getAttribute('data-insert') || '';
+    const scope = btn.closest('form') || document;
+    const area = scope.querySelector('textarea');
+    if (!area || !text) return;
+    const start = area.selectionStart ?? area.value.length;
+    const end = area.selectionEnd ?? area.value.length;
+    area.value = area.value.slice(0, start) + text + area.value.slice(end);
+    const caret = start + text.length;
+    area.focus();
+    try { area.setSelectionRange(caret, caret); } catch (err) { /* older inputs */ }
+    // A programmatic value change fires no event, so anything listening (a
+    // character counter, a dirty flag) has to be told.
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+
   /* ------------------------------------------------- mobile nav drawer */
   /* Off-canvas, not an inline list. Locks the page behind it, closes on
      Escape / overlay / navigation, and restores focus to the button that

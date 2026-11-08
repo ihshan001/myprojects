@@ -1,4 +1,5 @@
 <?php
+use App\Core\Auth;
 /**
  * Priority rules.
  *
@@ -412,9 +413,11 @@ $stats = [
         <svg class="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-500"><use href="#i-info"/></svg>
         Every rule change is kept in Rule history, and every priority a rule applies is logged with its reason.
       </p>
-      <a class="shrink-0 text-xs font-semibold text-brand-700" href="/audit">
-        Go to audit log <svg class="inline h-3 w-3"><use href="#i-arrow-right"/></svg>
-      </a>
+      <?php if (Auth::can('clinic.manage')): ?>
+        <a class="shrink-0 text-xs font-semibold text-brand-700" href="/audit">
+          Go to audit log <svg class="inline h-3 w-3"><use href="#i-arrow-right"/></svg>
+        </a>
+      <?php endif; ?>
     </div>
   </div>
 

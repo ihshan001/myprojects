@@ -55,7 +55,7 @@ $isPublic = !empty($publicScreen);
             </button>
           </form>
           <?php if ($kioskKey !== null): ?>
-            <form method="post" action="/display/kiosk/off" onsubmit="return confirm('Switch the kiosk off? Any tablet using it stops issuing tokens.');">
+            <form method="post" action="/display/kiosk/off" data-confirm="Switch the kiosk off? Any tablet using it stops issuing tokens.">
               <?= csrf_field() ?>
               <button class="wr-btn">Switch off</button>
             </form>
@@ -103,7 +103,7 @@ $isPublic = !empty($publicScreen);
       <button type="button" id="tv-speech" class="wr-btn">Voice announcements: on</button>
       <button type="button" id="tv-full" class="wr-btn">Full screen</button>
       <?php if ($canRotate): ?>
-        <form method="post" action="/display/rotate" onsubmit="return confirm('Rotate the display key? Every screen using the old link stops updating.')">
+        <form method="post" action="/display/rotate" data-confirm="Rotate the display key? Every screen using the old link stops updating.">
           <?= csrf_field() ?>
           <button class="wr-btn">Rotate key</button>
         </form>

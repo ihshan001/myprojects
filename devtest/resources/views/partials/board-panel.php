@@ -69,7 +69,7 @@ $verbsFor = static function (string $status) use ($canPriority): array {
           <?php if (count($queues) > 3): ?>
             <form method="get" action="/app" class="shrink-0 pb-1">
               <label class="sr-only" for="queue-pick">Jump to another doctor</label>
-              <select id="queue-pick" name="queue" onchange="this.form.submit()"
+              <select id="queue-pick" name="queue" data-autosubmit
                       class="qselect h-8 cursor-pointer truncate rounded border-0 bg-transparent py-0 pl-0 pr-5 text-[12px] font-medium text-ink-500 focus:ring-0">
                 <option value="" selected>All doctors</option>
                 <?php foreach (array_slice($queues, 3) as $q): ?>

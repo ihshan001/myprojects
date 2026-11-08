@@ -53,7 +53,7 @@
       <svg class="h-4 w-4"><use href="#i-printer"/></svg>
       Thermal slip
     </a>
-    <button onclick="window.print()" class="btn-secondary">
+    <button data-print class="btn-secondary">
       <svg class="h-4 w-4"><use href="#i-print"/></svg>
       Print token
     </button>
