@@ -1,0 +1,32 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Dependencies
+/vendor/
+/node_modules/
+
+# Storage: logs, caches, uploads, exports, sessions
+/storage/logs/*
+/storage/cache/*
+/storage/exports/*
+/storage/private/*
+/storage/sessions/*
+!/storage/**/.gitkeep
+
+# Local database files
+*.sqlite
+*.sqlite3
+*.db
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Build artefacts
+/public/assets/build/
+/public/build/
