@@ -16,6 +16,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BillingController;
 use App\Http\Controllers\ClinicController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DoctorController;
 use App\Http\Controllers\DisplayController;
 use App\Http\Controllers\EmailVerificationController;
 use App\Http\Controllers\MonitorController;
@@ -86,6 +87,14 @@ Router::post('/locale', [AuthController::class, 'locale']);
 
 /* ------------------------------------------------------------ reception */
 Router::get('/app', [DashboardController::class, 'index'], ['auth' => true, 'ability' => 'queue.operate']);
+
+/* The doctor workspace. Kept separate from the reception dashboard on
+   purpose: the PDF asks for a dedicated, minimal doctor experience with its
+   own navigation, not the clinic board with a few links hidden. */
+Router::get('/doctor', [DoctorController::class, 'today'], ['auth' => true, 'ability' => 'queue.consult']);
+Router::get('/doctor/schedule', [DoctorController::class, 'schedule'], ['auth' => true, 'ability' => 'queue.consult']);
+Router::get('/doctor/patients', [DoctorController::class, 'patients'], ['auth' => true, 'ability' => 'queue.consult']);
+Router::get('/doctor/profile', [DoctorController::class, 'profile'], ['auth' => true, 'ability' => 'queue.consult']);
 Router::get('/queue/new', [QueueController::class, 'newPatient'], ['auth' => true, 'ability' => 'queue.issue']);
 Router::post('/queue/new', [QueueController::class, 'createEntry'], ['auth' => true, 'ability' => 'queue.issue']);
 Router::get('/queue', [QueueController::class, 'show'], ['auth' => true, 'ability' => 'queue.operate']);

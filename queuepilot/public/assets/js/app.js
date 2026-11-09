@@ -316,11 +316,13 @@
       const actions = (r.actions || []).map((a) => {
         const label = {
           call: 'Call', recall: 'Call again', start: 'Start', complete: 'Complete',
+          complete_next: 'Complete &amp; call next',
           skip: 'Skip', no_show: 'No show', cancel: 'Cancel', transfer: 'Transfer',
           requeue: 'Re-queue', priority: 'Priority', hold: 'Hold', release_hold: 'Back to queue',
         }[a] || a;
         const tone = {
           call: 'act-call', recall: 'act-call', start: 'act-start', complete: 'act-done',
+          complete_next: 'act-done',
           skip: 'act-skip', cancel: 'act-stop', no_show: 'act-mute', transfer: 'act-mute',
           requeue: 'act-start', priority: 'act-stop', hold: 'act-mute', release_hold: 'act-start',
         }[a] || 'act-mute';

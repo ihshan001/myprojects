@@ -1056,6 +1056,35 @@ Assert::test('the layout actually calls t() for its navigation', function (): vo
     Assert::true($calls >= 5, "layout uses t() for nav labels (found {$calls})");
 });
 
+Assert::test('a doctor\'s navigation is only their own four destinations', function (): void {
+    // The PDF: "Doctor navigation: Today's queue, My schedule, My patients,
+    // My profile. No clinic-wide configuration or platform administration
+    // should be visible." Hiding a link is not the same as withholding
+    // permission, but showing a doctor the clinic's queue settings invites
+    // them to change settings that apply to everybody.
+    $layout = (string) file_get_contents(QP_ROOT . '/resources/views/layouts/app.php');
+
+    // The doctor branch is the one guarded on the doctor role.
+    $branch = strstr($layout, '$u[\'role\'] === \'doctor\'') ?: '';
+    Assert::true($branch !== '', 'a doctor-only navigation branch exists');
+
+    $slice = substr($branch, 0, strpos($branch, '} else') ?: strlen($branch));
+    foreach (['/doctor', '/doctor/schedule', '/doctor/patients', '/doctor/profile'] as $need) {
+        Assert::true(str_contains($slice, "'" . $need . "'"), "doctor nav offers {$need}");
+    }
+    foreach (['/queues/config', '/settings', '/billing', '/patients', '/appointments', '/calendar'] as $leak) {
+        Assert::false(str_contains($slice, "'" . $leak . "'"), "doctor nav must not offer {$leak}");
+    }
+});
+
+Assert::test('a doctor lands on their own workspace after signing in', function (): void {
+    // Dropping a doctor on the reception board — which is built around
+    // issuing tokens, the one thing a doctor cannot do — makes their first
+    // screen a list of controls they are not allowed to use.
+    $src = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/AuthController.php');
+    Assert::true(str_contains($src, 'ROLE_DOCTOR => \'/doctor\''), 'doctors are sent to /doctor');
+});
+
 Assert::test('Lang returns the translated string, not the raw key', function (): void {
     App\Core\Lang::load('si');
     $label = App\Core\Lang::get('nav.live_board');

@@ -26,19 +26,31 @@ if ($u) {
                 ['/admin/organisations', 'users', 'Groups', $isActive('/admin/organisations')],
             ],
         ];
+    } elseif ($u['role'] === 'doctor') {
+        // The PDF is specific about the doctor's navigation: today's queue, my
+        // schedule, my patients, my profile — and "no clinic-wide
+        // configuration or platform administration should be visible". A
+        // doctor who can see a link to the clinic's queue settings has been
+        // handed a reason to change them for everybody.
+        $navSections = [
+            'My work' => [
+                ['/doctor', 'stethoscope', 'Today’s queue', $isActive('/doctor')],
+                ['/doctor/schedule', 'calendar', 'My schedule', $isActive('/doctor/schedule')],
+                ['/doctor/patients', 'users', 'My patients', $isActive('/doctor/patients')],
+                ['/doctor/profile', 'user', 'My profile', $isActive('/doctor/profile')],
+            ],
+        ];
     } else {
-        $isDoctor = $u['role'] === 'doctor';
-
         // Only show destinations the current role can actually open. A doctor
         // who sees a "Patients" link that 403s learns to distrust the UI.
         $navSections = [
-            'Queue' => array_values(array_filter([
+            'Queue' => [
                 ['/app', 'grid', t('nav.live_board', 'Live board'), $isActive('/app')],
-                $isDoctor ? null : ['/queue/new', 'plus', t('nav.new_patient', 'New patient'), $isActive('/queue/new')],
-            ])),
-            'Clinic' => array_values(array_filter([
-                $isDoctor ? null : ['/appointments', 'calendar', t('nav.appointments', 'Appointments'), $isActive('/appointments')],
-                $isDoctor ? null : ['/patients', 'users', t('nav.patients', 'Patients'), $isActive('/patients')],
+                ['/queue/new', 'plus', t('nav.new_patient', 'New patient'), $isActive('/queue/new')],
+            ],
+            'Clinic' => [
+                ['/appointments', 'calendar', t('nav.appointments', 'Appointments'), $isActive('/appointments')],
+                ['/patients', 'users', t('nav.patients', 'Patients'), $isActive('/patients')],
                 ['/doctors', 'stethoscope', t('nav.doctors', 'Doctors & rooms'), $isActive('/doctors')],
                 ['/rooms', 'building', 'Rooms', $isActive('/rooms')],
                 ['/queues/config', 'switch', 'Queue settings', $isActive('/queues/config')],
@@ -51,9 +63,9 @@ if ($u) {
                 // Departments and the operating calendar are clinic structure;
                 // a doctor does not need to see them, reception does not edit
                 // them, and the page itself hides the write controls by role.
-                $isDoctor ? null : ['/departments', 'grid', 'Departments', $isActive('/departments')],
+                ['/departments', 'grid', 'Departments', $isActive('/departments')],
                 ['/calendar', 'calendar', 'Schedules & holidays', $isActive('/calendar')],
-            ])),
+            ],
             'Insight' => array_values(array_filter([
                 Auth::can('reports.view') ? ['/reports', 'chart', t('nav.reports', 'Reports'), $isActive('/reports')] : null,
                 // Only shown to a clinic owner whose clinic is actually in a

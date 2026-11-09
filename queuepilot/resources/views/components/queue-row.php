@@ -67,6 +67,11 @@ $json = htmlspecialchars(json_encode([
       <?php if (in_array('complete', $actions, true)): ?>
         <button type="button" class="act-done" data-act="complete"><svg class="h-3.5 w-3.5"><use href="#i-check"/></svg>Complete</button>
       <?php endif; ?>
+      <?php if (in_array('complete_next', $actions, true)): ?>
+        <button type="button" class="act-done" data-act="complete_next" title="Finish this visit and call the next patient">
+          <svg class="h-3.5 w-3.5"><use href="#i-check"/></svg>Complete &amp; call next
+        </button>
+      <?php endif; ?>
       <?php if (in_array('requeue', $actions, true)): ?>
         <button type="button" class="act-start" data-act="requeue"><svg class="h-3.5 w-3.5"><use href="#i-refresh"/></svg>Re-queue</button>
       <?php endif; ?>
