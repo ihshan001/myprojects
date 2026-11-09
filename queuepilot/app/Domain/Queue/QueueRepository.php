@@ -110,6 +110,27 @@ final class QueueRepository
         );
     }
 
+    /**
+     * The next patient who should be called, using the same ordering the
+     * board renders (priority, then weight, then who joined first).
+     *
+     * $exceptId keeps a "complete & call next" from calling the very entry it
+     * just completed when the row still matches the ordering.
+     */
+    public function nextWaitingForCall(int $clinicId, int $queueId, int $exceptId = 0): ?array
+    {
+        return Db::one(
+            "SELECT e.*, p.full_name
+               FROM queue_entries e
+               JOIN patients p ON p.id = e.patient_id
+              WHERE e.clinic_id = ? AND e.queue_id = ? AND e.status = 'waiting'
+                AND e.id <> ?
+              ORDER BY e.priority DESC, e.sort_weight ASC, e.id ASC
+              LIMIT 1",
+            [$clinicId, $queueId, $exceptId]
+        );
+    }
+
     /** Row lock for mutation. SQLite ignores FOR UPDATE; MySQL takes it. */
     public function lockEntry(int $clinicId, int $entryId): ?array
     {

@@ -174,10 +174,23 @@ final class ApiController
         $ability = match ($action) {
             'call', 'recall' => 'queue.call',
             'start', 'complete' => 'queue.consult',
+            // It finishes a consultation *and* calls, so it needs both. A role
+            // with only one half of the pair must not be able to use it.
+            'complete_next' => 'queue.consult+queue.call',
             'priority' => 'queue.priority',
             default => 'queue.operate',
         };
-        if (!Auth::can('queue.operate') || !Auth::can($ability)) {
+        $required = $ability === 'queue.consult+queue.call'
+            ? ['queue.consult', 'queue.call']
+            : [$ability];
+
+        $denied = false;
+        foreach ($required as $need) {
+            if (!Auth::can($need)) {
+                $denied = true;
+            }
+        }
+        if (!Auth::can('queue.operate') || $denied) {
             json([
                 'ok' => false,
                 'error' => 'forbidden',

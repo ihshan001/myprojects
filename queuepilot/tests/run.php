@@ -241,6 +241,78 @@ Assert::test('every mutation writes a queue event with from/to', function () use
 });
 
 /* ------------------------------------------------------------------ */
+/* 2a. complete & call next                                            */
+/* ------------------------------------------------------------------ */
+
+// Its own queue so these assertions never depend on what ran above.
+$cnQueue = (int) Db::insert(
+    "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
+     VALUES (1, 1, 'Complete and call next probe', 'consultation', 'open', ?, 'Z', 0, 3, ?)",
+    [date('Y-m-d'), Db::now()]
+);
+$GLOBALS['cnQueue'] = $cnQueue;
+$service->startSession(1, $cnQueue);
+
+$cnVersion = static function (int $id): int {
+    return (int) Db::scalar('SELECT version FROM queue_entries WHERE id = ?', [$id]);
+};
+
+$cnIds = [];
+foreach (['CN First', 'CN Second', 'CN Third'] as $i => $name) {
+    $p = $patients->findOrCreate(1, ['full_name' => $name, 'phone' => '077111000' . ($i + 1)]);
+    $issued = $service->issueToken(1, $cnQueue, (int) $p['id'], []);
+    $cnIds[] = (int) $issued['entry_id'];
+}
+[$cnA, $cnB, $cnC] = $cnIds;
+
+$service->apply(1, $cnA, 'call', ['version' => $cnVersion($cnA)]);
+$service->apply(1, $cnA, 'start', ['version' => $cnVersion($cnA)]);
+$cnRes = $service->apply(1, $cnA, 'complete_next', ['version' => $cnVersion($cnA)]);
+
+Assert::test('complete & call next finishes the visit', function () use ($cnRes): void {
+    Assert::true($cnRes['ok'], 'action accepted');
+    Assert::same('completed', $cnRes['status']);
+});
+
+Assert::test('complete & call next rings in the next patient', function () use ($cnRes, $cnB): void {
+    Assert::true(isset($cnRes['called_next']), 'the called patient is reported back');
+    Assert::same($cnB, (int) $cnRes['called_next']['id']);
+    Assert::same('called', (string) Db::scalar('SELECT status FROM queue_entries WHERE id = ?', [$cnB]));
+});
+
+Assert::test('complete & call next only calls one patient, not the rest', function () use ($cnC): void {
+    Assert::same('waiting', (string) Db::scalar('SELECT status FROM queue_entries WHERE id = ?', [$cnC]));
+});
+
+// The PDF's hard rule: completing on its own must never call anyone.
+$service->apply(1, $cnB, 'start', ['version' => $cnVersion($cnB)]);
+$plainRes = $service->apply(1, $cnB, 'complete', ['version' => $cnVersion($cnB)]);
+
+Assert::test('completing alone never calls the next patient', function () use ($plainRes, $cnB, $cnC): void {
+    Assert::true($plainRes['ok']);
+    Assert::false(isset($plainRes['called_next']), 'no patient is called');
+    Assert::same('completed', (string) Db::scalar('SELECT status FROM queue_entries WHERE id = ?', [$cnB]));
+    Assert::same('waiting', (string) Db::scalar('SELECT status FROM queue_entries WHERE id = ?', [$cnC]));
+});
+
+Assert::test('the chained call is audited and recorded as an event', function () use ($cnB): void {
+    $events = Db::all(
+        "SELECT action, from_status, to_status FROM queue_events WHERE entry_id = ? ORDER BY id",
+        [$cnB]
+    );
+    $calls = array_values(array_filter($events, static fn (array $e): bool => $e['action'] === 'entry.call'));
+    Assert::true(count($calls) >= 1, 'the call is recorded in the visit history');
+    Assert::same('waiting', $calls[0]['from_status']);
+    Assert::same('called', $calls[0]['to_status']);
+
+    $audited = (int) Db::scalar(
+        "SELECT COUNT(*) FROM audit_logs WHERE clinic_id = 1 AND entity = 'queue_entry' AND entity_id = ? AND action = 'queue.call'",
+        [$cnB]
+    );
+    Assert::true($audited >= 1, 'the call is audited');
+});
+
+/* ------------------------------------------------------------------ */
 /* 2b. duplicate-prevention constraints                                */
 /* ------------------------------------------------------------------ */
 
