@@ -1203,6 +1203,73 @@ Assert::test('a plan change closes the old subscription and opens a new one', fu
     Assert::same(3, (int) $current['plan_id'], 'the open row is the new plan');
 });
 
+Assert::test('a display key opens its clinic and nothing else', function (): void {
+    // These are bearer credentials on an unauthenticated URL — anyone who
+    // photographs the lobby screen has one.
+    $svc = new App\Services\DisplayKeyService();
+    $issued = $svc->issue(1, 'Reception TV', 'waiting_room');
+
+    $resolved = $svc->resolve($issued['key']);
+    Assert::true($resolved !== null, 'a fresh key resolves');
+    Assert::same(1, $resolved['clinic_id']);
+    Assert::same(null, $resolved['department_id']);
+
+    Assert::same(null, $svc->resolve('not-a-real-key'), 'an unknown key resolves to nothing');
+});
+
+Assert::test('revoking one screen leaves the others running', function (): void {
+    // The whole point of per-screen keys. With one shared key, retiring a
+    // single TV meant blacking out every display in the clinic.
+    $svc = new App\Services\DisplayKeyService();
+    $a = $svc->issue(1, 'Screen A', 'waiting_room');
+    $b = $svc->issue(1, 'Screen B', 'waiting_room');
+
+    Assert::true($svc->revoke(1, (int) $a['id']));
+
+    Assert::same(null, $svc->resolve($a['key']), 'the revoked screen stops');
+    Assert::true($svc->resolve($b['key']) !== null, 'the other screen keeps working');
+
+    // Revoked rows are kept, not deleted: a key still being requested is a
+    // screen somebody forgot to update, and that is worth being able to see.
+    $row = Db::one('SELECT revoked_at, name FROM public_display_keys WHERE id = ?', [(int) $a['id']]);
+    Assert::true($row['revoked_at'] !== null, 'the row survives revocation');
+    Assert::same('Screen A', $row['name'], 'and is still identifiable');
+});
+
+Assert::test('a department key stays inside its clinic', function (): void {
+    $svc = new App\Services\DisplayKeyService();
+
+    // Its own department, removed afterwards. Reusing one of the seeded
+    // departments would collide with the department tests further down,
+    // which create their own fixtures by name.
+    $deptId = Db::insert(
+        "INSERT INTO departments (clinic_id, name, code, is_active, created_at)
+         VALUES (1,'Display key probe','DKP',1,?)",
+        [Db::now()]
+    );
+
+    try {
+        $issued = $svc->issue(1, 'Probe board', 'department', $deptId);
+        $resolved = $svc->resolve($issued['key']);
+        Assert::same(1, $resolved['clinic_id']);
+        Assert::same((int) $deptId, $resolved['department_id']);
+    } finally {
+        Db::run('DELETE FROM public_display_keys WHERE department_id = ?', [$deptId]);
+        Db::run('DELETE FROM departments WHERE id = ?', [$deptId]);
+    }
+});
+
+Assert::test('a screen with no name cannot be issued', function (): void {
+    // An unnamed key is the old problem again: nobody can tell which screen
+    // to revoke.
+    $svc = new App\Services\DisplayKeyService();
+    Assert::throws(
+        static fn () => $svc->issue(1, '   ', 'waiting_room'),
+        \RuntimeException::class,
+        'a blank name is refused'
+    );
+});
+
 Assert::test('Lang returns the translated string, not the raw key', function (): void {
     App\Core\Lang::load('si');
     $label = App\Core\Lang::get('nav.live_board');

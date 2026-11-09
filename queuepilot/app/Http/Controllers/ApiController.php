@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Services\DisplayKeyService;
 use App\Core\Env;
 use App\Core\Log;
 use App\Core\RateLimiter;
@@ -366,25 +367,15 @@ final class ApiController
         RateLimiter::enforce('display:key:' . $key, $perMin, 60);
         RateLimiter::enforce('display:ip:' . Request::ip(), $perMin * 2, 60);
 
-        $clinicId = Db::scalar(
-            "SELECT owner_id FROM settings WHERE scope='clinic' AND key_name='display_token' AND value = ?",
-            [$key]
-        );
+        // Per-screen keys first, then the legacy settings values. Both are
+        // bearer credentials on an unauthenticated URL, so both are resolved
+        // by the same code path and rate-limited identically above.
+        $resolved = (new DisplayKeyService())->resolve($key);
+        $clinicId = $resolved['clinic_id'] ?? null;
 
-        // A department display key is a token of its own rather than the clinic
-        // key plus a parameter. Try it when the clinic key misses, so a screen
-        // issued for one waiting area keeps working.
         $scopedDepartment = null;
-        if (!$clinicId) {
-            $row = Db::one(
-                "SELECT owner_id, key_name FROM settings
-                  WHERE scope='clinic' AND key_name LIKE 'display.department.%' AND value = ?",
-                [$key]
-            );
-            if ($row) {
-                $clinicId = (int) $row['owner_id'];
-                $scopedDepartment = (int) substr((string) $row['key_name'], strlen('display.department.'));
-            }
+        if ($resolved !== null && $resolved['department_id'] !== null) {
+            $scopedDepartment = $resolved['department_id'];
         }
         if (!$clinicId) {
             json(['ok' => false, 'error' => 'not_found'], 404);

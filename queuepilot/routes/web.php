@@ -113,7 +113,10 @@ Router::post('/queue/session/start', [QueueController::class, 'startSession'], [
 Router::post('/queue/session', [QueueController::class, 'sessionControl'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/delay', [QueueController::class, 'announceDelay'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::get('/display', [DisplayController::class, 'screen'], ['auth' => true]);
+Router::get('/settings/displays', [DisplayController::class, 'displays'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/display/rotate', [DisplayController::class, 'rotate'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/display/keys', [DisplayController::class, 'issueKey'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/display/keys/{id}/revoke', [DisplayController::class, 'revokeKey'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/display/kiosk', [DisplayController::class, 'kioskIssuing'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/display/kiosk/off', [DisplayController::class, 'kioskRevoke'], ['auth' => true, 'ability' => 'clinic.manage']);
 
