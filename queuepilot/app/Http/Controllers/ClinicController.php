@@ -125,7 +125,7 @@ final class ClinicController
             "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
              VALUES (?,?,?,'consultation','open',?,?,0,3,?)",
             [$clinicId, $id, 'OPD — ' . $name, Db::today(),
-             strtoupper(substr(Auth::clinic()['token_prefix'] ?: $name, 0, 1)) ?: 'A', Db::now()]
+             (new DoctorService())->prefixFor($clinicId, $id), Db::now()]
         );
 
         (new AuditService())->log($clinicId, 'doctor.created', 'doctor', $id, ['name' => $name]);

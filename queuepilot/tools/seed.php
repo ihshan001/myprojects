@@ -74,9 +74,14 @@ function makeClinic(array $c, int $planId): int
 function addUser(int $clinicId, string $role, string $name, string $email, string $password, ?int $doctorId = null): int
 {
     return Db::insert(
-        'INSERT INTO users (clinic_id, role, name, email, phone, password_hash, doctor_id, locale, is_active, created_at)
-         VALUES (?,?,?,?,?,?,?,?,1,?)',
-        [$clinicId, $role, $name, mb_strtolower($email), '+94770000000', password_hash($password, PASSWORD_DEFAULT), $doctorId, 'en', Db::now()]
+        'INSERT INTO users (clinic_id, role, name, email, phone, password_hash, doctor_id, locale, is_active, email_verified_at, created_at)
+         VALUES (?,?,?,?,?,?,?,?,1,?,?)',
+        // Demo accounts are seeded pre-verified. clinicMayIssueTokens() blocks
+        // token issuance while any active clinic_admin is unverified, so a
+        // seeded clinic whose owner has never clicked a verification mail can
+        // never issue a token — the boards would open empty for no visible
+        // reason. Real signups still have to verify.
+        [$clinicId, $role, $name, mb_strtolower($email), '+94770000000', password_hash($password, PASSWORD_DEFAULT), $doctorId, 'en', Db::now(), Db::now()]
     );
 }
 
@@ -125,11 +130,14 @@ Db::transaction(function () use ($planIds, $today) {
     addUser($c1, 'doctor', 'Dr. Ruwan Jayasinghe', 'ruwan@serenity.lk', 'Doctor#2026', $doctors[2]);
 
     $queues = [];
+    $doctorService = new App\Services\DoctorService();
     foreach ($doctors as $i => $docId) {
         $queues[$i] = Db::insert(
             "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
              VALUES (?,?,?,?, 'open', ?, ?, 0, 3, ?)",
-            [$c1, $docId, 'OPD — ' . explode(' ', $doctorDefs[$i][0])[1] . ' ' . explode(' ', $doctorDefs[$i][0])[2], 'consultation', $today, 'A', Db::now()]
+            // One prefix per doctor (A, B, C …) so the display board and the
+            // printed slip can tell the consulting rooms apart.
+            [$c1, $docId, 'OPD — ' . explode(' ', $doctorDefs[$i][0])[1] . ' ' . explode(' ', $doctorDefs[$i][0])[2], 'consultation', $today, $doctorService->prefixFor($c1, $docId), Db::now()]
         );
     }
 

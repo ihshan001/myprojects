@@ -124,7 +124,8 @@ final class ClinicService
             Db::insert(
                 "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
                  VALUES (?,?,?,?, 'open', ?, ?, 0, 3, ?)",
-                [$clinicId, $doctorId, 'OPD — Consultation', 'consultation', Db::today(), strtoupper(substr($slug, 0, 1)), Db::now()]
+                [$clinicId, $doctorId, 'OPD — Consultation', 'consultation', Db::today(),
+                 (new DoctorService())->prefixFor($clinicId, $doctorId), Db::now()]
             );
 
             Db::insert(
