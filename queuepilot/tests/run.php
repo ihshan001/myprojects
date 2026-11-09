@@ -1130,6 +1130,79 @@ Assert::test('a processed notification keeps its history when retried', function
     Assert::true($after >= $before, 'history is appended, never rewritten');
 });
 
+/**
+ * An unpaid invoice to test against. The suite does not seed billing, so the
+ * tests make their own rather than depending on fixtures that may not exist.
+ */
+$testInvoiceId = (int) (Db::scalar("SELECT id FROM invoices WHERE clinic_id = 1 ORDER BY id DESC LIMIT 1") ?: 0);
+if ($testInvoiceId === 0) {
+    $testInvoiceId = Db::insert(
+        'INSERT INTO invoices (clinic_id, number, period_from, period_to, amount, currency, status, created_at)
+         VALUES (1,?,?,?,?,?,?,?)',
+        ['INV-TEST-0001', date('Y-m-01'), date('Y-m-t'), 7900, 'LKR', 'unpaid', Db::now()]
+    );
+}
+
+Assert::test('a rejected payment keeps its submission on file', function () use ($testInvoiceId): void {
+    // This is the whole reason `payments` exists. The claim used to live on
+    // the invoice, so rejecting it reset the invoice to unpaid and the record
+    // that the clinic said it had paid vanished with it — leaving a billing
+    // dispute with no evidence on either side.
+    $svc = new App\Services\SubscriptionService();
+
+    $invoiceId = $testInvoiceId;
+    Db::run("UPDATE invoices SET status = 'unpaid', paid_at = NULL WHERE id = ?", [$invoiceId]);
+
+    $paymentId = $svc->claim(1, $invoiceId, 'REJ-TEST-0001', 'bank_transfer');
+    Assert::same(
+        'claimed',
+        (string) Db::scalar('SELECT status FROM payments WHERE id = ?', [$paymentId])
+    );
+
+    $svc->reject($paymentId, null, 'No transfer with that reference.');
+
+    // The invoice goes back to unpaid — the clinic has not paid.
+    Assert::same('unpaid', (string) Db::scalar('SELECT status FROM invoices WHERE id = ?', [$invoiceId]));
+    // …but the submission survives, with the decision recorded.
+    $row = Db::one('SELECT status, decision_note, decided_at FROM payments WHERE id = ?', [$paymentId]);
+    Assert::same('rejected', $row['status']);
+    Assert::same('No transfer with that reference.', $row['decision_note']);
+    Assert::true($row['decided_at'] !== null, 'the decision is timestamped');
+});
+
+Assert::test('a verified payment settles the invoice and keeps the record too', function () use ($testInvoiceId): void {
+    $svc = new App\Services\SubscriptionService();
+    $invoiceId = $testInvoiceId;
+    Db::run("UPDATE invoices SET status = 'unpaid', paid_at = NULL WHERE id = ?", [$invoiceId]);
+
+    $paymentId = $svc->claim(1, $invoiceId, 'VER-TEST-0002', 'bank_transfer');
+    $result = $svc->verify($paymentId, null, '');
+    Assert::true($result['ok']);
+
+    Assert::same('paid', (string) Db::scalar('SELECT status FROM invoices WHERE id = ?', [$invoiceId]));
+    Assert::same('verified', (string) Db::scalar('SELECT status FROM payments WHERE id = ?', [$paymentId]));
+});
+
+Assert::test('a plan change closes the old subscription and opens a new one', function (): void {
+    // clinics.plan_id can only describe the present. Without history,
+    // "what plan were we on before the upgrade" is unanswerable.
+    $svc = new App\Services\SubscriptionService();
+    $svc->ensureOpen(1);
+
+    $before = (int) Db::scalar('SELECT COUNT(*) FROM subscriptions WHERE clinic_id = 1 AND ended_at IS NULL');
+    Assert::same(1, $before, 'exactly one open subscription');
+
+    $svc->open(1, 3, 'active', 'Upgraded to Clinic Plus.');
+
+    $open = (int) Db::scalar('SELECT COUNT(*) FROM subscriptions WHERE clinic_id = 1 AND ended_at IS NULL');
+    $closed = (int) Db::scalar('SELECT COUNT(*) FROM subscriptions WHERE clinic_id = 1 AND ended_at IS NOT NULL');
+    Assert::same(1, $open, 'still exactly one open subscription');
+    Assert::true($closed >= 1, 'the previous one is closed, not deleted');
+
+    $current = $svc->current(1);
+    Assert::same(3, (int) $current['plan_id'], 'the open row is the new plan');
+});
+
 Assert::test('Lang returns the translated string, not the raw key', function (): void {
     App\Core\Lang::load('si');
     $label = App\Core\Lang::get('nav.live_board');

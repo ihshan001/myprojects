@@ -169,3 +169,76 @@
     <?php endforeach; ?>
   </div>
 </div>
+
+
+<!-- ── Payment history ──────────────────────────────────────────────── -->
+<div class="card overflow-hidden">
+  <div class="border-b border-slate-100 px-4 py-3">
+    <h2 class="text-sm font-bold text-slate-900">Payment history</h2>
+    <p class="mt-0.5 text-xs text-slate-500">
+      Every payment you have submitted. A rejected submission stays listed — if a reference did not match,
+      this is the record that you paid and what happened next.
+    </p>
+  </div>
+  <?php if (($payments ?? []) === []): ?>
+    <p class="px-4 py-8 text-center text-sm text-slate-500">No payments submitted yet.</p>
+  <?php else: ?>
+    <div class="overflow-x-auto">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Submitted</th><th>Invoice</th><th>Amount</th>
+            <th>Reference</th><th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php foreach ($payments as $pay): ?>
+            <tr>
+              <td class="whitespace-nowrap text-xs text-slate-500"><?= e(fmt_time($pay['submitted_at'], 'j M Y, g:i A')) ?></td>
+              <td class="text-xs text-slate-600"><?= e($pay['invoice_number'] ?? '') ?></td>
+              <td class="whitespace-nowrap text-xs font-medium text-slate-800"><?= e(money((float) $pay['amount'], (string) $pay['currency'])) ?></td>
+              <td class="font-mono text-xs text-slate-600"><?= e($pay['reference'] ?? '—') ?></td>
+              <td>
+                <span class="<?= match ((string) $pay['status']) {
+                    'verified' => 'badge-emerald',
+                    'claimed'  => 'badge-amber',
+                    default    => 'badge-rose',
+                } ?>"><?= e($pay['status'] === 'claimed' ? 'with us for checking' : $pay['status']) ?></span>
+                <?php if (!empty($pay['decision_note'])): ?>
+                  <p class="mt-1 text-[11px] text-slate-500"><?= e($pay['decision_note']) ?></p>
+                <?php endif; ?>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+  <?php endif; ?>
+</div>
+
+<!-- ── Plan history ─────────────────────────────────────────────────── -->
+<div class="card overflow-hidden">
+  <div class="border-b border-slate-100 px-4 py-3">
+    <h2 class="text-sm font-bold text-slate-900">Plan history</h2>
+    <p class="mt-0.5 text-xs text-slate-500">Every plan this clinic has been on, most recent first.</p>
+  </div>
+  <?php if (($planHistory ?? []) === []): ?>
+    <p class="px-4 py-8 text-center text-sm text-slate-500">No plan changes recorded yet.</p>
+  <?php else: ?>
+    <ul class="divide-y divide-slate-100">
+      <?php foreach ($planHistory as $sub): ?>
+        <li class="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-3">
+          <span class="text-sm font-medium text-slate-800"><?= e($sub['plan_name'] ?? 'No plan') ?></span>
+          <span class="badge-slate"><?= e($sub['status']) ?></span>
+          <span class="text-xs text-slate-500">
+            from <?= e(fmt_time($sub['started_at'], 'j M Y')) ?>
+            <?php if ($sub['ended_at'] !== null): ?> · until <?= e(fmt_time($sub['ended_at'], 'j M Y')) ?><?php endif; ?>
+          </span>
+          <?php if (!empty($sub['note'])): ?>
+            <span class="text-xs text-slate-400">· <?= e($sub['note']) ?></span>
+          <?php endif; ?>
+        </li>
+      <?php endforeach; ?>
+    </ul>
+  <?php endif; ?>
+</div>

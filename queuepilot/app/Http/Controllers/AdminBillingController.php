@@ -7,6 +7,7 @@ use App\Core\Auth;
 use App\Core\Db;
 use App\Core\Request;
 use App\Services\AuditService;
+use App\Services\SubscriptionService;
 use App\Services\StaffNotificationService;
 
 /**
@@ -33,6 +34,11 @@ final class AdminBillingController
         view('admin/billing', [
             'title' => 'Payment verification',
             'pending' => $pending,
+            // The durable queue. `pending` is the invoice view; this is the
+            // submission view, and it is what survives a rejection — a clinic
+            // can claim, be rejected, and claim again, and both attempts are
+            // visible instead of the second silently replacing the first.
+            'claimed' => (new SubscriptionService())->claimedPayments(),
             'recent' => Db::all(
                 "SELECT i.*, c.name AS clinic_name, u.name AS verifier
                    FROM invoices i
@@ -45,77 +51,90 @@ final class AdminBillingController
         ]);
     }
 
-    /** Confirm a claimed payment and activate the subscription. */
+    /**
+     * Confirm a claimed payment and activate the subscription.
+     *
+     * Accepts a payment id, falling back to "the invoice's newest open claim"
+     * so the existing invoice-level links keep working. The decision is
+     * recorded against the submission, not the invoice.
+     */
     public function verify(string $id): void
     {
+        $payment = $this->resolveClaim($id);
+        if ($payment === null) {
+            redirect('/admin/billing');
+            return;
+        }
+
+        $result = (new SubscriptionService())->verify((int) $payment['id'], Auth::id(), '');
+        if (!$result['ok']) {
+            flash('warn', $result['message']);
+            redirect('/admin/billing');
+            return;
+        }
+
+        $invoice = Db::one('SELECT * FROM invoices WHERE id = ?', [(int) $payment['invoice_id']]);
+        $clinic  = Db::one('SELECT renews_on FROM clinics WHERE id = ?', [(int) $payment['clinic_id']]);
+
+        (new StaffNotificationService())->operational(
+            (int) $payment['clinic_id'],
+            'Payment verified — subscription active',
+            'Invoice ' . ($invoice['number'] ?? '') . ' was verified. Your subscription runs to '
+                . (string) ($clinic['renews_on'] ?? '') . '.',
+            'success',
+            '/billing'
+        );
+
+        flash('success', 'Payment verified. Invoice ' . ($invoice['number'] ?? '') . ' is settled and the subscription is active.');
+        redirect('/admin/billing');
+    }
+
+    /**
+     * The claim an admin action refers to.
+     *
+     * $id is normally a payment id. Older screens and bookmarks pass an
+     * invoice id, so that is resolved to the invoice's newest open claim.
+     */
+    private function resolveClaim(string $id): ?array
+    {
+        $payment = Db::one('SELECT * FROM payments WHERE id = ?', [(int) $id]);
+        if ($payment !== null) {
+            return $payment;
+        }
+
         $invoice = Db::one('SELECT * FROM invoices WHERE id = ?', [(int) $id]);
         if (!$invoice) {
             flash('error', 'That invoice no longer exists.');
-            redirect('/admin/billing');
-            return;
+            return null;
         }
         if ($invoice['status'] !== 'claimed') {
             flash('warn', 'That invoice is not awaiting verification (status: ' . $invoice['status'] . ').');
-            redirect('/admin/billing');
-            return;
+            return null;
         }
 
-        Db::transaction(function () use ($invoice): void {
-            Db::run(
-                "UPDATE invoices SET status = 'paid', paid_at = ?, verified_at = ?, verified_by = ?, rejection_reason = NULL
-                  WHERE id = ?",
-                [Db::now(), Db::now(), Auth::id(), (int) $invoice['id']]
-            );
-
-            // Renew from the later of today and the current end date, so a
-            // clinic that pays early is not penalised by losing the remainder
-            // of its current period.
-            $clinic = Db::one('SELECT renews_on FROM clinics WHERE id = ?', [(int) $invoice['clinic_id']]);
-            $base = $clinic && !empty($clinic['renews_on']) && strtotime((string) $clinic['renews_on']) > time()
-                ? strtotime((string) $clinic['renews_on'])
-                : time();
-            $next = date('Y-m-d', strtotime('+1 month', $base));
-
-            Db::run(
-                "UPDATE clinics SET billing_status = 'active', renews_on = ?, suspended_at = NULL,
-                        suspension_reason = NULL, updated_at = ? WHERE id = ?",
-                [$next, Db::now(), (int) $invoice['clinic_id']]
-            );
-
-            (new StaffNotificationService())->operational(
+        $payment = Db::one(
+            "SELECT * FROM payments WHERE invoice_id = ? AND status = 'claimed' ORDER BY id DESC",
+            [(int) $invoice['id']]
+        );
+        if ($payment === null) {
+            // An invoice claimed before submissions were recorded. Create the
+            // row now so the decision still has somewhere to live.
+            $paymentId = (new SubscriptionService())->claim(
                 (int) $invoice['clinic_id'],
-                'Payment verified — subscription active',
-                'Invoice ' . $invoice['number'] . ' was verified. Your subscription runs to ' . $next . '.',
-                'success',
-                '/billing'
+                (int) $invoice['id'],
+                (string) ($invoice['reference'] ?? ''),
+                (string) ($invoice['method'] ?? 'bank_transfer')
             );
-        });
+            $payment = Db::one('SELECT * FROM payments WHERE id = ?', [$paymentId]);
+        }
 
-        (new AuditService())->log((int) $invoice['clinic_id'], 'billing.payment_verified', 'invoice', (int) $invoice['id'], [
-            'amount' => $invoice['amount'],
-            'reference' => $invoice['reference'],
-            'verified_by' => Auth::id(),
-        ]);
-
-        flash('success', 'Payment verified. Invoice ' . $invoice['number'] . ' is settled and the subscription is active.');
-        redirect('/admin/billing');
+        return $payment;
     }
+
 
     /** Reject a claim with a reason the clinic can act on. */
     public function reject(string $id): void
     {
-        $invoice = Db::one('SELECT * FROM invoices WHERE id = ?', [(int) $id]);
-        if (!$invoice) {
-            flash('error', 'That invoice no longer exists.');
-            redirect('/admin/billing');
-            return;
-        }
-        if ($invoice['status'] !== 'claimed') {
-            flash('warn', 'That invoice is not awaiting verification.');
-            redirect('/admin/billing');
-            return;
-        }
-
         $reason = trim(Request::string('reason'));
         if (mb_strlen($reason) < 5) {
             flash('error', 'Give a reason — the clinic sees it and needs to know what to fix.');
@@ -123,11 +142,23 @@ final class AdminBillingController
             return;
         }
 
-        Db::run(
-            "UPDATE invoices SET status = 'rejected', rejection_reason = ?, verified_at = ?, verified_by = ?
-              WHERE id = ?",
-            [mb_substr($reason, 0, 255), Db::now(), Auth::id(), (int) $invoice['id']]
-        );
+        $payment = $this->resolveClaim($id);
+        if ($payment === null) {
+            redirect('/admin/billing');
+            return;
+        }
+
+        // The submission is kept. Only the invoice goes back to unpaid: the
+        // clinic has not paid, but it did submit, and a rejection that erases
+        // the submission leaves a dispute with no evidence on either side.
+        $result = (new SubscriptionService())->reject((int) $payment['id'], Auth::id(), mb_substr($reason, 0, 255));
+        if (!$result['ok']) {
+            flash('warn', $result['message']);
+            redirect('/admin/billing');
+            return;
+        }
+
+        $invoice = Db::one('SELECT * FROM invoices WHERE id = ?', [(int) $payment['invoice_id']]);
 
         (new StaffNotificationService())->operational(
             (int) $invoice['clinic_id'],

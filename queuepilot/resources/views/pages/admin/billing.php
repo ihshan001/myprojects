@@ -106,3 +106,39 @@
     </div>
   <?php endif; ?>
 </div>
+
+
+<!-- ── Every submission, including rejected ones ────────────────────── -->
+<div class="card mt-5 overflow-hidden">
+  <div class="border-b border-slate-100 px-4 py-3">
+    <h2 class="text-sm font-bold text-slate-900">All payment submissions</h2>
+    <p class="mt-0.5 text-xs text-slate-500">
+      The durable record. A rejected claim leaves the invoice unpaid, so the invoice list above cannot show
+      it — this can. A clinic that claims, is rejected, and claims again appears twice.
+    </p>
+  </div>
+  <?php if (($claimed ?? []) === []): ?>
+    <p class="px-4 py-8 text-center text-sm text-slate-500">
+      Nothing waiting. Submissions that have been decided stay in the payment history.
+    </p>
+  <?php else: ?>
+    <div class="overflow-x-auto">
+      <table class="table">
+        <thead>
+          <tr><th>Clinic</th><th>Invoice</th><th>Amount</th><th>Reference</th><th>Submitted</th></tr>
+        </thead>
+        <tbody>
+          <?php foreach ($claimed as $p2): ?>
+            <tr>
+              <td class="text-sm font-medium text-slate-900"><?= e($p2['clinic_name']) ?></td>
+              <td class="font-mono text-xs"><?= e($p2['invoice_number']) ?></td>
+              <td class="font-semibold"><?= e(money((float) $p2['amount'], (string) $p2['currency'])) ?></td>
+              <td class="font-mono text-xs text-slate-600"><?= e($p2['reference'] ?? '—') ?></td>
+              <td class="text-xs text-slate-500"><?= e(ago($p2['submitted_at'])) ?></td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+  <?php endif; ?>
+</div>

@@ -7,6 +7,7 @@ use App\Core\Auth;
 use App\Core\Db;
 use App\Core\Request;
 use App\Services\AuditService;
+use App\Services\SubscriptionService;
 use App\Services\ClinicService;
 
 /**
@@ -43,6 +44,13 @@ final class BillingController
             'plan' => $plan,
             'plans' => $service->plans(),
             'invoices' => Db::all('SELECT * FROM invoices WHERE clinic_id = ? ORDER BY id DESC LIMIT 24', [$clinicId]),
+            'payments' => (new SubscriptionService())->paymentsFor($clinicId),
+            'subscription' => (function () use ($clinicId): array {
+                $service = new SubscriptionService();
+                $service->ensureOpen($clinicId);          // clinics older than this table
+                return $service->current($clinicId) ?? [];
+            })(),
+            'planHistory' => (new SubscriptionService())->history($clinicId),
             'usage' => $usage,
             'notifStats' => (new \App\Services\NotificationService())->stats($clinicId),
             'suspended' => (bool) Request::int('suspended'),
@@ -78,6 +86,15 @@ final class BillingController
         }
 
         Db::run('UPDATE clinics SET plan_id = ?, updated_at = ? WHERE id = ?', [$planId, Db::now(), $clinicId]);
+
+        // clinics.plan_id can only describe the present. Recording the change
+        // is what makes "we used to be on Professional" answerable.
+        (new SubscriptionService())->open(
+            $clinicId,
+            $planId,
+            (string) (Auth::clinic()['billing_status'] ?? 'active'),
+            'Changed to ' . $plan['name'] . '.'
+        );
         (new AuditService())->log($clinicId, 'billing.plan_changed', 'clinic', $clinicId, [
             'plan' => $plan['code'], 'price' => $plan['price_monthly'],
         ]);
@@ -133,6 +150,11 @@ final class BillingController
               WHERE id = ? AND clinic_id = ?",
             ['bank_transfer', $reference, Db::now(), $invoiceId, $clinicId]
         );
+
+        // The invoice says "claimed"; the durable record of *what was claimed*
+        // lives in payments. If an admin rejects it the invoice goes back to
+        // unpaid, and without this row the clinic's claim would go with it.
+        (new SubscriptionService())->claim($clinicId, $invoiceId, $reference, 'bank_transfer');
 
         (new AuditService())->log($clinicId, 'billing.payment_claimed', 'invoice', $invoiceId, [
             'amount' => $invoice['amount'], 'reference' => $reference,
