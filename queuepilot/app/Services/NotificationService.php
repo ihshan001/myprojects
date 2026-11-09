@@ -331,6 +331,44 @@ final class NotificationService
         return $queued;
     }
 
+    /**
+     * Append one row per delivery attempt.
+     *
+     * The outbox row is updated in place on every retry, so without this the
+     * earlier attempts are simply gone. This table is never updated and never
+     * deleted mid-life: it is the record the clinic reads when a patient says
+     * they never got the message.
+     *
+     * Written inside the same call as the outbox update rather than in a
+     * transaction, on purpose — a failure to record history must not fail the
+     * send, and a failed send must not lose its history.
+     */
+    private function recordAttempt(array $job, int $attempt, string $outcome, ?string $error): void
+    {
+        try {
+            Db::insert(
+                'INSERT INTO notification_logs (clinic_id, notification_id, attempt, channel, outcome, error, created_at)
+                 VALUES (?,?,?,?,?,?,?)',
+                [
+                    (int) $job['clinic_id'],
+                    (int) $job['id'],
+                    $attempt,
+                    (string) $job['channel'],
+                    $outcome,
+                    $error,
+                    Db::now(),
+                ]
+            );
+        } catch (\Throwable $e) {
+            // Losing history is bad; stopping the queue because we could not
+            // write history would be worse. The notification failure rules
+            // exist precisely so a notification problem never blocks a clinic.
+            Log::error('notification.log_failed', [
+                'id' => $job['id'], 'outcome' => $outcome, 'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
     public function processDue(int $limit = 50): array
     {
         $due = Db::all(
@@ -358,6 +396,7 @@ final class NotificationService
                          $this->withoutNumber($job['payload_json']), $job['id']]
                     );
                     $logged++;
+                    $this->recordAttempt($job, $attempts, 'gated', 'feature not enabled for this clinic — contact the platform operator');
                     Log::info('notification.feature_gated', [
                         'id' => $job['id'], 'channel' => $job['channel'], 'clinic_id' => $job['clinic_id'],
                     ]);
@@ -386,12 +425,15 @@ final class NotificationService
                          $this->withoutNumber($job['payload_json']), $job['id']]
                     );
                     $logged++;
+                    $this->recordAttempt($job, $attempts, 'logged', 'recorded by the log transport — not sent to the patient');
                     continue;
                 }
                 Db::run(
                     "UPDATE notifications SET status='sent', attempts=?, sent_at=?, last_error=NULL, payload_json=? WHERE id=?",
                     [$attempts, Db::now(), $this->withoutNumber($job['payload_json']), $job['id']]
                 );
+                $this->recordAttempt($job, $attempts, 'sent', null);
+
                 // Meter every SMS that actually left the building so the
                 // operator can bill for it (0.64 LKR per message via text.lk).
                 if ($job['channel'] === 'sms') {
@@ -407,6 +449,7 @@ final class NotificationService
                      $attempts >= 3 ? $this->withoutNumber($job['payload_json']) : $job['payload_json'], $job['id']]
                 );
                 $failed++;
+                $this->recordAttempt($job, $attempts, $status === 'abandoned' ? 'abandoned' : 'failed', mb_substr($e->getMessage(), 0, 290));
                 Log::warn('notification.send.failed', ['id' => $job['id'], 'error' => $e->getMessage()]);
             }
         }

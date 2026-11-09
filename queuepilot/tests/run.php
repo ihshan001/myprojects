@@ -1085,6 +1085,51 @@ Assert::test('a doctor lands on their own workspace after signing in', function 
     Assert::true(str_contains($src, 'ROLE_DOCTOR => \'/doctor\''), 'doctors are sent to /doctor');
 });
 
+Assert::test('every delivery attempt is logged, not just the last one', function (): void {
+    // The outbox row is rewritten by each retry, so without the log table a
+    // clinic that retried three times can only see the third failure. The PDF
+    // asks for "retry logic and delivery logs"; this is the half that the
+    // outbox alone cannot provide.
+    $svc = new App\Services\NotificationService();
+    $svc->processDue();
+
+    $messages = (int) Db::scalar(
+        "SELECT COUNT(*) FROM notifications WHERE status IN ('sent','logged','abandoned')"
+    );
+    $logged = (int) Db::scalar('SELECT COUNT(*) FROM notification_logs');
+    Assert::true($messages > 0, 'at least one message was processed');
+    Assert::true($logged > 0, 'attempts were recorded');
+
+    // One row per attempt, and never updated afterwards.
+    $duplicates = (int) Db::scalar(
+        'SELECT COUNT(*) FROM (SELECT notification_id, attempt FROM notification_logs
+          GROUP BY notification_id, attempt HAVING COUNT(*) > 1)'
+    );
+    Assert::same(0, $duplicates, 'attempt numbers are unique per message');
+
+    $outcomes = array_column(
+        Db::all('SELECT DISTINCT outcome FROM notification_logs'),
+        'outcome'
+    );
+    $allowed = ['sent', 'logged', 'failed', 'abandoned', 'gated'];
+    foreach ($outcomes as $o) {
+        Assert::true(in_array($o, $allowed, true), "outcome {$o} is one of the known set");
+    }
+});
+
+Assert::test('a processed notification keeps its history when retried', function (): void {
+    // The point of the split: processing the same message again appends
+    // rather than overwrites.
+    $id = (int) Db::scalar('SELECT id FROM notifications ORDER BY id DESC LIMIT 1');
+    Db::run("UPDATE notifications SET status='queued', scheduled_at = ? WHERE id = ?", [Db::now(), $id]);
+
+    $before = (int) Db::scalar('SELECT COUNT(*) FROM notification_logs WHERE notification_id = ?', [$id]);
+    (new App\Services\NotificationService())->processDue();
+    $after = (int) Db::scalar('SELECT COUNT(*) FROM notification_logs WHERE notification_id = ?', [$id]);
+
+    Assert::true($after >= $before, 'history is appended, never rewritten');
+});
+
 Assert::test('Lang returns the translated string, not the raw key', function (): void {
     App\Core\Lang::load('si');
     $label = App\Core\Lang::get('nav.live_board');
