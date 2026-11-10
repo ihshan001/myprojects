@@ -844,3 +844,46 @@
   .lp-reveal-ready [data-reveal-group] > *,
   .lp-reveal-ready [data-reveal-group].is-in > * { opacity: 1 !important; transform: none !important; transition: none !important; }
 }
+
+  /* ------------------------------------------------------------ dialogs
+     In-page replacements for confirm() and prompt(). The native ones are
+     prefaced by the browser with "an embedded page at <host> says" whenever
+     the console runs inside the preview iframe, which reads like a phishing
+     attempt, cannot be styled, and cannot be driven by a test. */
+  .qp-dialog-locked { overflow: hidden; }
+
+  .qp-dialog-host {
+    @apply fixed inset-0 z-[120] flex items-center justify-center p-4;
+    background: rgb(15 23 42 / 0.45);
+    /* The console is drawn at 0.9 zoom, so a fixed overlay has to undo it or
+       it lands slightly off-centre against the rest of the chrome. */
+    zoom: 1;
+  }
+  .qp-dialog-host[hidden] { display: none; }
+
+  .qp-dialog {
+    @apply w-full max-w-[26rem] rounded-xl border border-slate-200 bg-white p-5 shadow-xl;
+  }
+  .qp-dialog-title {
+    @apply text-[15px] font-bold tracking-tight text-slate-900;
+  }
+  .qp-dialog-text {
+    @apply mt-1.5 text-[13px] leading-relaxed text-slate-600;
+  }
+  .qp-dialog-field {
+    @apply mt-3 block;
+  }
+  .qp-dialog-field > span {
+    @apply mb-1 block text-[11.5px] font-semibold text-slate-700;
+  }
+  .qp-dialog-field > .input {
+    @apply mt-0 w-full;
+  }
+  .qp-dialog-actions {
+    @apply mt-4 flex flex-wrap items-center justify-end gap-2;
+  }
+  .qp-dialog-actions > .btn-primary,
+  .qp-dialog-actions > .btn-danger,
+  .qp-dialog-actions > .btn-secondary {
+    @apply !w-auto;
+  }

@@ -51,7 +51,7 @@
 
           <?php if (($c['owner_verified_at'] ?? null) === null && !empty($c['owner_id'])): ?>
             <form method="post" action="/admin/clinics/<?= (int) $c['owner_id'] ?>/verify-email"
-                  onsubmit="return confirm('Mark this address as verified by hand? Only do this once you have spoken to the owner.')">
+                  data-confirm-submit="Mark this address as verified by hand? Only do this once you have spoken to the owner.">
               <?= csrf_field() ?>
               <button class="act-mute" title="<?= e((string) $c['owner_email']) ?>">Verify email</button>
             </form>
@@ -111,7 +111,7 @@
         <details class="mt-3">
           <summary class="cursor-pointer text-[11px] font-medium text-rose-600 hover:underline">Suspend this clinic…</summary>
           <form method="post" action="/admin/clinics/<?= (int) $c['id'] ?>/suspend" class="mt-2 flex flex-wrap gap-2"
-                onsubmit="return confirm('Suspend <?= e(addslashes((string) $c['name'])) ?>? Patients cannot be issued tokens until reinstated.')">
+                data-confirm-submit="Suspend <?= e(addslashes((string) $c['name'])) ?>? Patients cannot be issued tokens until reinstated." data-confirm-danger>
             <?= csrf_field() ?>
             <input class="input !w-64 !py-1 text-xs" name="reason" required maxlength="255"
                    placeholder="Unpaid invoice since 3 Nov">

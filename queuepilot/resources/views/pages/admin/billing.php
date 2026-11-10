@@ -47,7 +47,7 @@
               <td>
                 <div class="flex flex-wrap items-center justify-end gap-2">
                   <form method="post" action="/admin/billing/<?= (int) $inv['id'] ?>/verify"
-                        onsubmit="return confirm('Confirm the bank shows this payment? The subscription activates immediately.')">
+                        data-confirm-submit="Confirm the bank shows this payment? The subscription activates immediately.">
                     <?= csrf_field() ?>
                     <button class="btn-primary btn-sm">Verify &amp; activate</button>
                   </form>

@@ -148,7 +148,7 @@ $futureDay = strtotime($date) >= strtotime(\App\Core\Db::today());
       The doctor cannot come in — cancel this whole day
     </summary>
     <form method="post" action="/appointments/cancel-day" class="mt-3 space-y-3"
-          onsubmit="return confirm('Cancel every live booking for this doctor on this day? Each patient will need a call.');">
+          data-confirm-submit="Cancel every live booking for this doctor on this day? Each patient will need a call." data-confirm-danger>
       <?= csrf_field() ?>
       <input type="hidden" name="date" value="<?= e($date) ?>">
       <input type="hidden" name="doctor_id" value="<?= (int) $cancelDoctor ?>">

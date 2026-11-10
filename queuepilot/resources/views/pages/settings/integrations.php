@@ -68,7 +68,7 @@
           <?php endif; ?>
 
           <form method="post" action="/settings/integrations/disconnect" class="mt-4"
-                onsubmit="return confirm('Switch <?= e($i['name']) ?> off? Its settings are kept.')">
+                data-confirm-submit="Switch <?= e($i['name']) ?> off? Its settings are kept." data-confirm-danger>
             <?= csrf_field() ?>
             <input type="hidden" name="provider" value="<?= e((string) $i['provider']) ?>">
             <button class="btn-secondary w-full justify-center">Switch off</button>

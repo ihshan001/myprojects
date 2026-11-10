@@ -6038,6 +6038,65 @@ Assert::test('registering a patient leaves them out of the queue', function (): 
 });
 
 
+/* ------------------------------------------------------------------ */
+/* 53. controls that actually run under the app's own CSP               */
+/* ------------------------------------------------------------------ */
+
+Assert::test('no inline event handlers anywhere: the CSP blocks them silently', function (): void {
+    // `script-src 'self'` blocks inline on*= attributes exactly as it blocks
+    // inline <script>. Nothing logs an error, so a control written that way
+    // simply does nothing, forever, and looks fine in review.
+    $offenders = [];
+    $dir = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($dir as $file) {
+        if (!$file->isFile() || $file->getExtension() !== 'php') {
+            continue;
+        }
+        $src = (string) file_get_contents($file->getPathname());
+        if (preg_match('/\son(?:change|submit|click|input|focus|blur|load)\s*=/i', $src)) {
+            $offenders[] = str_replace(QP_ROOT . '/', '', $file->getPathname());
+        }
+    }
+    Assert::true(
+        $offenders === [],
+        'no view uses an inline handler' . ($offenders === [] ? '' : ': ' . implode(', ', $offenders))
+    );
+});
+
+Assert::test('destructive actions ask in-page, not through the browser', function (): void {
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+
+    // A native confirm() inside the preview iframe is prefaced by "an embedded
+    // page at <host> says". That reads like a phishing prompt, cannot be
+    // styled, and cannot be driven by a test.
+    Assert::true(strpos($js, 'window.confirm') === false, 'no window.confirm');
+    Assert::true(strpos($js, 'window.prompt') === false, 'no window.prompt');
+    Assert::true(strpos($js, 'qp-dialog-host') !== false, 'the in-page dialog exists');
+
+    // Moving the guards to data- attributes only helps if something listens.
+    // Without these, the conversion would just relocate the silence.
+    Assert::true(strpos($js, 'data-confirm-submit') !== false, 'confirm-on-submit is handled');
+    Assert::true(strpos($js, 'data-submit-on-change') !== false, 'submit-on-change is handled');
+    Assert::true(strpos($js, 'data-print') !== false, 'print buttons are handled');
+    Assert::true(strpos($js, 'data-insert-placeholder') !== false, 'template placeholders are handled');
+});
+
+Assert::test('the guarded forms are really guarded', function (): void {
+    $guarded = 0;
+    $dir = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($dir as $file) {
+        if (!$file->isFile() || $file->getExtension() !== 'php') {
+            continue;
+        }
+        $guarded += preg_match_all('/data-confirm-submit=/', (string) file_get_contents($file->getPathname()));
+    }
+    // The point of the number: every one of these used to be an inline
+    // onsubmit that never fired, so suspending a clinic or deleting a room
+    // happened with no confirmation at all.
+    Assert::true($guarded >= 20, "destructive forms still ask first ({$guarded} guarded)");
+});
+
+
 $code = Assert::summary();
 Database::cleanup($dbPath);
 echo "\n";

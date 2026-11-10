@@ -316,7 +316,7 @@
         <details class="mt-3">
           <summary class="cursor-pointer text-xs font-semibold text-rose-600 hover:underline">Close this clinic…</summary>
           <form method="post" action="/settings/closure" class="mt-3 space-y-2"
-                onsubmit="return confirm('Sign out every staff member and close this clinic? There is a 90-day window to reverse it.')">
+                data-confirm-submit="Sign out every staff member and close this clinic? There is a 90-day window to reverse it." data-confirm-danger>
             <?= csrf_field() ?>
             <label class="label" for="confirm_name">Type <b><?= e($clinicRecord['name']) ?></b> to confirm</label>
             <input class="input" id="confirm_name" name="confirm_name" required autocomplete="off"

@@ -124,7 +124,7 @@ $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
             </button>
           </form>
           <?php if ($kioskKey !== null): ?>
-            <form method="post" action="/display/kiosk/off" onsubmit="return confirm('Switch the kiosk off? Any tablet using it stops issuing tokens.');">
+            <form method="post" action="/display/kiosk/off" data-confirm-submit="Switch the kiosk off? Any tablet using it stops issuing tokens." data-confirm-danger>
               <?= csrf_field() ?>
               <button class="rounded border border-white/15 px-2.5 py-1 text-[11px] text-slate-400 hover:text-white">Switch off</button>
             </form>
@@ -153,7 +153,7 @@ $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
         Voice announcements: on
       </button>
       <?php if ($canRotate): ?>
-        <form method="post" action="/display/rotate" onsubmit="return confirm('Rotate the display key? Every screen using the old link stops updating.')">
+        <form method="post" action="/display/rotate" data-confirm-submit="Rotate the display key? Every screen using the old link stops updating." data-confirm-danger>
           <?= csrf_field() ?>
           <button class="rounded border border-white/15 px-2 py-1 text-slate-400 hover:text-white">Rotate key</button>
         </form>

@@ -93,7 +93,7 @@
                   <button class="btn-secondary btn-sm" type="submit"><?= $isActive ? 'Turn off' : 'Turn on' ?></button>
                 </form>
                 <form method="post" action="/queues/priority-rules/<?= (int) $rule['id'] ?>/delete"
-                      onsubmit="return confirm('Delete this rule? Patients it already reordered keep their recorded reason.')">
+                      data-confirm-submit="Delete this rule? Patients it already reordered keep their recorded reason." data-confirm-danger>
                   <?= csrf_field() ?>
                   <button class="btn-secondary btn-sm text-red-700" type="submit">Delete</button>
                 </form>

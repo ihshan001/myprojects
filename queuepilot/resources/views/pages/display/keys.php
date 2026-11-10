@@ -160,7 +160,7 @@
           <?php else: ?>
             <span class="badge-emerald">Live</span>
             <form method="post" action="/display/keys/<?= (int) $k['id'] ?>/revoke"
-                  onsubmit="return confirm('Revoke this screen? Only this display stops updating.')">
+                  data-confirm-submit="Revoke this screen? Only this display stops updating." data-confirm-danger>
               <?= csrf_field() ?>
               <button class="act-stop">Revoke</button>
             </form>

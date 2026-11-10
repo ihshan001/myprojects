@@ -137,7 +137,7 @@ if ($u) {
             <?= csrf_field() ?>
             <input type="hidden" name="back" value="<?= e($path ?? '/app') ?>">
             <label class="sr-only" for="branch-switch">Working in branch</label>
-            <select id="branch-switch" name="clinic_id" onchange="this.form.submit()"
+            <select id="branch-switch" name="clinic_id" data-submit-on-change
                     class="w-full rounded-md border border-white/15 bg-white/5 px-2 py-1 text-[11px] text-white
                            focus:border-teal-400 focus:outline-none">
               <?php foreach ($choices as $b): ?>
