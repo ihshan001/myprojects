@@ -6177,6 +6177,122 @@ Assert::test('the controller reads the tab from the query string', function (): 
 });
 
 
+/* ------------------------------------------------------------------ */
+/* 56. priority rules: ranked order, and fever                          */
+/* ------------------------------------------------------------------ */
+
+/** Two rules for clinic 200: a strong one listed second. */
+function seedRankedRules(int $clinicId): void
+{
+    Db::run(
+        'INSERT INTO priority_rules (clinic_id, name, effect, reason, is_active, sort_order, created_at)
+         VALUES (?,?,?,?,1,?,?)',
+        [$clinicId, 'Listed first, weaker', 2, 'weaker but first in the list', 1, Db::now()]
+    );
+    Db::run(
+        'INSERT INTO priority_rules (clinic_id, name, effect, reason, is_active, sort_order, created_at)
+         VALUES (?,?,?,?,1,?,?)',
+        [$clinicId, 'Listed second, stronger', 8, 'stronger but second in the list', 2, Db::now()]
+    );
+}
+
+Assert::test('the first matching rule on the list wins, not the biggest number', function (): void {
+    seedTenant(200, 'ranked', 'Ranked Clinic');
+    seedRankedRules(200);
+
+    $svc = new App\Services\PriorityRuleService();
+    $picked = $svc->evaluate(200, ['source' => 'walkin', 'kind' => 'consultation', 'hour' => 10]);
+
+    // Under the old "highest effect wins" the stronger rule took it. Now the
+    // manager's list is the truth, so the one they put first does.
+    Assert::same(2, (int) $picked['priority'], 'the rule ranked first decides');
+    Assert::same('Listed first, weaker', $picked['rule_name'], 'and it is named on the entry');
+});
+
+Assert::test('reordering the list reorders who is called next', function (): void {
+    $svc = new App\Services\PriorityRuleService();
+
+    // Swap them. This is what dragging a row up does.
+    Db::run('UPDATE priority_rules SET sort_order = 2 WHERE clinic_id = 200 AND name = ?', ['Listed first, weaker']);
+    Db::run('UPDATE priority_rules SET sort_order = 1 WHERE clinic_id = 200 AND name = ?', ['Listed second, stronger']);
+
+    $picked = $svc->evaluate(200, ['source' => 'walkin', 'kind' => 'consultation', 'hour' => 10]);
+    Assert::same(8, (int) $picked['priority'], 'the newly-first rule now decides');
+    Assert::same('Listed second, stronger', $picked['rule_name'], 'named');
+
+    // Put it back, so the two tests are independent of run order.
+    Db::run('UPDATE priority_rules SET sort_order = 1 WHERE clinic_id = 200 AND name = ?', ['Listed first, weaker']);
+    Db::run('UPDATE priority_rules SET sort_order = 2 WHERE clinic_id = 200 AND name = ?', ['Listed second, stronger']);
+});
+
+Assert::test('an unmeasured temperature never matches a fever rule', function (): void {
+    seedTenant(201, 'fever', 'Fever Clinic');
+    Db::run(
+        'INSERT INTO priority_rules (clinic_id, name, effect, reason, min_temp_x10, is_active, sort_order, created_at)
+         VALUES (?,?,?,?,?,1,1,?)',
+        [201, 'Fever above 39', 9, 'high fever', 390, Db::now()]
+    );
+    $svc = new App\Services\PriorityRuleService();
+
+    // 39.7 °C — measured, and above the threshold.
+    $hot = $svc->evaluate(201, ['source' => 'walkin', 'kind' => 'consultation', 'hour' => 10, 'temp_c_x10' => 397]);
+    Assert::same(9, (int) $hot['priority'], 'a measured fever is caught');
+
+    // 38.0 °C — measured, and below it.
+    $warm = $svc->evaluate(201, ['source' => 'walkin', 'kind' => 'consultation', 'hour' => 10, 'temp_c_x10' => 380]);
+    Assert::same(0, (int) $warm['priority'], 'a measured non-fever is not');
+
+    // Not measured at all. This is the one that matters: null is not 0, and
+    // treating it as afebrile would hand a fever rule everyone untriaged.
+    $unknown = $svc->evaluate(201, ['source' => 'walkin', 'kind' => 'consultation', 'hour' => 10]);
+    Assert::same(0, (int) $unknown['priority'], 'an unmeasured patient is not an afebrile one');
+    Assert::same(null, $unknown['rule_id'], 'and no rule is recorded against them');
+});
+
+Assert::test('a fever threshold is exact at the boundary', function (): void {
+    $svc = new App\Services\PriorityRuleService();
+    // 39.0 on the nose is "above 39" for a rule with min 390, because the
+    // reading is stored in tenths and compared as an integer. A REAL column
+    // would leave 39.0 to floating point.
+    $at = $svc->evaluate(201, ['source' => 'walkin', 'kind' => 'consultation', 'hour' => 10, 'temp_c_x10' => 390]);
+    Assert::same(9, (int) $at['priority'], '39.0 matches a 39.0 threshold');
+    $under = $svc->evaluate(201, ['source' => 'walkin', 'kind' => 'consultation', 'hour' => 10, 'temp_c_x10' => 389]);
+    Assert::same(0, (int) $under['priority'], '38.9 does not');
+});
+
+Assert::test('the migration numbers old rules the way the old engine did', function (): void {
+    // The backfill ranks by `effect DESC, id ASC`, which is exactly how the
+    // engine used to evaluate. If these ever disagree, upgrading a live
+    // clinic silently changes who gets called next.
+    seedTenant(202, 'rankcheck', 'Rank Check Clinic');
+    $weakId = Db::insert(
+        'INSERT INTO priority_rules (clinic_id, name, effect, reason, is_active, sort_order, created_at)
+         VALUES (202,?,?,?,1,?,?)',
+        ['Weak', 1, 'w', 0, Db::now()]
+    );
+    Db::insert(
+        'INSERT INTO priority_rules (clinic_id, name, effect, reason, is_active, sort_order, created_at)
+         VALUES (202,?,?,?,1,?,?)',
+        ['Strong', 7, 's', 0, Db::now()]
+    );
+
+    // Reproduce the backfill for this pair and check it ranks Strong first.
+    $ranks = Db::all(
+        'SELECT id, (SELECT COUNT(*) FROM priority_rules AS peer
+                      WHERE peer.clinic_id = priority_rules.clinic_id
+                        AND (peer.effect > priority_rules.effect
+                             OR (peer.effect = priority_rules.effect AND peer.id <= priority_rules.id))) AS rank
+           FROM priority_rules WHERE clinic_id = 202'
+    );
+    $byId = [];
+    foreach ($ranks as $r) {
+        $byId[(int) $r['id']] = (int) $r['rank'];
+    }
+    Assert::same(2, $byId[$weakId], 'the weaker rule takes the later slot');
+    Assert::same(1, min($byId), 'and ranking is 1-based');
+});
+
+
 $code = Assert::summary();
 Database::cleanup($dbPath);
 echo "\n";

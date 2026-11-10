@@ -54,7 +54,10 @@ final class PriorityRuleService
         if ($activeOnly) {
             $sql .= ' AND r.is_active = 1';
         }
-        $sql .= ' ORDER BY r.effect DESC, r.id ASC';
+        // The clinic's own ranked list. It used to be `effect DESC`, which
+        // meant the only way to say "this policy outranks that one" was to
+        // inflate a number until it won. The list is now the truth.
+        $sql .= ' ORDER BY r.sort_order ASC, r.id ASC';
 
         return Db::all($sql, [$clinicId]);
     }
@@ -81,6 +84,24 @@ final class PriorityRuleService
         $effect = filter_var($in['effect'] ?? null, FILTER_VALIDATE_INT);
         if ($effect === false || $effect === 0 || $effect < -5 || $effect > 9) {
             $errors[] = 'Choose a priority between -5 and 9, but not 0 — a rule that changes nothing is a comment, not a rule.';
+        }
+
+        // 34.0–43.0 °C. Outside that range a patient is not in a waiting
+        // room, and the number is a typo that would silently reorder people.
+        foreach (['min_temp_x10' => 'Minimum', 'max_temp_x10' => 'Maximum'] as $field => $label) {
+            $raw = $in[$field] ?? null;
+            if ($raw === null || $raw === '') {
+                continue;
+            }
+            $tenths = filter_var($raw, FILTER_VALIDATE_INT);
+            if ($tenths === false || $tenths < 340 || $tenths > 430) {
+                $errors[] = $label . ' temperature must be between 34.0 and 43.0 °C.';
+            }
+        }
+        $minT = $this->nullableInt($in['min_temp_x10'] ?? null);
+        $maxT = $this->nullableInt($in['max_temp_x10'] ?? null);
+        if ($minT !== null && $maxT !== null && $minT >= $maxT) {
+            $errors[] = 'The temperature window must start below where it ends.';
         }
 
         $source = ($in['source'] ?? '') !== '' ? (string) $in['source'] : null;
@@ -210,10 +231,17 @@ final class PriorityRuleService
         $kind = $ctx['kind'] ?? null;
         $doctorId = isset($ctx['doctor_id']) ? (int) $ctx['doctor_id'] : null;
         $queueId = isset($ctx['queue_id']) ? (int) $ctx['queue_id'] : null;
+        // Tenths of a degree. Null means "not measured", which is not the
+        // same as "afebrile" — an unmeasured patient must never be caught by
+        // a fever rule, in either direction.
+        $temp = isset($ctx['temp_c_x10']) && $ctx['temp_c_x10'] !== null
+            ? (int) $ctx['temp_c_x10']
+            : null;
 
-        // Ordered by effect desc, so the first match is the strongest boost.
-        // A penalty only applies when nothing else matches, which falls out of
-        // the same ordering: boosts are positive and sort first.
+        // The FIRST matching rule in the clinic's ranked list decides. It
+        // used to be "highest effect wins", which is the same thing for a
+        // list nobody has reordered — and different the moment they do,
+        // which is the point of letting them.
         $best = null;
         foreach ($this->rules($clinicId) as $rule) {
             if ($rule['queue_id'] !== null && (int) $rule['queue_id'] !== $queueId) {
@@ -234,6 +262,12 @@ final class PriorityRuleService
             if ($rule['max_age'] !== null && ($age === null || $age > (int) $rule['max_age'])) {
                 continue;
             }
+            if ($rule['min_temp_x10'] !== null && ($temp === null || $temp < (int) $rule['min_temp_x10'])) {
+                continue;
+            }
+            if ($rule['max_temp_x10'] !== null && ($temp === null || $temp > (int) $rule['max_temp_x10'])) {
+                continue;
+            }
             if ($rule['from_hour'] !== null || $rule['to_hour'] !== null) {
                 if ($hour === null) {
                     continue;
@@ -245,9 +279,8 @@ final class PriorityRuleService
                 }
             }
 
-            if ($best === null || (int) $rule['effect'] > (int) $best['effect']) {
-                $best = $rule;
-            }
+            $best = $rule;
+            break;
         }
 
         if ($best === null) {
