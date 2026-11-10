@@ -282,6 +282,9 @@ Router::post('/admin/support/{id}/status', [SupportController::class, 'setStatus
 Router::post('/admin/billing/{id}/verify', [AdminBillingController::class, 'verify'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/admin/billing/{id}/reject', [AdminBillingController::class, 'reject'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::get('/admin/features', [AdminController::class, 'features'], ['auth' => true, 'roles' => ['super_admin']]);
+// The same checks /api/health returns, laid out for a person. Super admin
+// only: the checks name tenants, queue depth and staff.
+Router::get('/admin/monitor', [AdminController::class, 'monitor'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/admin/features/{clinicId}', [AdminController::class, 'saveFeature'], ['auth' => true, 'roles' => ['super_admin'], 'csrf' => false]);
 Router::post('/admin/features/{clinicId}/unset', [AdminController::class, 'unsetFeature'], ['auth' => true, 'roles' => ['super_admin'], 'csrf' => false]);
 

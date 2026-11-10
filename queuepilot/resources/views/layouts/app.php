@@ -4,8 +4,11 @@ $u = $user ?? null;
 $cl = $clinic ?? null;
 $current = $path ?? '/';
 $isActive = static function (string $prefix) use ($current): string {
-    if ($prefix === '/app') {
-        return $current === '/app' ? 'nav-item-active' : '';
+    // An exact match for a bare section root. Prefix matching would keep
+    // 'Overview' lit on every page beneath it, so the nav could never tell
+    // you where you actually were.
+    if ($prefix === '/app' || $prefix === '/admin') {
+        return $current === $prefix ? 'nav-item-active' : '';
     }
     return str_starts_with($current, $prefix) ? 'nav-item-active' : '';
 };
@@ -19,6 +22,7 @@ if ($u) {
         $navSections = [
             'Platform' => [
                 ['/admin', 'grid', 'Overview', $isActive('/admin')],
+                ['/admin/monitor', 'heart', 'Platform health', $isActive('/admin/monitor')],
                 ['/admin/clinics', 'building', 'Clinics', $isActive('/admin/clinics')],
                 ['/admin/plans', 'card', 'Plans & billing', $isActive('/admin/plans')],
                 ['/admin/billing', 'check-circle', 'Payment verification', $isActive('/admin/billing')],

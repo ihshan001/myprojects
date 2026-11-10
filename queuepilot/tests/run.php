@@ -5859,6 +5859,62 @@ Assert::test('one clinic cannot measure another clinic\'s waits', function () us
 });
 
 
+/* ------------------------------------------------------------------ */
+/* 50. platform health, readable by a person                           */
+/* ------------------------------------------------------------------ */
+
+Assert::test('the platform health page has a route and is super-admin only', function (): void {
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    Assert::true(strpos($routes, "'/admin/monitor'") !== false, 'the route exists');
+    Assert::true(
+        (bool) preg_match("~'/admin/monitor'.*?'roles'\s*=>\s*\['super_admin'\]~s", $routes),
+        'it is gated to the platform administrator'
+    );
+    Assert::true(is_file(QP_ROOT . '/resources/views/pages/admin/monitor.php'), 'the view exists');
+});
+
+Assert::test('the health page renders every check the endpoint returns', function (): void {
+    $src = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/AdminController.php');
+    Assert::true(strpos($src, 'public function monitor()') !== false, 'the action exists');
+    Assert::true(strpos($src, "view('admin/monitor'") !== false, 'it renders the page');
+
+    // The whole point of the page is that it shows the probe's checks to a
+    // human. Reading them from a different service would make the page and
+    // the endpoint disagree about whether the platform is healthy.
+    Assert::true(strpos($src, 'MonitorService') !== false, 'it uses the same service as /api/health');
+});
+
+Assert::test('a health page never paints a serious incident as healthy', function (): void {
+    // Two vocabularies meet on this page: checks say ok/warning/critical,
+    // incidents say minor/major/critical. A missing key falling through to
+    // the 'ok' green would show 'major' as healthy.
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/admin/monitor.php');
+    foreach (['critical', 'warning', 'major', 'minor', 'ok'] as $severity) {
+        Assert::true(strpos($view, "'" . $severity . "'") !== false, $severity . ' has its own colour');
+    }
+
+    // And every severity the incident model allows is covered.
+    foreach (array_keys(App\Services\IncidentService::SEVERITIES) as $severity) {
+        Assert::true(
+            strpos($view, "'" . $severity . "' =>") !== false || strpos($view, "'" . $severity . "'    =>") !== false,
+            'incident severity ' . $severity . ' is mapped'
+        );
+    }
+});
+
+Assert::test('the nav does not leave Overview lit on every admin page', function (): void {
+    $layout = (string) file_get_contents(QP_ROOT . '/resources/views/layouts/app.php');
+
+    // Prefix matching made /admin/monitor light up /admin too, so the nav
+    // could never tell a platform operator where they were.
+    Assert::true(
+        (bool) preg_match('~\$prefix === \'/app\' \|\| \$prefix === \'/admin\'~', $layout),
+        'a bare section root matches exactly'
+    );
+    Assert::true(strpos($layout, "'/admin/monitor'") !== false, 'and health is in the nav');
+});
+
+
 $code = Assert::summary();
 Database::cleanup($dbPath);
 echo "\n";
