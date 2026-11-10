@@ -133,6 +133,16 @@ final class ClinicService
                 [$clinicId]
             );
 
+            // The signup page promises a waiting-room display key, and until
+            // this row exists there is nothing for a patient to open: the
+            // board, the position screen and the phone board are all keyed off
+            // it. Creating it on demand the first time somebody asked left a
+            // new clinic with a promise and no board.
+            Db::insert(
+                "INSERT INTO settings (scope, owner_id, key_name, value) VALUES ('clinic', ?, 'display_token', ?)",
+                [$clinicId, Str::urlToken(20)]
+            );
+
             return ['clinic_id' => $clinicId, 'slug' => $slug, 'owner_email' => mb_strtolower($data['email'])];
         });
     }

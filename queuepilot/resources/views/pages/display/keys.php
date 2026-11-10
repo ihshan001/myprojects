@@ -32,11 +32,66 @@
 <?php endif; ?>
 
 <?php if ($legacyKey !== ''): ?>
-  <div class="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
-    <p class="text-sm font-semibold text-amber-900">This clinic still has one shared key</p>
-    <p class="mt-1 text-xs text-amber-800">
-      It was issued before screens could be named, so it cannot be revoked individually. Issue a named key
-      below, point the screen at it, then rotate the shared key to retire it.
+  <?php
+  // Every new clinic starts on this key, so until a named one exists this is
+  // the only link that opens the board. Saying "issue a named key" and nothing
+  // else left the clinic with a board it could not find the address of.
+  //
+  // Absolute, not a path: these get printed on a counter card and pasted into
+  // a QR generator, where "/board/abc" is not something anyone can use.
+  $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+  $host = $_SERVER['HTTP_HOST'] ?? ('localhost:' . ($_SERVER['SERVER_PORT'] ?? '8080'));
+  $sharedLinks = [
+    ['Waiting-room board', $scheme . '://' . $host . url('board/' . $legacyKey),
+      'Open this on the TV. Tokens and rooms, no names.'],
+    ['Patient tracking', $scheme . '://' . $host . url('board/' . $legacyKey . '/position'),
+      'Print it on the token slip. A patient taps their number here.'],
+    ['Phone board', $scheme . '://' . $host . url('live/' . $legacyKey),
+      'A leaner board for a phone in the waiting room.'],
+  ];
+  ?>
+  <div class="card card-pad mb-4 border-amber-200 bg-amber-50/60">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 class="text-sm font-bold text-amber-900">Your clinic-wide links</h2>
+        <p class="mt-1 max-w-prose text-xs leading-relaxed text-amber-800">
+          These work right now and need no sign-in. Anyone with the link sees token numbers and room names —
+          never a patient's name. This is the address to print on the counter card or put in the QR code.
+        </p>
+      </div>
+      <span class="rounded-full border border-amber-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-800">
+        Shared key
+      </span>
+    </div>
+
+    <div class="mt-3 space-y-2">
+      <?php foreach ($sharedLinks as [$label, $href, $hint]): ?>
+        <div class="rounded-lg border border-amber-200 bg-white p-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs font-semibold text-slate-800"><?= e($label) ?></p>
+            <div class="flex shrink-0 items-center gap-1">
+              <a href="<?= e($href) ?>" target="_blank" rel="noopener"
+                 class="rounded px-1.5 py-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                 aria-label="Open <?= e($label) ?>">
+                <svg class="h-3.5 w-3.5"><use href="#i-eye"/></svg>
+              </a>
+              <button type="button"
+                      class="rounded px-1.5 py-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                      data-copy="<?= e($href) ?>"
+                      aria-label="Copy the <?= e($label) ?> link">
+                <svg class="h-3.5 w-3.5"><use href="#i-copy"/></svg>
+              </button>
+            </div>
+          </div>
+          <p class="mt-1 font-mono text-[11px] leading-snug text-slate-600"><?= e($href) ?></p>
+          <p class="mt-1 text-[11px] text-slate-400"><?= e($hint) ?></p>
+        </div>
+      <?php endforeach; ?>
+    </div>
+
+    <p class="mt-3 border-t border-amber-200 pt-3 text-xs leading-relaxed text-amber-800">
+      One key for the whole clinic cannot be revoked on its own — anyone who photographed it keeps it.
+      Issue a named key below for each screen, then rotate this one to retire it.
     </p>
   </div>
 <?php endif; ?>

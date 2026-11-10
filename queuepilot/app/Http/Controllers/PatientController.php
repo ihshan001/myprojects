@@ -45,6 +45,59 @@ final class PatientController
         ]);
     }
 
+    /**
+     * Add someone to the register without putting them in today's queue.
+     *
+     * The token desk (POST /queue/new) still does both in one step, which is
+     * what a walk-in wants. This is the other half: a clinic that takes a
+     * booking over the phone, or keeps a register ahead of the day, had no
+     * way to record a person without also issuing them a token now.
+     */
+    public function store(): void
+    {
+        $clinicId = $this->clinicId();
+
+        $name = trim(Request::string('full_name'));
+        $phone = trim(Request::string('phone'));
+
+        if (mb_strlen($name) < 2) {
+            flash('error', 'Enter the patient name (at least 2 characters).');
+            back('/patients');
+            return;
+        }
+        if ($phone !== '' && strlen(preg_replace('/\D/', '', $phone) ?? '') < 9) {
+            flash('error', 'That phone number looks too short. Use 07X XXX XXXX or leave it blank.');
+            back('/patients');
+            return;
+        }
+
+        $service = new PatientService();
+
+        // A phone that is already on the register returns that person rather
+        // than creating a second record under a slightly different spelling.
+        $existing = $phone !== '' ? $service->findByPhone($clinicId, $phone) : null;
+        if ($existing !== null) {
+            flash('info', $existing['full_name'] . ' is already on the register under this number.');
+            back('/patients?q=' . urlencode($phone));
+            return;
+        }
+
+        $patient = $service->findOrCreate($clinicId, [
+            'full_name' => $name,
+            'phone' => $phone,
+            'gender' => Request::string('gender'),
+            'birth_year' => Request::int('birth_year'),
+            'notes' => Request::string('notes'),
+        ]);
+
+        (new AuditService())->log($clinicId, 'patient.created', 'patient', (int) $patient['id'], [
+            'name' => $patient['full_name'],
+        ]);
+
+        flash('success', $patient['full_name'] . ' added to the register.');
+        back('/patients?q=' . urlencode($patient['full_name']));
+    }
+
     public function show(string $id): void
     {
         $clinicId = $this->clinicId();

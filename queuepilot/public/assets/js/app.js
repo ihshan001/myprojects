@@ -821,3 +821,32 @@
     }
   });
 })();
+
+/* --------------------------------------------- patients: add-to-register */
+/* A plain toggle, kept here rather than inline so the CSP does not need
+   'unsafe-inline'. No JS means no panel — so the panel starts hidden only
+   when JS is present, and the page stays usable without it. */
+(function () {
+  var panel = document.getElementById('add-patient-panel');
+  if (!panel) return;
+
+  function open() {
+    panel.classList.remove('hidden');
+    var name = panel.querySelector('#ap-name');
+    if (name) name.focus();
+  }
+  function close() {
+    panel.classList.add('hidden');
+    var form = panel.querySelector('form');
+    if (form) form.reset();
+  }
+
+  document.addEventListener('click', function (e) {
+    if (!e.target || !e.target.closest) return;
+    if (e.target.closest('[data-open-add-patient]')) { open(); return; }
+    if (e.target.closest('[data-close-add-patient]')) { close(); return; }
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !panel.classList.contains('hidden')) close();
+  });
+})();

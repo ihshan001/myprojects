@@ -122,6 +122,7 @@ Router::post('/display/kiosk/off', [DisplayController::class, 'kioskRevoke'], ['
 
 /* ------------------------------------------------------- patients, appts */
 Router::get('/patients', [PatientController::class, 'index'], ['auth' => true, 'ability' => 'patient.manage']);
+Router::post('/patients', [PatientController::class, 'store'], ['auth' => true, 'ability' => 'patient.manage']);
 Router::get('/patients/{id}', [PatientController::class, 'show'], ['auth' => true, 'ability' => 'patient.manage']);
 Router::post('/patients/{id}', [PatientController::class, 'update'], ['auth' => true, 'ability' => 'patient.manage']);
 

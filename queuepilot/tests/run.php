@@ -5964,6 +5964,80 @@ Assert::test('the coming-up list names the doctor, because token series repeat',
 });
 
 
+/* ------------------------------------------------------------------ */
+/* 52. day one: a brand-new clinic can actually open                    */
+/* ------------------------------------------------------------------ */
+
+Assert::test('signup mints the waiting-room key it promises', function (): void {
+    // The signup page lists "Waiting-room display key generated" among the
+    // things it sets up. For a while it set up nothing: the key was created
+    // on first use, so a new clinic had a patient tracking screen with no
+    // address until somebody happened to visit the screens page.
+    $result = (new App\Services\ClinicService())->register([
+        'name' => 'Day One Clinic',
+        'owner_name' => 'Dr. Day One',
+        'email' => 'dayone-' . uniqid() . '@example.lk',
+        'phone' => '+94 77 111 0001',
+        'city' => 'Negombo',
+        'district' => 'Gampaha',
+        'password' => 'DayOne#2026',
+    ], 'starter');
+
+    $clinicId = (int) $result['clinic_id'];
+    Assert::true($clinicId > 0, 'the clinic is created');
+
+    $key = Db::scalar(
+        "SELECT value FROM settings WHERE scope='clinic' AND owner_id=? AND key_name='display_token'",
+        [$clinicId]
+    );
+    Assert::true(is_string($key) && $key !== '', 'and it has a display key on day one');
+
+    // A key that opens nothing is not a key. The lookup the board performs is
+    // the same one, so resolve it the way DisplayController does.
+    $byKey = (new App\Services\DisplayKeyService())->resolve((string) $key);
+    Assert::true($byKey !== null, 'the key resolves to a clinic');
+    Assert::same($clinicId, (int) ($byKey['clinic_id'] ?? 0), 'and it resolves to this one');
+});
+
+Assert::test('a clinic can register a patient without queueing them', function (): void {
+    // "Register patients" and "Issue tokens" are separate things in the spec.
+    // The token desk does both at once, which is right for a walk-in and wrong
+    // for a booking taken over the phone.
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    Assert::true(
+        (bool) preg_match("~Router::post\('/patients'.*?PatientController::class,\s*'store'~s", $routes),
+        'POST /patients is routed'
+    );
+
+    $src = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/PatientController.php');
+    Assert::true(strpos($src, 'public function store()') !== false, 'the action exists');
+
+    // It must not mint a token: registering and queueing are different acts.
+    Assert::true(
+        strpos($src, 'issueToken') === false,
+        'registering does not also issue a token'
+    );
+});
+
+Assert::test('registering a patient leaves them out of the queue', function (): void {
+    seedTenant(120, 'dayone-two', 'Day One Two');
+    $before = (int) Db::scalar('SELECT COUNT(*) FROM queue_entries WHERE clinic_id = 120');
+    Assert::same(0, $before, 'starting from an empty queue');
+
+    $patient = (new App\Services\PatientService())->findOrCreate(120, [
+        'full_name' => 'Registered Not Queued',
+        'phone' => '+94 77 222 0099',
+    ]);
+    Assert::true((int) $patient['id'] > 0, 'the patient is created');
+
+    $after = (int) Db::scalar('SELECT COUNT(*) FROM queue_entries WHERE clinic_id = 120');
+    Assert::same(0, $after, 'and no token was issued for them');
+
+    $onRegister = (int) Db::scalar('SELECT COUNT(*) FROM patients WHERE clinic_id = 120');
+    Assert::same(1, $onRegister, 'they are on the register though');
+});
+
+
 $code = Assert::summary();
 Database::cleanup($dbPath);
 echo "\n";
