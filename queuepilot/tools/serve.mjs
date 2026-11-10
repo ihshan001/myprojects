@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { PHP } from '@php-wasm/universal';
 import { loadNodeRuntime, useHostFilesystem } from '@php-wasm/node';
+import { expandPhpKeys } from './form-parser.mjs';
 
 const ROOT = path.resolve(process.cwd());
 const PORT = Number(process.env.PORT || 8080);
@@ -101,7 +102,7 @@ const server = http.createServer(async (req, res) => {
     let rawBody = '';
 
     if (contentType === 'application/x-www-form-urlencoded') {
-      post = Object.fromEntries(new URLSearchParams(raw.toString('utf8')));
+      post = expandPhpKeys([...new URLSearchParams(raw.toString('utf8')).entries()]);
     } else if (contentType === 'application/json') {
       rawBody = raw.toString('utf8');
       try {

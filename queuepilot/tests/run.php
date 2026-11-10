@@ -1354,20 +1354,24 @@ Assert::test('doctor leave blocks both the form and the POST', function (): void
     $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1');
     $service = new App\Services\DoctorService();
 
-    $added = $service->addLeave(1, $doctorId, '2026-12-01', '2026-12-03', 'Conference', null);
+    // Deliberately not December 2026: relative dates like 'next tuesday
+    // +14 days' drift forward every year and used to land inside this
+    // window, which made an unrelated slot test fail for no visible
+    // reason. A fixed date far past any relative window stays put.
+    $added = $service->addLeave(1, $doctorId, '2027-03-02', '2027-03-04', 'Conference', null);
     Assert::true($added['ok'], $added['error'] ?? '');
 
-    Assert::true($service->isOnLeave(1, $doctorId, '2026-12-01'), 'first day covered');
-    Assert::true($service->isOnLeave(1, $doctorId, '2026-12-02'), 'middle day covered');
-    Assert::true($service->isOnLeave(1, $doctorId, '2026-12-03'), 'last day covered (inclusive)');
-    Assert::false($service->isOnLeave(1, $doctorId, '2026-12-04'), 'day after is free');
-    Assert::false($service->isOnLeave(1, $doctorId, '2026-11-30'), 'day before is free');
+    Assert::true($service->isOnLeave(1, $doctorId, '2027-03-02'), 'first day covered');
+    Assert::true($service->isOnLeave(1, $doctorId, '2027-03-03'), 'middle day covered');
+    Assert::true($service->isOnLeave(1, $doctorId, '2027-03-04'), 'last day covered (inclusive)');
+    Assert::false($service->isOnLeave(1, $doctorId, '2027-03-05'), 'day after is free');
+    Assert::false($service->isOnLeave(1, $doctorId, '2027-03-01'), 'day before is free');
 
     // Another clinic's doctor must never be affected.
     $otherDoctor = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 2');
-    Assert::false($service->isOnLeave(2, $otherDoctor, '2026-12-02'), 'tenant isolation');
+    Assert::false($service->isOnLeave(2, $otherDoctor, '2027-03-03'), 'tenant isolation');
 
-    $bookable = $service->bookable(1, '2026-12-02');
+    $bookable = $service->bookable(1, '2027-03-03');
     $onLeave = array_values(array_filter($bookable, static fn (array $d): bool => (int) $d['id'] === $doctorId));
     Assert::true($onLeave !== [] && $onLeave[0]['on_leave'] === true, 'doctor flagged in bookable list');
 });
@@ -2009,12 +2013,24 @@ Assert::test('a booked slot disappears from the list', function (): void {
     $clinicId = 1;
     $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1 LIMIT 1');
     $date = date('Y-m-d', strtotime('next tuesday +14 days'));
+
+    // Some leave fixtures are pinned to fixed calendar dates, and a relative
+    // date like this one eventually lands on one of them — which is exactly
+    // what happened: 'next tuesday +14 days' reached 2026-12-01, inside a
+    // leave window, and the doctor correctly had no slots. Step forward
+    // until the doctor is actually free rather than hard-coding a date that
+    // only works until the calendar catches up with it.
+    $doctors = new App\Services\DoctorService();
+    for ($guard = 0; $guard < 12 && $doctors->isOnLeave($clinicId, $doctorId, $date); $guard++) {
+        $date = date('Y-m-d', strtotime($date . ' +7 days'));
+    }
+
     (new App\Services\SlotService())->saveHours($clinicId, [
         (int) date('w', strtotime($date)) => '09:00-10:00',
     ]);
 
     $before = (new App\Services\SlotService())->slotsFor($clinicId, $doctorId, $date)['slots'];
-    Assert::true(in_array('09:00', $before, true), '09:00 starts free');
+    Assert::true(in_array('09:00', $before, true), '09:00 starts free on ' . $date . ' (got ' . json_encode($before) . ')');
 
     $patient = Db::insert(
         'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (1, ?, ?, ?, ?)',
@@ -5363,6 +5379,128 @@ Assert::test('the brand type is self-hosted and licensed', function (): void {
 });
 
 /* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/* 47. integrations                                                     */
+/* ------------------------------------------------------------------ */
+
+Assert::test('every catalogued integration is offered with a state', function (): void {
+    $service = new App\Services\IntegrationService();
+    $list = $service->listFor(1);
+
+    Assert::true(count($list) >= 5, 'the full catalogue is listed');
+    foreach ($list as $entry) {
+        Assert::true(array_key_exists('provider', $entry), 'provider named');
+        Assert::true(array_key_exists('connected', $entry), 'connected is always answered');
+        Assert::true(array_key_exists('available', $entry), 'available is always answered');
+        Assert::true(is_bool($entry['available']), 'available is a boolean, never null');
+        Assert::true(is_bool($entry['connected']), 'connected is a boolean, never null');
+    }
+
+    // Available and connected are two separate facts. Collapsing them is how
+    // a clinic files a support ticket about an integration that simply is
+    // not installed on this server. The patient app and webhooks need no
+    // server-side credential, so they are available everywhere; the rest
+    // depend on what this deployment has been given.
+    $byProvider = array_column($list, null, 'provider');
+    Assert::true($byProvider['patient_app']['available'], 'patient app needs no credential');
+    Assert::true($byProvider['webhooks']['available'], 'webhooks need no credential');
+    $providers = array_column($list, 'provider');
+    foreach (['sms_gateway', 'email_transport', 'accounting', 'patient_app', 'webhooks'] as $p) {
+        Assert::true(in_array($p, $providers, true), $p . ' is in the catalogue');
+    }
+});
+
+Assert::test('connecting an unknown integration is refused', function (): void {
+    $service = new App\Services\IntegrationService();
+    Assert::false($service->connect(1, 'not_a_provider', []));
+    Assert::false($service->connect(1, '', []));
+    $rows = Db::all("SELECT provider FROM integrations WHERE clinic_id = 1 AND provider NOT IN
+                     ('sms_gateway','email_transport','accounting','patient_app','webhooks')");
+    Assert::same([], $rows, 'nothing was written for a bogus provider');
+});
+
+Assert::test('only whitelisted config keys are stored, and they are truncated', function (): void {
+    $service = new App\Services\IntegrationService();
+    $service->connect(1, 'webhooks', [
+        'endpoint'      => 'https://hooks.example.com/qp',
+        'signing_secret' => 'should-never-be-stored',
+        'api_key'       => 'should-never-be-stored',
+    ]);
+
+    $row = Db::one("SELECT config FROM integrations WHERE clinic_id = 1 AND provider = 'webhooks'");
+    $config = json_decode((string) $row['config'], true);
+
+    Assert::same(['endpoint' => 'https://hooks.example.com/qp'], $config, 'only the whitelisted field survived');
+    Assert::false(isset($config['signing_secret']), 'a secret cannot be smuggled in');
+    Assert::false(isset($config['api_key']), 'a credential cannot be smuggled in');
+
+    // Sender IDs are capped by the SMS spec (11 chars), not by goodwill.
+    $service->connect(1, 'sms_gateway', ['sender_id' => 'SERENITYCLINIC']);
+    $row = Db::one("SELECT config FROM integrations WHERE clinic_id = 1 AND provider = 'sms_gateway'");
+    $config = json_decode((string) $row['config'], true);
+    Assert::same(11, mb_strlen($config['sender_id']), 'sender id clamped to 11 characters');
+});
+
+Assert::test('disconnecting keeps the settings so reconnecting is one click', function (): void {
+    $service = new App\Services\IntegrationService();
+    $service->connect(1, 'accounting', ['organisation' => 'Serenity-ACC-01']);
+    Assert::same(1, (int) Db::scalar("SELECT COUNT(*) FROM integrations
+                                      WHERE clinic_id = 1 AND provider = 'accounting' AND status = 'connected'"));
+
+    Assert::true($service->disconnect(1, 'accounting'), 'disconnect reports success');
+
+    $row = Db::one("SELECT status, config FROM integrations WHERE clinic_id = 1 AND provider = 'accounting'");
+    Assert::same('off', $row['status'], 'flipped off, not deleted');
+    Assert::same(
+        ['organisation' => 'Serenity-ACC-01'],
+        json_decode((string) $row['config'], true),
+        'the setting survives so it does not have to be retyped'
+    );
+
+    // And reconnecting is idempotent — one row, not two.
+    $service->connect(1, 'accounting', []);
+    Assert::same(1, (int) Db::scalar("SELECT COUNT(*) FROM integrations
+                                      WHERE clinic_id = 1 AND provider = 'accounting'"), 'still one row');
+});
+
+Assert::test('one clinic cannot see or touch another clinic\'s integrations', function (): void {
+    $service = new App\Services\IntegrationService();
+
+    // A real row in clinic 1 first: probing a tenant with no rows proves
+    // nothing, because 'no rows' is also what a leak looks like.
+    $service->connect(1, 'patient_app', []);
+
+    $clinic1 = array_column($service->listFor(1), 'connected', 'provider');
+    Assert::true($clinic1['patient_app'] ?? false, 'clinic 1 turned it on');
+
+    $clinic2 = array_column($service->listFor(2), 'connected', 'provider');
+    Assert::false($clinic2['patient_app'] ?? false, 'clinic 2 does not inherit it');
+    Assert::same(
+        0,
+        (int) Db::scalar("SELECT COUNT(*) FROM integrations WHERE clinic_id = 2 AND provider = 'patient_app'"),
+        'no row leaked into clinic 2'
+    );
+
+    // Disconnecting from the wrong clinic must not reach clinic 1's row.
+    $service->disconnect(2, 'patient_app');
+    Assert::same(
+        'connected',
+        (string) Db::scalar("SELECT status FROM integrations WHERE clinic_id = 1 AND provider = 'patient_app'"),
+        'clinic 1 keeps its connection'
+    );
+});
+
+Assert::test('the connected count only counts live connections', function (): void {
+    $service = new App\Services\IntegrationService();
+    $service->disconnect(1, 'sms_gateway');
+    $before = $service->connectedCount(1);
+    $service->connect(1, 'sms_gateway', ['sender_id' => 'SERENITY']);
+    Assert::same($before + 1, $service->connectedCount(1), 'connecting raises the count');
+    $service->disconnect(1, 'sms_gateway');
+    Assert::same($before, $service->connectedCount(1), 'disconnecting lowers it again');
+});
+
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

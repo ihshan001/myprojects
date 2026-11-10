@@ -2,7 +2,7 @@
   "name": "queuepilot",
   "version": "1.0.0",
   "private": true,
-  "description": "QueuePilot — multi-tenant clinic queue management SaaS (PHP 8.3 + MySQL + Tailwind)",
+  "description": "QueuePilot \u2014 multi-tenant clinic queue management SaaS (PHP 8.3 + MySQL + Tailwind)",
   "type": "module",
   "scripts": {
     "dev": "node tools/serve.mjs",
@@ -13,6 +13,7 @@
     "fresh": "rm -f storage/db/queuepilot.sqlite* && npm run migrate && npm run seed",
     "worker": "node tools/php.mjs tools/queue-worker.php",
     "test": "node tools/php.mjs tests/run.php",
+    "test:tools": "node tests/form-parser.test.mjs",
     "build": "npm run css && node tools/php.mjs tools/healthcheck.php",
     "health": "node tools/php.mjs tools/healthcheck.php",
     "lint": "node tools/lint.mjs",

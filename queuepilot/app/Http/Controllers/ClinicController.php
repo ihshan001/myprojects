@@ -368,6 +368,62 @@ final class ClinicController
         redirect('/settings/templates');
     }
 
+    /**
+     * The integrations a clinic can connect.
+     *
+     * "Configured on this server" and "switched on by this clinic" are
+     * different facts, and the screen shows both: they are different
+     * problems with different fixes, and an owner who cannot tell them
+     * apart will file the wrong support ticket.
+     */
+    public function integrations(): void
+    {
+        $clinicId = $this->clinicId();
+        view('settings/integrations', [
+            'title'        => 'Integrations',
+            'integrations' => (new \App\Services\IntegrationService())->listFor($clinicId),
+        ]);
+    }
+
+    /** Switch an integration on for this clinic. */
+    public function connectIntegration(): void
+    {
+        $clinicId = $this->clinicId();
+        if (!Auth::can('clinic.manage')) {
+            abort(403, 'Only a clinic owner can connect an integration.');
+            return;
+        }
+
+        $provider = Request::string('provider');
+        $service  = new \App\Services\IntegrationService();
+        if (!$service->connect($clinicId, $provider, is_array(Request::input('config')) ? Request::input('config') : [])) {
+            flash('error', 'That integration is not available.');
+            redirect('/settings/integrations');
+            return;
+        }
+
+        (new AuditService())->log($clinicId, 'integration.connected', 'integration', null, ['provider' => $provider]);
+        flash('success', 'Integration connected.');
+        redirect('/settings/integrations');
+    }
+
+    /** Switch an integration off, keeping its settings for later. */
+    public function disconnectIntegration(): void
+    {
+        $clinicId = $this->clinicId();
+        if (!Auth::can('clinic.manage')) {
+            abort(403, 'Only a clinic owner can disconnect an integration.');
+            return;
+        }
+
+        $provider = Request::string('provider');
+        (new \App\Services\IntegrationService())->disconnect($clinicId, $provider);
+
+        (new AuditService())->log($clinicId, 'integration.disconnected', 'integration', null, ['provider' => $provider]);
+        flash('success', 'Integration switched off. Its settings are kept, so reconnecting is one click.');
+        redirect('/settings/integrations');
+    }
+
     public function branches(): void
     {
         $clinicId = $this->clinicId();

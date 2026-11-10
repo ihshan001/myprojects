@@ -258,6 +258,19 @@
 
     <?php if ($canManage): ?>
       <div class="card card-pad">
+        <h2 class="text-sm font-bold text-slate-900">Integrations</h2>
+        <p class="mt-1 text-xs leading-relaxed text-slate-500">
+          Switch on the outside systems this clinic uses — SMS, email, accounting, the patient app
+          and webhooks.
+        </p>
+        <a href="/settings/integrations" class="btn-secondary mt-3 w-full text-xs">
+          Manage integrations →
+        </a>
+      </div>
+    <?php endif; ?>
+
+    <?php if ($canManage): ?>
+      <div class="card card-pad">
         <h2 class="text-sm font-bold text-slate-900">Your data</h2>
         <p class="mt-1 text-xs leading-relaxed text-slate-500">
           Every patient record, token and history entry is yours. Take the whole clinic as one zip of CSV
