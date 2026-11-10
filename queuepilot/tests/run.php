@@ -6293,6 +6293,92 @@ Assert::test('the migration numbers old rules the way the old engine did', funct
 });
 
 
+/* ------------------------------------------------------------------ */
+/* 57. the ranked list is editable, and the change is on record        */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a clinic can reorder its rules, and only its own', function (): void {
+    seedTenant(210, 'reorder', 'Reorder Clinic');
+    $svc = new App\Services\PriorityRuleService();
+    $a = Db::insert(
+        'INSERT INTO priority_rules (clinic_id, name, effect, reason, is_active, sort_order, created_at)
+         VALUES (210,?,?,?,1,?,?)', ['First', 5, 'a', 1, Db::now()]
+    );
+    Db::insert(
+        'INSERT INTO priority_rules (clinic_id, name, effect, reason, is_active, sort_order, created_at)
+         VALUES (210,?,?,?,1,?,?)', ['Second', 5, 'b', 2, Db::now()]
+    );
+
+    // Sanity: the two rules start in the order they were created.
+    Assert::same($a, (int) Db::scalar(
+        'SELECT id FROM priority_rules WHERE clinic_id = 210 ORDER BY sort_order LIMIT 1'
+    ), 'the first one created is first');
+
+    // Reorder with the real ids, reversed.
+    $rows = Db::all('SELECT id FROM priority_rules WHERE clinic_id = 210 ORDER BY sort_order');
+    $order = array_reverse(array_map(static fn ($r) => (int) $r['id'], $rows));
+    $moved = $svc->reorder(210, $order);
+    Assert::same(2, $moved, 'both rules were renumbered');
+
+    $after = Db::all('SELECT id, sort_order FROM priority_rules WHERE clinic_id = 210 ORDER BY sort_order');
+    Assert::same((int) $order[0], (int) $after[0]['id'], 'the new first rule is first');
+    Assert::same(1, (int) $after[0]['sort_order'], 'and numbering restarts at 1');
+
+    // A hand-crafted POST must not renumber another tenant's list.
+    $before = (int) Db::scalar('SELECT sort_order FROM priority_rules WHERE clinic_id = 1 ORDER BY sort_order LIMIT 1');
+    $svc->reorder(210, array_merge($order, [1, 2]));   // ids belonging to clinic 1
+    $afterForeign = (int) Db::scalar('SELECT sort_order FROM priority_rules WHERE clinic_id = 1 ORDER BY sort_order LIMIT 1');
+    Assert::same($before, $afterForeign, "another clinic's order is untouched");
+});
+
+Assert::test('rule changes are written to the rule history', function (): void {
+    $svc = new App\Services\PriorityRuleService();
+
+    $rows = Db::all('SELECT id, name FROM priority_rules WHERE clinic_id = 210 ORDER BY sort_order');
+    $first = $rows[0];
+
+    $svc->record(210, (int) $first['id'], $first['name'], 'updated', null, 'Effect changed from 5 to 6');
+    $history = $svc->history(210);
+
+    Assert::true(count($history) > 0, 'history is readable');
+    Assert::same('updated', $history[0]['action'], 'newest first');
+    Assert::same($first['name'], $history[0]['rule_name'], 'and it names the rule');
+});
+
+Assert::test('creating a rule records what it says, not just that it was made', function (): void {
+    $svc = new App\Services\PriorityRuleService();
+    $before = count($svc->history(210));
+
+    $svc->create(210, [
+        'name' => 'Fever above 39',
+        'effect' => 9,
+        'reason' => 'high fever',
+        'min_temp_x10' => 390,
+    ], null);
+
+    $history = $svc->history(210);
+    Assert::same($before + 1, count($history), 'a history row was written');
+    Assert::same('created', $history[0]['action'], 'recorded as a creation');
+    Assert::same('Fever above 39', $history[0]['rule_name'], 'named');
+    // The payload is kept, so the rule is explainable after it is edited.
+    $after = json_decode((string) $history[0]['after_json'], true);
+    Assert::same(390, (int) ($after['min_temp_x10'] ?? 0), 'with the temperature it was created with');
+});
+
+Assert::test('a new rule appends to the list rather than jumping it', function (): void {
+    $svc = new App\Services\PriorityRuleService();
+    $maxBefore = (int) Db::scalar('SELECT COALESCE(MAX(sort_order),0) FROM priority_rules WHERE clinic_id = 210');
+
+    $id = $svc->create(210, ['name' => 'Appended rule', 'effect' => 1, 'reason' => 'last'], null);
+    $order = (int) Db::scalar('SELECT sort_order FROM priority_rules WHERE id = ?', [$id]);
+
+    Assert::same($maxBefore + 1, $order, 'it lands at the bottom');
+    // Inserting at the top would let an unranked rule silently outrank every
+    // policy the clinic had already written.
+    Assert::true($order > 1, 'and therefore does not outrank anything by default');
+});
+
+
 $code = Assert::summary();
 Database::cleanup($dbPath);
 echo "\n";

@@ -169,11 +169,20 @@ final class PriorityRuleService
             throw new \InvalidArgumentException('That queue does not belong to this clinic.');
         }
 
-        return Db::insert(
+        // New rules append at the bottom of the list, where a manager can see
+        // them and move them up. Inserting at the top would make an unranked
+        // rule quietly outrank every policy the clinic already wrote.
+        $nextOrder = (int) Db::scalar(
+            'SELECT COALESCE(MAX(sort_order), 0) + 1 FROM priority_rules WHERE clinic_id = ?',
+            [$clinicId]
+        );
+
+        $id = Db::insert(
             'INSERT INTO priority_rules
                (clinic_id, queue_id, name, source, kind, doctor_id, min_age, max_age,
-                from_hour, to_hour, effect, reason, is_active, created_by, created_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)',
+                from_hour, to_hour, min_temp_x10, max_temp_x10,
+                effect, reason, is_active, sort_order, created_by, created_at, updated_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?)',
             [
                 $clinicId, $queueId, trim((string) $in['name']),
                 ($in['source'] ?? '') !== '' ? (string) $in['source'] : null,
@@ -183,11 +192,130 @@ final class PriorityRuleService
                 $this->nullableInt($in['max_age'] ?? null),
                 $this->nullableHour($in['from_hour'] ?? null),
                 $this->nullableHour($in['to_hour'] ?? null),
+                $this->nullableInt($in['min_temp_x10'] ?? null),
+                $this->nullableInt($in['max_temp_x10'] ?? null),
                 (int) $in['effect'],
                 trim((string) $in['reason']),
-                $actorId, Db::now(),
+                $nextOrder, $actorId, Db::now(), Db::now(),
             ]
         );
+
+        // Describe the row that was actually stored, not the POST: the saved
+        // rule has the defaults filled in and the queue and doctor resolved
+        // to names, which is what someone reading the history needs.
+        $saved = Db::one('SELECT * FROM priority_rules WHERE id = ? AND clinic_id = ?', [$id, $clinicId]);
+        $this->record($clinicId, $id, trim((string) $in['name']), 'created', $actorId,
+            'Rule created: ' . ($saved === null ? '' : $this->describeMatch($saved)),
+            null, $saved);
+
+        return $id;
+    }
+
+    /**
+     * Put the rules in the order given.
+     *
+     * Only ids belonging to this clinic are touched, so a hand-crafted POST
+     * cannot renumber another tenant's list. Ids that are not mentioned keep
+     * their place rather than being dropped to the end.
+     */
+    public function reorder(int $clinicId, array $orderedIds, ?int $actorId = null): int
+    {
+        $ids = [];
+        foreach ($orderedIds as $id) {
+            $id = (int) $id;
+            if ($id > 0 && !in_array($id, $ids, true)) {
+                $ids[] = $id;
+            }
+        }
+        if ($ids === []) {
+            return 0;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $owned = Db::all(
+            "SELECT id FROM priority_rules WHERE clinic_id = ? AND id IN ($placeholders)",
+            array_merge([$clinicId], $ids)
+        );
+        $ownedIds = array_map(static fn (array $r): int => (int) $r['id'], $owned);
+        // Keep the caller's order, drop anything that is not ours.
+        $final = array_values(array_filter($ids, static fn (int $id): bool => in_array($id, $ownedIds, true)));
+        if ($final === []) {
+            return 0;
+        }
+
+        Db::transaction(function () use ($clinicId, $final): void {
+            foreach ($final as $position => $ruleId) {
+                Db::run(
+                    'UPDATE priority_rules SET sort_order = ?, updated_at = ? WHERE id = ? AND clinic_id = ?',
+                    [$position + 1, Db::now(), $ruleId, $clinicId]
+                );
+            }
+        });
+
+        $this->record($clinicId, null, count($final) . ' rules', 'reordered', $actorId,
+            'Order changed: ' . implode(' → ', array_map(
+                static fn (int $id): string => (string) Db::scalar(
+                    'SELECT name FROM priority_rules WHERE id = ? AND clinic_id = ?', [$id, $clinicId]
+                ), $final
+            )));
+
+        return count($final);
+    }
+
+    /**
+     * Write a row to the rule's own history.
+     *
+     * The audit log records that something happened to a rule. This records
+     * WHAT the rule said at the time, because a priority nobody typed has to
+     * be explainable after the rule has been edited or deleted — and "the
+     * rule may have changed since" is how an audit trail becomes a guess.
+     */
+    public function record(
+        int $clinicId,
+        ?int $ruleId,
+        string $ruleName,
+        string $action,
+        ?int $actorId = null,
+        string $detail = '',
+        ?array $before = null,
+        ?array $after = null
+    ): void {
+        try {
+            Db::insert(
+                'INSERT INTO priority_rule_history
+                   (clinic_id, rule_id, rule_name, action, actor_id, detail, before_json, after_json, created_at)
+                 VALUES (?,?,?,?,?,?,?,?,?)',
+                [
+                    $clinicId, $ruleId, mb_substr($ruleName, 0, 120), $action, $actorId,
+                    mb_substr($detail, 0, 500),
+                    $before === null ? null : json_encode($before, JSON_UNESCAPED_UNICODE),
+                    $after === null ? null : json_encode($after, JSON_UNESCAPED_UNICODE),
+                    Db::now(),
+                ]
+            );
+        } catch (\Throwable $e) {
+            // History is evidence, not the transaction. A clinic must never
+            // lose the rule they just wrote because its footnote failed.
+            \App\Core\Log::warn('priority_rule.history_failed', ['error' => $e->getMessage()]);
+        }
+    }
+
+    /** Most recent changes to this clinic's rules, newest first. */
+    public function history(int $clinicId, int $limit = 12): array
+    {
+        try {
+            return Db::all(
+                'SELECT h.*, u.name AS actor_name
+                   FROM priority_rule_history h
+                   LEFT JOIN users u ON u.id = h.actor_id
+                  WHERE h.clinic_id = ?
+                  ORDER BY h.id DESC
+                  LIMIT ?',
+                [$clinicId, $limit]
+            );
+        } catch (\Throwable $e) {
+            return [];
+        }
     }
 
     /** Turn a rule off without deleting the history that refers to it. */
@@ -197,7 +325,13 @@ final class PriorityRuleService
         if ($rule === null) {
             return false;
         }
-        Db::run('UPDATE priority_rules SET is_active = ? WHERE id = ? AND clinic_id = ?', [$active ? 1 : 0, $ruleId, $clinicId]);
+        $name = (string) Db::scalar('SELECT name FROM priority_rules WHERE id = ? AND clinic_id = ?', [$ruleId, $clinicId]);
+        Db::run(
+            'UPDATE priority_rules SET is_active = ?, updated_at = ? WHERE id = ? AND clinic_id = ?',
+            [$active ? 1 : 0, Db::now(), $ruleId, $clinicId]
+        );
+        $this->record($clinicId, $ruleId, $name, $active ? 'enabled' : 'disabled', null,
+            $active ? 'Rule turned back on.' : 'Rule turned off. Entries it already decided keep their reason.');
         return true;
     }
 
@@ -210,6 +344,12 @@ final class PriorityRuleService
         // Entries that already carry the rule keep their reason string; only
         // the foreign reference is cleared, so the audit trail still reads.
         Db::run('UPDATE queue_entries SET priority_rule_id = NULL WHERE priority_rule_id = ?', [$ruleId]);
+        $name = (string) Db::scalar('SELECT name FROM priority_rules WHERE id = ? AND clinic_id = ?', [$ruleId, $clinicId]);
+        $snapshot = Db::one('SELECT * FROM priority_rules WHERE id = ? AND clinic_id = ?', [$ruleId, $clinicId]);
+        // History first: the row is about to go, and the rule_id column
+        // deliberately has no foreign key so this outlives it.
+        $this->record($clinicId, $ruleId, $name, 'deleted', null,
+            'Rule deleted. Patients it already reordered keep their recorded reason.', $snapshot);
         Db::run('DELETE FROM priority_rules WHERE id = ? AND clinic_id = ?', [$ruleId, $clinicId]);
         return true;
     }

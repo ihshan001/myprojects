@@ -63,12 +63,38 @@
           has a standing clinical priority.
         </p>
       <?php else: ?>
-        <div class="divide-y divide-slate-100">
-          <?php foreach ($rules as $rule): ?>
+        <?php $last = count($rules) - 1; ?>
+        <div class="divide-y divide-slate-100" data-rule-list>
+          <?php foreach ($rules as $i => $rule): ?>
             <?php $isActive = (int) $rule['is_active'] === 1; ?>
-            <div class="flex flex-wrap items-start gap-3 px-4 py-3 <?= $isActive ? '' : 'bg-slate-50/70' ?>">
+            <div class="flex flex-wrap items-start gap-3 px-4 py-3 <?= $isActive ? '' : 'bg-slate-50/70' ?>"
+                 draggable="true" data-rule-row="<?= (int) $rule['id'] ?>">
+              <!-- Order is the policy. A drag handle and up/down buttons, so the
+                   list can be reordered by mouse or by keyboard — a ranked list
+                   that only works one way locks out whoever uses the other. -->
+              <div class="flex shrink-0 flex-col items-center gap-0.5 pt-0.5">
+                <form method="post" action="/queues/priority-rules/<?= (int) $rule['id'] ?>/move">
+                  <?= csrf_field() ?>
+                  <input type="hidden" name="direction" value="up">
+                  <button type="submit" class="rule-nudge" <?= $i === 0 ? 'disabled' : '' ?>
+                          aria-label="Move <?= e($rule['name']) ?> up">
+                    <svg class="h-3.5 w-3.5"><use href="#i-arrow-up"/></svg>
+                  </button>
+                </form>
+                <span class="select-none px-0.5 text-[11px] font-bold text-slate-300" aria-hidden="true" data-rule-grip>⣿</span>
+                <form method="post" action="/queues/priority-rules/<?= (int) $rule['id'] ?>/move">
+                  <?= csrf_field() ?>
+                  <input type="hidden" name="direction" value="down">
+                  <button type="submit" class="rule-nudge" <?= $i === $last ? 'disabled' : '' ?>
+                          aria-label="Move <?= e($rule['name']) ?> down">
+                    <svg class="h-3.5 w-3.5"><use href="#i-chevron-down"/></svg>
+                  </button>
+                </form>
+              </div>
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-2">
+                  <span class="tabular w-5 shrink-0 text-[11px] font-bold text-slate-400"
+                        title="Position in the ranked list"><?= (int) ($rule['sort_order'] ?? ($i + 1)) ?></span>
                   <span class="font-medium text-slate-900"><?= e($rule['name']) ?></span>
                   <?php if ((int) $rule['effect'] > 0): ?>
                     <span class="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">+<?= (int) $rule['effect'] ?> ahead</span>
@@ -121,7 +147,7 @@
       <p class="text-xs font-semibold text-slate-600">New rule</p>
     </div>
 
-    <form method="post" action="/queues/priority-rules" class="space-y-3 p-4">
+    <form method="post" action="/queues/priority-rules" class="space-y-3 p-4" data-rule-form>
       <?= csrf_field() ?>
 
       <div>
@@ -215,6 +241,28 @@
       </div>
       <p class="-mt-1 text-[11px] text-slate-500">
         Hours use the clinic's clock, 0–23. A window that crosses midnight is two rules.
+      </p>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="label" for="min_temp">Temperature at least (°C)</label>
+          <input class="input" id="min_temp" name="min_temp" type="number" step="0.1" min="34" max="43"
+                 value="<?= e(isset($old['min_temp']) && $old['min_temp'] !== ''
+                        ? (string) $old['min_temp']
+                        : '') ?>" placeholder="any">
+        </div>
+        <div>
+          <label class="label" for="max_temp">Temperature at most (°C)</label>
+          <input class="input" id="max_temp" name="max_temp" type="number" step="0.1" min="34" max="43"
+                 value="<?= e(isset($old['max_temp']) && $old['max_temp'] !== ''
+                        ? (string) $old['max_temp']
+                        : '') ?>" placeholder="any">
+        </div>
+      </div>
+      <p class="-mt-1 text-[11px] text-slate-500">
+        Fever triage: “at least 39.0” matches a measured fever. A patient whose
+        temperature was not taken never matches — not measured is not the same as
+        not febrile.
       </p>
 
       <div>
@@ -320,6 +368,28 @@ $severityTone = static fn (string $s): string => match ($s) {
       <p class="text-xs font-semibold text-slate-600">Who is overriding priority</p>
       <p class="text-[11px] text-slate-400"><?= e($from) ?> to <?= e($to) ?></p>
     </div>
+  <?php if (($history ?? []) !== []): ?>
+    <div class="card card-pad mt-5">
+      <h2 class="text-sm font-bold text-slate-900">What changed, and who changed it</h2>
+      <p class="mt-1 text-xs text-slate-500">
+        A priority order nobody typed has to be explainable afterwards. A rule's reason is copied onto the
+        entry it decided, but the rule itself can be edited or deleted — this is the record of that.
+      </p>
+      <ul class="mt-3 space-y-2">
+        <?php foreach ($history as $h): ?>
+          <li class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-l-2 border-slate-200 pl-3 text-xs">
+            <span class="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600"><?= e($h['action']) ?></span>
+            <span class="font-semibold text-slate-800"><?= e($h['rule_name']) ?></span>
+            <span class="text-slate-500"><?= e($h['detail'] ?? '') ?></span>
+            <span class="ml-auto shrink-0 text-[10px] text-slate-400">
+              <?= e($h['actor_name'] ?? 'system') ?> · <?= e(ago((string) $h['created_at'])) ?>
+            </span>
+          </li>
+        <?php endforeach; ?>
+      </ul>
+    </div>
+  <?php endif; ?>
+
     <form method="get" action="/queues/priority-rules" class="flex items-end gap-1.5">
       <input class="input !py-1.5 text-xs" type="date" name="from" value="<?= e($from) ?>">
       <input class="input !py-1.5 text-xs" type="date" name="to" value="<?= e($to) ?>">

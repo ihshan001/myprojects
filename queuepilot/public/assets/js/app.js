@@ -1118,6 +1118,120 @@
   });
 })();
 
+
+  /* ------------------------------------------- priority rules: reordering
+     The ranked list is the clinic's policy, so it is editable in place.
+     Drag is the fast path and the up/down buttons are the keyboard path;
+     both end at POST /queues/priority-rules/reorder with the full order, so
+     the two can never disagree about what the list is.
+
+     Drag is an enhancement only — with no pointer, or no JS, the buttons
+     still work and the page is fully usable. */
+  (function () {
+    const list = document.querySelector('[data-rule-list]');
+    if (!list) return;
+
+    const form = document.querySelector('[data-rule-form]');
+    const rows = () => Array.from(list.querySelectorAll('[data-rule-row]'));
+    let dragging = null;
+
+    function clearMarks() {
+      rows().forEach((r) => r.classList.remove('is-dragging', 'is-drop-target'));
+    }
+
+    function currentOrder() {
+      return rows().map((r) => r.getAttribute('data-rule-row'));
+    }
+
+    async function sendOrder(order) {
+      const body = new URLSearchParams();
+      body.set('_token', csrf);
+      body.set('order', order.join(','));
+      const res = await fetch('/queues/priority-rules/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+        body: body.toString(),
+        credentials: 'same-origin',
+      });
+      return res.ok;
+    }
+
+    rows().forEach((row) => {
+      row.addEventListener('dragstart', (ev) => {
+        dragging = row;
+        row.classList.add('is-dragging');
+        if (ev.dataTransfer) {
+          ev.dataTransfer.effectAllowed = 'move';
+          // Firefox refuses to start a drag with an empty payload.
+          ev.dataTransfer.setData('text/plain', row.getAttribute('data-rule-row') || '');
+        }
+      });
+
+      row.addEventListener('dragend', () => {
+        dragging = null;
+        clearMarks();
+      });
+
+      row.addEventListener('dragover', (ev) => {
+        if (!dragging || dragging === row) return;
+        ev.preventDefault();
+        if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+        clearMarks();
+        dragging.classList.add('is-dragging');
+        row.classList.add('is-drop-target');
+      });
+
+      row.addEventListener('drop', async (ev) => {
+        if (!dragging || dragging === row) return;
+        ev.preventDefault();
+
+        // Move the dragged row to where it was dropped, then send the whole
+        // list rather than a delta: two staff reordering at once is far safer
+        // as two whole lists than as two patches of each other.
+        const box = row.getBoundingClientRect();
+        const after = ev.clientY > box.top + box.height / 2;
+        list.insertBefore(dragging, after ? row.nextSibling : row);
+
+        clearMarks();
+        // Renumber immediately so the position shown matches what was saved,
+        // even before a reload.
+        rows().forEach((r, i) => {
+          const badge = r.querySelector('.tabular');
+          if (badge) badge.textContent = String(i + 1);
+        });
+
+        const ok = await sendOrder(currentOrder());
+        if (!ok) {
+          toast('Could not save the new order. Reloading.', 'error');
+          window.location.reload();
+          return;
+        }
+        toast('Order saved. It applies from the next token.', 'success', 2400);
+      });
+    });
+
+    list.addEventListener('dragover', (ev) => ev.preventDefault());
+
+    // Degrees in, tenths out. The column is an INTEGER so a 39.0 threshold
+    // is exact; the form is for people, who think in degrees.
+    if (form) {
+      form.addEventListener('submit', function () {
+        ['min', 'max'].forEach(function (prefix) {
+          const visible = form.querySelector('[name="' + prefix + '_temp"]');
+          if (!visible) return;
+          const hidden = document.createElement('input');
+          hidden.type = 'hidden';
+          hidden.name = prefix + '_temp_x10';
+          const value = (visible.value || '').trim();
+          hidden.value = value === '' ? '' : String(Math.round(parseFloat(value) * 10));
+          form.appendChild(hidden);
+          // Rename so a degree string never reaches the service unscaled.
+          visible.name = prefix + '_temp_degrees';
+        });
+      });
+    }
+  })();
+
 /* --------------------------------------------- patients: add-to-register */
 /* A plain toggle, kept here rather than inline so the CSP does not need
    'unsafe-inline'. No JS means no panel — so the panel starts hidden only

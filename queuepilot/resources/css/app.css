@@ -983,3 +983,20 @@
   .st-tab.is-active {
     @apply border-teal-700 text-teal-800;
   }
+
+  /* ------------------------------------------------- priority rule list
+     Order is the policy, so it is editable in place. The nudge buttons are
+     the keyboard path; the grip is the drag path. Both write the same POST. */
+  .rule-nudge {
+    @apply flex h-5 w-5 items-center justify-center rounded text-slate-400 transition
+           hover:bg-slate-100 hover:text-slate-700 disabled:pointer-events-none disabled:opacity-30;
+  }
+  [data-rule-list] [data-rule-row] {
+    @apply transition-colors;
+  }
+  [data-rule-list] [data-rule-row].is-dragging {
+    @apply bg-teal-50 opacity-60;
+  }
+  [data-rule-list] [data-rule-row].is-drop-target {
+    @apply border-t-2 border-teal-600;
+  }

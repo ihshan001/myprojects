@@ -90,6 +90,9 @@ final class PriorityRuleController
             // dressed up as a finding.
             'impact'   => $impact->measure($clinicId, $from, $to),
             'overridingNow' => $impact->overridingNow($clinicId, Db::today()),
+            // A priority order nobody typed has to be explainable afterwards.
+            // Read here so the screen can show what changed, by whom and when.
+            'history' => $this->rules->history($clinicId),
         ];
     }
 
@@ -102,6 +105,32 @@ final class PriorityRuleController
     {
         $clinicId = $this->clinicId();
         $in = Request::payload();
+
+        // The form is in degrees, the column is tenths of a degree — an
+        // INTEGER, so 39.0 is exactly 390 and a threshold is not left to
+        // floating point. Converted here, at the boundary, so nothing
+        // downstream has to remember which unit it is holding.
+        foreach (['min', 'max'] as $prefix) {
+            $field = $prefix . '_temp';
+            $tenthsKey = $prefix . '_temp_x10';
+
+            if (array_key_exists($tenthsKey, $in)) {
+                // Javascript already scaled it. Keep the degrees alongside it
+                // so a validation failure can redisplay what was typed.
+                $tenths = $in[$tenthsKey];
+                $in[$field] = ($tenths === null || $tenths === '')
+                    ? ''
+                    : number_format(((int) $tenths) / 10, 1, '.', '');
+                continue;
+            }
+
+            // No Javascript: the form posted degrees. Scale it here, at the
+            // boundary, so nothing downstream remembers which unit it holds.
+            $raw = $in[$field] ?? null;
+            $in[$tenthsKey] = ($raw === null || $raw === '')
+                ? null
+                : (int) round(((float) $raw) * 10);
+        }
 
         try {
             $ruleId = $this->rules->create($clinicId, $in, Auth::id());
@@ -139,6 +168,69 @@ final class PriorityRuleController
         flash('success', $active
             ? 'Rule turned off. Entries it already decided keep their reason.'
             : 'Rule turned on. It applies from the next token.');
+        redirect('/queues/priority-rules');
+    }
+
+    /**
+     * Save a new order.
+     *
+     * The list is a ranked list, so its order is data the clinic owns — not
+     * something the engine infers from a number. Dragging writes it here, and
+     * the fallback (up/down buttons) posts the same shape, so the keyboard
+     * path and the mouse path cannot disagree.
+     */
+    public function reorder(): void
+    {
+        $clinicId = $this->clinicId();
+
+        $order = Request::input('order', []);
+        if (is_string($order)) {
+            $order = array_filter(explode(',', $order), static fn ($v): bool => trim((string) $v) !== '');
+        }
+        if (!is_array($order)) {
+            $order = [];
+        }
+
+        $moved = $this->rules->reorder($clinicId, $order, Auth::id());
+        if ($moved === 0) {
+            flash('error', 'Nothing to reorder.');
+            redirect('/queues/priority-rules');
+            return;
+        }
+
+        $this->audit->log($clinicId, 'priority_rule.reordered', 'priority_rule', null, ['moved' => $moved]);
+        flash('success', $moved === 1 ? 'Rule moved.' : $moved . ' rules reordered. The new order applies from the next token.');
+        redirect('/queues/priority-rules');
+    }
+
+    /** Move one rule up one place. Keyboard path for the drag list. */
+    public function move(string $id): void
+    {
+        $clinicId = $this->clinicId();
+        $ruleId = (int) $id;
+        $direction = Request::string('direction', 'up') === 'down' ? 'down' : 'up';
+
+        $ids = array_map(
+            static fn (array $r): int => (int) $r['id'],
+            Db::all(
+                'SELECT id FROM priority_rules WHERE clinic_id = ? ORDER BY sort_order ASC, id ASC',
+                [$clinicId]
+            )
+        );
+        $at = array_search($ruleId, $ids, true);
+        if ($at === false) {
+            abort(404, 'Rule not found.');
+            return;
+        }
+        $swap = $direction === 'up' ? $at - 1 : $at + 1;
+        if ($swap < 0 || $swap >= count($ids)) {
+            // Already at the end of the list; nothing to swap with.
+            redirect('/queues/priority-rules');
+            return;
+        }
+        [$ids[$at], $ids[$swap]] = [$ids[$swap], $ids[$at]];
+
+        $this->rules->reorder($clinicId, $ids, Auth::id());
         redirect('/queues/priority-rules');
     }
 

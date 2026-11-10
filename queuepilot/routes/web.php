@@ -151,6 +151,10 @@ Router::post('/queues/{id}/rename', [QueueConfigController::class, 'rename'], ['
 Router::get('/queues/priority-rules', [PriorityRuleController::class, 'index'], ['auth' => true]);
 Router::post('/queues/priority-rules', [PriorityRuleController::class, 'save'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/queues/priority-rules/{id}/toggle', [PriorityRuleController::class, 'toggle'], ['auth' => true, 'ability' => 'clinic.manage']);
+// The list is the clinic's ranked policy, so its order is editable data.
+// POST /reorder takes the whole list; POST /{id}/move is the keyboard path.
+Router::post('/queues/priority-rules/reorder', [PriorityRuleController::class, 'reorder'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/queues/priority-rules/{id}/move', [PriorityRuleController::class, 'move'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/queues/priority-rules/{id}/delete', [PriorityRuleController::class, 'delete'], ['auth' => true, 'ability' => 'clinic.manage']);
 
 // Service workflows — the steps a visit must pass before it is complete.
