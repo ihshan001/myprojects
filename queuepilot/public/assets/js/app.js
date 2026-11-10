@@ -295,6 +295,40 @@
   const menuBtn = $('#mobile-menu-btn');
   if (menuBtn) menuBtn.addEventListener('click', () => $('#mobile-menu')?.classList.toggle('hidden'));
 
+  /* The bottom tab bar's More opens the same drawer, so there is one nav map
+     and not two to keep in step. */
+  document.addEventListener('click', (ev) => {
+    if (ev.target.closest('[data-open-nav]')) $('#mobile-menu')?.classList.toggle('hidden');
+  });
+
+  /* ------------------------------------------- header "More" dropdown */
+  document.addEventListener('click', (ev) => {
+    const toggle = ev.target.closest('[data-nav-more-toggle]');
+    const menu = toggle && toggle.parentElement?.querySelector('[data-nav-more] .topnav-menu, .topnav-menu');
+    if (!toggle) return;
+    const panel = document.getElementById(toggle.getAttribute('aria-controls') || '');
+    if (!panel) return;
+    const open = panel.hidden;
+    panel.hidden = !open;
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+
+  // Dismiss on any click or Escape that is not inside the menu.
+  document.addEventListener('click', (ev) => {
+    $$('.topnav-menu').forEach((panel) => {
+      if (panel.hidden) return;
+      if (ev.target.closest('.topnav-more')) return;
+      panel.hidden = true;
+      const t = panel.closest('.topnav-more')?.querySelector('[data-nav-more-toggle]');
+      if (t) t.setAttribute('aria-expanded', 'false');
+    });
+  });
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Escape') return;
+    $$('.topnav-menu').forEach((panel) => { panel.hidden = true; });
+    $$('[data-nav-more-toggle]').forEach((t) => t.setAttribute('aria-expanded', 'false'));
+  });
+
   /* ------------------------------------------------ confirmable actions
      Capture phase, and stopImmediatePropagation, so a destructive submit
      cannot fire on the same click that is still asking permission. */

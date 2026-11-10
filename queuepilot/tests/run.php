@@ -6097,6 +6097,46 @@ Assert::test('the guarded forms are really guarded', function (): void {
 });
 
 
+/* ------------------------------------------------------------------ */
+/* 54. navigation that fits the screen it is on                        */
+/* ------------------------------------------------------------------ */
+
+Assert::test('the app has a header nav, not only a side rail', function (): void {
+    $layout = (string) file_get_contents(QP_ROOT . '/resources/views/layouts/app.php');
+    $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+
+    // A 256px rail of twenty links is right for a phone drawer and wrong for
+    // a wide screen: it spends the width the queue board needs on labels
+    // nobody scrolls.
+    Assert::true(strpos($layout, 'class="topnav') !== false, 'there is a header nav');
+    Assert::true(strpos($layout, 'topnav-links') !== false, 'with primary links in it');
+    Assert::true(strpos($layout, 'topnav-menu') !== false, 'and the rest grouped under More');
+    Assert::true(strpos($css, '.topnav {') !== false, 'styled');
+
+    // Phone: the four things a clinic does all day, in thumb reach.
+    Assert::true(strpos($layout, 'bottom-tabs') !== false, 'there are bottom tabs for a phone');
+    Assert::true(strpos($css, '.bottom-tabs {') !== false, 'styled too');
+    // A fixed bar over the last row of content is worse than no bar.
+    Assert::true(strpos($layout, 'h-[52px] lg:hidden') !== false, 'with space reserved so it covers nothing');
+});
+
+Assert::test('the header shows a different map per role', function (): void {
+    $layout = (string) file_get_contents(QP_ROOT . '/resources/views/layouts/app.php');
+
+    // One shared list left the platform header with nothing but "More",
+    // because none of a clinic's destinations are the admin's.
+    Assert::true(strpos($layout, "'super_admin'") !== false && strpos($layout, 'primaryHrefs') !== false,
+        'the primary set is chosen from something');
+    Assert::true(strpos($layout, "role'] === 'super_admin'") !== false, 'platform gets its own');
+    Assert::true(strpos($layout, "role'] === 'doctor'") !== false, 'and so does a doctor');
+
+    // Every destination must still be reachable: the ones not in the header
+    // have to land in the More menu, or moving them there lost them.
+    Assert::true(strpos($layout, 'headerMore') !== false, 'the overflow is collected');
+    Assert::true(strpos($layout, 'headerPrimary') !== false, 'and the primaries are split out');
+});
+
+
 $code = Assert::summary();
 Database::cleanup($dbPath);
 echo "\n";

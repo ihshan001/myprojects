@@ -85,6 +85,47 @@ if ($u) {
         ];
     }
 }
+
+/* Desktop header nav.
+   A 256px rail of twenty links is right for a phone drawer but wrong for a
+   wide screen: it spends the width the queue board needs on labels nobody
+   scrolls. So the header carries only the destinations a clinic reaches for
+   all day and groups the rest under "More", keeping the drawer's section
+   names so it stays the same map either way. */
+$flatNav = [];
+foreach ($navSections as $section => $items) {
+    foreach ($items as $it) {
+        $flatNav[] = [$section, $it[0], $it[1], $it[2], $it[3]];
+    }
+}
+// Role-aware. A shared list left the platform header with nothing but
+// "More", because none of a clinic's destinations are the admin's.
+$primaryHrefs = !$u ? [] : ($u['role'] === 'super_admin'
+    ? ['/admin', '/admin/clinics', '/admin/organisations', '/admin/plans', '/admin/billing', '/admin/monitor']
+    : ($u['role'] === 'doctor'
+        ? ['/doctor', '/doctor/schedule', '/doctor/patients']
+        : ['/app', '/queue/new', '/patients', '/appointments', '/reports']));
+
+$headerPrimary = array_values(array_filter($flatNav, static fn ($n) => in_array($n[1], $primaryHrefs, true)));
+$headerMore = [];
+foreach ($flatNav as $n) {
+    if (in_array($n[1], $primaryHrefs, true)) {
+        continue;
+    }
+    $headerMore[$n[0]][] = $n;
+}
+// Kept one click away in the header rather than buried in the drawer.
+$headerQuick = array_values(array_filter($flatNav, static fn ($n) => in_array($n[1], ['/settings', '/support'], true)));
+
+// The five things a phone screen can show without scrolling. Everything
+// else lives behind the drawer that the "More" tab opens.
+$tabBar = array_values(array_filter($flatNav, static function ($n) use ($primaryHrefs) {
+    return in_array($n[1], array_slice($primaryHrefs, 0, 4), true);
+}));
+
+// Search goes where the signed-in role can act on what it finds.
+$searchAction = !$u ? '/patients' : ($u['role'] === 'super_admin' ? '/admin/clinics'
+    : ($u['role'] === 'doctor' ? '/doctor/patients' : '/patients'));
 ?>
 <!DOCTYPE html>
 <html lang="<?= e($locale ?? 'en') ?>" class="h-full">
@@ -197,6 +238,101 @@ if ($u) {
 
   <!-- Main column -->
   <div class="main-col">
+    <!-- Desktop header: the handful of places a clinic goes all day, with
+         everything else one click away under "More". -->
+    <header class="topnav no-print">
+      <div class="topnav-inner">
+        <a href="<?= e($u && $u['role'] === 'super_admin' ? '/admin' : '/app') ?>" class="topnav-brand">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-teal-700 text-sm font-black text-white">Q</span>
+          <span class="truncate text-[14px] font-bold tracking-tight text-slate-900"><?= e($appName) ?></span>
+        </a>
+
+        <?php if ($headerPrimary !== []): ?>
+          <nav class="topnav-links" aria-label="Main">
+            <?php foreach ($headerPrimary as [, $href, $icon, $label, $active]): ?>
+              <a href="<?= e($href) ?>" class="topnav-link <?= $active ? 'is-active' : '' ?>"<?= $active ? ' aria-current="page"' : '' ?>>
+                <?= e($label) ?>
+              </a>
+            <?php endforeach; ?>
+
+            <?php if ($headerMore !== []): ?>
+              <div class="topnav-more" data-nav-more>
+                <button type="button" class="topnav-link" data-nav-more-toggle aria-expanded="false" aria-controls="nav-more-menu">
+                  More
+                  <svg class="h-3.5 w-3.5"><use href="#i-chevron-down"/></svg>
+                </button>
+                <div class="topnav-menu" id="nav-more-menu" hidden>
+                  <?php foreach ($headerMore as $section => $items): ?>
+                    <p class="topnav-menu-label"><?= e($section) ?></p>
+                    <?php foreach ($items as [, $href, $icon, $label, $active]): ?>
+                      <a href="<?= e($href) ?>" class="topnav-menu-item <?= $active ? 'is-active' : '' ?>">
+                        <svg class="h-4 w-4 shrink-0 text-slate-400"><use href="#i-<?= e($icon) ?>"/></svg>
+                        <span class="truncate"><?= e($label) ?></span>
+                      </a>
+                    <?php endforeach; ?>
+                  <?php endforeach; ?>
+                </div>
+              </div>
+            <?php endif; ?>
+          </nav>
+        <?php endif; ?>
+
+        <div class="topnav-right">
+          <form method="get" action="<?= e($searchAction) ?>" class="topnav-search">
+            <svg class="h-4 w-4 shrink-0 text-slate-400"><use href="#i-search"/></svg>
+            <label class="sr-only" for="q-desk">Search</label>
+            <input id="q-desk" name="q" type="search" autocomplete="off"
+                   placeholder="<?= e($u && $u['role'] === 'super_admin' ? 'Search clinics...' : 'Search patients, tokens...') ?>">
+          </form>
+
+          <?php $choices = $branchChoices ?? []; ?>
+          <?php if (count($choices) > 1): ?>
+            <form method="post" action="/branch/switch" class="shrink-0">
+              <?= csrf_field() ?>
+              <input type="hidden" name="back" value="<?= e($path ?? '/app') ?>">
+              <label class="sr-only" for="branch-switch-head">Working in branch</label>
+              <select id="branch-switch-head" name="clinic_id" data-submit-on-change class="topnav-branch">
+                <?php foreach ($choices as $b): ?>
+                  <option value="<?= (int) $b['id'] ?>" <?= (int) $b['id'] === (int) ($activeBranchId ?? 0) ? 'selected' : '' ?>>
+                    <?= e((string) $b['name']) ?><?= $b['is_home'] ? ' (home)' : '' ?>
+                  </option>
+                <?php endforeach; ?>
+              </select>
+            </form>
+          <?php endif; ?>
+
+          <?php foreach ($headerQuick as [, $href, $icon, $label]): ?>
+            <a href="<?= e($href) ?>" class="topnav-icon" aria-label="<?= e($label) ?>" title="<?= e($label) ?>">
+              <svg class="h-[18px] w-[18px]"><use href="#i-<?= e($icon) ?>"/></svg>
+            </a>
+          <?php endforeach; ?>
+
+          <?php if ($u && $u['role'] !== 'super_admin' && Auth::can('queue.issue')): ?>
+            <a href="/queue/new" class="btn-primary shrink-0 !w-auto !px-3 !py-1.5 !text-[13px]">
+              <svg class="h-4 w-4"><use href="#i-plus"/></svg>New patient
+            </a>
+          <?php endif; ?>
+
+          <div class="topnav-user" title="<?= e($u['name'] ?? '') ?> · <?= e($roleLabel) ?>">
+            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-teal-700 text-[11px] font-bold text-white">
+              <?= e(App\Core\Str::initials((string) $u['name'])) ?>
+            </span>
+            <span class="hidden min-w-0 leading-tight xl:block">
+              <span class="block truncate text-[12px] font-bold text-slate-900"><?= e($u['name']) ?></span>
+              <span class="block truncate text-[10px] text-slate-500"><?= e($roleLabel) ?></span>
+            </span>
+          </div>
+
+          <form method="post" action="/logout" class="shrink-0">
+            <?= csrf_field() ?>
+            <button type="submit" class="topnav-icon" title="Sign out" aria-label="Sign out">
+              <svg class="h-[18px] w-[18px]"><use href="#i-logout"/></svg>
+            </button>
+          </form>
+        </div>
+      </div>
+    </header>
+
     <!-- Mobile top bar -->
     <div class="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-slate-200 bg-white/90 px-4 backdrop-blur lg:hidden no-print">
       <div class="flex items-center gap-2">
@@ -268,6 +404,24 @@ if ($u) {
     <main class="page">
       <?= $content ?>
     </main>
+
+    <?php if ($tabBar !== []): ?>
+      <!-- Thumb-reachable on a phone. The rail is a drawer you have to open;
+           these are the four things a clinic does all day, always visible. -->
+      <nav class="bottom-tabs no-print" aria-label="Primary">
+        <?php foreach ($tabBar as [, $href, $icon, $label, $active]): ?>
+          <a href="<?= e($href) ?>" class="btab <?= $active ? 'btab-active' : '' ?>"<?= $active ? ' aria-current="page"' : '' ?>>
+            <svg class="h-[18px] w-[18px]"><use href="#i-<?= e($icon) ?>"/></svg>
+            <span><?= e($label) ?></span>
+          </a>
+        <?php endforeach; ?>
+        <button type="button" class="btab" data-open-nav aria-label="More" aria-controls="mobile-menu">
+          <svg class="h-[18px] w-[18px]"><use href="#i-menu"/></svg>
+          <span>More</span>
+        </button>
+      </nav>
+      <div class="h-[52px] lg:hidden" style="margin-bottom: env(safe-area-inset-bottom)"></div>
+    <?php endif; ?>
 
     <footer class="mt-auto border-t border-slate-200 px-4 py-4 text-center text-[11px] text-slate-400 sm:px-6 lg:px-8 no-print">
       <?= e($appName) ?> · multi-tenant queue management · <?= e(date('Y')) ?>

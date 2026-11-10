@@ -887,3 +887,83 @@
   .qp-dialog-actions > .btn-secondary {
     @apply !w-auto;
   }
+
+  /* ------------------------------------------------------- desktop header
+     The rail is right for a phone drawer and wrong for a wide screen. This
+     carries the destinations a clinic uses all day, hides on lg-down where
+     the bottom tabs take over, and prints as nothing. */
+  .topnav {
+    @apply sticky top-0 z-30 hidden border-b border-slate-200 bg-white/95 backdrop-blur lg:block no-print;
+  }
+  .topnav-inner {
+    @apply flex h-14 items-center gap-4 px-4 xl:px-6;
+  }
+  .topnav-brand {
+    @apply flex shrink-0 items-center gap-2;
+  }
+  .topnav-links {
+    @apply flex min-w-0 flex-1 items-center gap-0.5;
+  }
+  .topnav-link {
+    @apply flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[13px] font-semibold text-slate-600
+           transition hover:bg-slate-100 hover:text-slate-900;
+  }
+  .topnav-link.is-active {
+    @apply bg-teal-50 text-teal-800;
+  }
+  .topnav-more {
+    @apply relative;
+  }
+  .topnav-menu {
+    @apply absolute left-0 top-full z-40 mt-1 w-60 overflow-hidden rounded-xl border border-slate-200
+           bg-white py-1.5 shadow-xl;
+  }
+  .topnav-menu[hidden] { display: none; }
+  .topnav-menu-label {
+    @apply px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-slate-400;
+  }
+  .topnav-menu-item {
+    @apply flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-slate-700 hover:bg-slate-50;
+  }
+  .topnav-menu-item.is-active {
+    @apply bg-teal-50 font-semibold text-teal-800;
+  }
+  .topnav-right {
+    @apply flex shrink-0 items-center gap-1.5;
+  }
+  .topnav-search {
+    @apply hidden min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5
+           focus-within:border-teal-500 focus-within:bg-white xl:flex;
+  }
+  .topnav-search > input {
+    @apply w-44 border-0 bg-transparent p-0 text-[13px] text-slate-800 placeholder:text-slate-400
+           focus:outline-none focus:ring-0;
+  }
+  .topnav-branch {
+    @apply max-w-[10rem] rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[12px] text-slate-700
+           focus:border-teal-500 focus:outline-none;
+  }
+  .topnav-icon {
+    @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500
+           transition hover:bg-slate-100 hover:text-slate-900;
+  }
+  .topnav-user {
+    @apply ml-0.5 flex shrink-0 items-center gap-2 rounded-lg px-1.5 py-1;
+  }
+
+  /* ---------------------------------------------------------- bottom tabs
+     The four things a clinic does all day, always within thumb reach. The
+     rail is a drawer you have to open first; this is not. */
+  .bottom-tabs {
+    @apply fixed inset-x-0 bottom-0 z-40 flex border-t border-slate-200 bg-white lg:hidden no-print;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .btab {
+    @apply flex min-w-0 flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-semibold text-slate-500;
+  }
+  .btab > span {
+    @apply max-w-full truncate;
+  }
+  .btab-active {
+    @apply text-teal-700;
+  }
