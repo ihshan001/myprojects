@@ -35,11 +35,21 @@ $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
         <p class="text-[11px] uppercase tracking-[0.2em] text-slate-500">Now serving</p>
       </div>
     </div>
-    <div class="text-right">
-      <p class="text-2xl font-bold tabular text-white" data-tv-clock><?= e(date('h:i A')) ?></p>
-      <p class="text-[11px] text-slate-500" data-tv-counts>
-        <?= count($queues) ?> queue(s) today
-      </p>
+    <div class="flex items-center gap-4">
+      <!-- The board shows where the queue is. This is how you find where YOU
+           are in it: type the number on your slip. Without it the screen
+           answers the clinic's question and leaves the patient's unanswered. -->
+      <a href="/board/<?= e($key) ?>/position"
+         class="flex items-center gap-2 rounded-xl border border-teal-400/30 bg-teal-400/10 px-4 py-2.5 text-sm font-semibold text-teal-200 transition hover:bg-teal-400/20">
+        <svg class="h-4 w-4" aria-hidden="true"><use href="#i-search"/></svg>
+        Check my position
+      </a>
+      <div class="text-right">
+        <p class="text-2xl font-bold tabular text-white" data-tv-clock><?= e(date('h:i A')) ?></p>
+        <p class="text-[11px] text-slate-500" data-tv-counts>
+          <?= count($queues) ?> queue(s) today
+        </p>
+      </div>
     </div>
   </header>
 

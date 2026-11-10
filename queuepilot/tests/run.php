@@ -5915,6 +5915,55 @@ Assert::test('the nav does not leave Overview lit on every admin page', function
 });
 
 
+/* ------------------------------------------------------------------ */
+/* 51. the position screen is reachable from the board                 */
+/* ------------------------------------------------------------------ */
+
+Assert::test('every waiting-room board links to "where do I stand?"', function (): void {
+    // A feature nobody can reach is not a feature. The position screen is
+    // keyed like the board, so the board is the only place a patient will
+    // ever discover it — there is no nav, no menu, and no app to install.
+    $screens = [
+        'resources/views/pages/display/screen.php', // the TV on the wall
+        'resources/views/pages/display/live.php',   // the phone link
+    ];
+    foreach ($screens as $screen) {
+        $src = (string) file_get_contents(QP_ROOT . '/' . $screen);
+        Assert::true(
+            strpos($src, '/position') !== false,
+            basename($screen) . ' links to the position screen'
+        );
+    }
+});
+
+Assert::test('both boards show every room, not one token for the whole clinic', function (): void {
+    $tv = (string) file_get_contents(QP_ROOT . '/resources/views/pages/display/screen.php');
+    $phone = (string) file_get_contents(QP_ROOT . '/resources/views/pages/display/live.php');
+
+    // A clinic with five doctors showing a single token means four rooms of
+    // patients watch a number that is never theirs.
+    // The TV's markup is in the view but its polling renderer is in app.js;
+    // the phone board carries both inline. Check each where it lives.
+    $appJs = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+
+    Assert::true(strpos($tv, 'data-tv-rooms') !== false, 'the TV has a per-room container');
+    Assert::true(strpos($appJs, 'data.serving') !== false, 'and app.js renders the room list into it');
+    Assert::true(strpos($appJs, 'data.solo') !== false, 'falling back to the hero for a solo practice');
+    Assert::true(strpos($phone, 'phone-serving-rooms') !== false, 'the phone board has one too');
+    Assert::true(strpos($phone, 'data.serving') !== false, 'and renders it');
+});
+
+Assert::test('the coming-up list names the doctor, because token series repeat', function (): void {
+    $appJs = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+    $phone = (string) file_get_contents(QP_ROOT . '/resources/views/pages/display/live.php');
+
+    // Every queue restarts its own A-series, so three rooms can all be
+    // waiting on "A002". Without the doctor the list is ambiguous.
+    Assert::true(strpos($appJs, 'u.doctor') !== false, 'the TV names the doctor');
+    Assert::true(strpos($phone, 'item.doctor') !== false, 'and so does the phone board');
+});
+
+
 $code = Assert::summary();
 Database::cleanup($dbPath);
 echo "\n";

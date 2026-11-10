@@ -51,11 +51,18 @@ $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
   <!-- now serving -->
   <section class="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
     <p class="text-xs font-bold uppercase tracking-[0.2em] text-slate-400 mb-3">Now serving</p>
-    <div class="flex flex-col items-center justify-center">
+
+    <!-- One doctor: the whole card is theirs. -->
+    <div id="phone-serving-solo" class="flex flex-col items-center justify-center">
       <p id="phone-serving-token" class="phone-token font-mono font-bold text-slate-900">—</p>
       <p id="phone-serving-room" class="mt-2 font-medium text-slate-600">—</p>
       <p id="phone-serving-doctor" class="mt-1 text-sm text-slate-500"></p>
     </div>
+
+    <!-- Several doctors: one row each. A single token on a five-room clinic
+         means four rooms of patients are watching a number that is not
+         theirs, which on a phone is the very thing they opened it for. -->
+    <ul id="phone-serving-rooms" class="hidden divide-y divide-slate-100"></ul>
   </section>
 
   <!-- coming up -->
@@ -75,6 +82,17 @@ $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
     <p class="text-sm font-bold text-amber-900" id="phone-notices-text"></p>
   </section>
 
+  <!-- Check my position: the board says where the queue is; this says where
+       YOU are in it. Same key, no sign-in — type the number on your slip. -->
+  <section class="mb-6">
+    <a href="/board/<?= e($key) ?>/position"
+       class="flex items-center justify-center gap-2 rounded-xl bg-teal-600 px-4 py-3.5 text-[15px] font-semibold text-white shadow-sm transition hover:bg-teal-700">
+      <svg class="h-4 w-4" aria-hidden="true"><use href="#i-search"/></svg>
+      Check my position
+    </a>
+    <p class="mt-1.5 text-center phone-nudge">Know your token number? See exactly how many people are ahead of you.</p>
+  </section>
+
   <!-- nudge -->
   <section class="rounded-xl border border-teal-200 bg-teal-50 p-4">
     <p class="text-sm text-teal-800">Your place is saved — watch this page. When your token appears under “Now serving,” head to the room shown.</p>
@@ -90,6 +108,8 @@ $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
   var servingTok = document.getElementById('phone-serving-token');
   var servingRoom = document.getElementById('phone-serving-room');
   var servingDoc = document.getElementById('phone-serving-doctor');
+  var soloBlock = document.getElementById('phone-serving-solo');
+  var roomsBlock = document.getElementById('phone-serving-rooms');
   var upcoming = document.getElementById('phone-upcoming-list');
   var empty = document.getElementById('phone-empty');
   var waitingCount = document.getElementById('phone-waiting-count');
@@ -110,13 +130,33 @@ $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
     if (data.now_serving) {
       servingTok.textContent = data.now_serving.token || '—';
       servingRoom.textContent = data.now_serving.room || '—';
-      servingDoc.textContent = data.now_serving.doctor ? ('With Dr ' + data.now_serving.doctor) : '';
+      servingDoc.textContent = data.now_serving.doctor ? ('With ' + data.now_serving.doctor) : '';
       status.textContent = 'Live';
     } else {
       servingTok.textContent = '—';
       servingRoom.textContent = '—';
       servingDoc.textContent = '';
       status.textContent = 'No one serving yet';
+    }
+
+    // Several rooms: one row per doctor. The hero stays for a solo practice,
+    // where a list of one would just be the same thing twice.
+    var rooms = data.serving || [];
+    if (data.solo === true || rooms.length <= 1) {
+      soloBlock.classList.remove('hidden');
+      roomsBlock.classList.add('hidden');
+    } else {
+      soloBlock.classList.add('hidden');
+      roomsBlock.classList.remove('hidden');
+      roomsBlock.innerHTML = rooms.map(function (r) {
+        return '<li class="flex items-center justify-between gap-3 py-2.5">' +
+            '<span class="min-w-0">' +
+              '<span class="block text-[13px] font-semibold text-slate-800">' + ehtml(r.doctor || r.queue || '') + '</span>' +
+              '<span class="block text-[11px] text-slate-500">' + ehtml(r.room || '') + (r.status === 'called' ? ' · called now' : '') + '</span>' +
+            '</span>' +
+            '<span class="font-mono text-2xl font-bold text-slate-900 phone-upcoming">' + ehtml(r.token || '—') + '</span>' +
+          '</li>';
+      }).join('');
     }
 
     // Coming up — same tokens as the TV.
@@ -131,7 +171,10 @@ $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
         li.className = 'flex items-center justify-between p-3 rounded-lg border border-slate-100 bg-slate-50';
         li.innerHTML =
           '<span class="font-mono font-bold text-slate-900 phone-upcoming">' + ehtml(item.token || '—') + '</span>' +
-          '<span class="phone-chip border border-slate-200 bg-white text-slate-600">' + ehtml(item.room || '—') + '</span>';
+          '<span class="min-w-0 text-right">' +
+            '<span class="block phone-chip text-slate-700">' + ehtml(item.doctor || '') + '</span>' +
+            '<span class="block text-[11px] text-slate-500">' + ehtml(item.room || '') + '</span>' +
+          '</span>';
         upcoming.appendChild(li);
       });
       waitingCount.textContent = list.length + ' ' + (list.length === 1 ? 'waiting' : 'waiting');
