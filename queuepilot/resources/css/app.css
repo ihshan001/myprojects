@@ -305,6 +305,18 @@
     font-variant-numeric: tabular-nums;
     @apply font-mono font-black tracking-tight;
   }
+  /* One card per consulting room. A clinic with five doctors used to show a
+     single token on the whole wall, so four rooms of patients watched a
+     number that was never theirs. */
+  .room-card {
+    @apply flex flex-col items-center justify-center rounded-2xl px-4 py-5 text-center;
+    @apply bg-white/[0.05] ring-1 ring-inset ring-white/10;
+  }
+  .room-card-called {
+    /* Someone has to stand up and walk. Make it the brightest thing on the
+       screen, not just a slightly different shade. */
+    @apply bg-teal-500/15 ring-teal-400/60;
+  }
 }
 
 @layer utilities {

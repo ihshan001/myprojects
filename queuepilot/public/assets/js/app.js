@@ -417,24 +417,79 @@
   const tvBoard = $('[data-display-board]');
   if (tvBoard) {
     const key = tvBoard.getAttribute('data-display-board');
+    const tvEsc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+
+    // Which token each room was showing last time, so a change can flash and
+    // be spoken. Keyed by queue id: two doctors can legitimately be on the
+    // same label, and comparing one flat string would miss half the calls.
+    const lastTokenByRoom = new Map();
+
     const apply = (data) => {
+      const solo = data.solo === true;
+      const soloEl = $('[data-tv-solo]');
+      const roomsEl = $('[data-tv-rooms]');
+
+      if (soloEl) soloEl.classList.toggle('hidden', !solo);
+      if (roomsEl) {
+        roomsEl.classList.toggle('hidden', solo);
+        roomsEl.classList.toggle('grid', !solo);
+      }
+
       const servingEl = $('[data-tv-serving]');
       if (servingEl && data.now_serving) {
         const prev = servingEl.getAttribute('data-token');
         servingEl.textContent = data.now_serving.token;
         servingEl.setAttribute('data-token', data.now_serving.token);
+        const roomEl = $('[data-tv-serving-room]');
+        if (roomEl) roomEl.textContent = [data.now_serving.room, data.now_serving.doctor].filter(Boolean).join(' · ');
         if (prev && prev !== data.now_serving.token) {
           servingEl.classList.add('call-flash');
           setTimeout(() => servingEl.classList.remove('call-flash'), 6000);
           speak(data.now_serving);
         }
       }
+
+      if (roomsEl && !solo) {
+        const rooms = data.serving || [];
+        // Work out what changed BEFORE rebuilding the list: the flash and the
+        // spoken announcement both need to know, and after the innerHTML swap
+        // the old tokens are gone.
+        const changed = new Map();
+        rooms.forEach((r) => {
+          const key = r.queue || r.room || '';
+          if (lastTokenByRoom.has(key) && lastTokenByRoom.get(key) !== r.token) changed.set(key, r);
+          lastTokenByRoom.set(key, r.token);
+        });
+
+        roomsEl.innerHTML = rooms.map((r) => {
+          const key = r.queue || r.room || '';
+          const cls = ['room-card'];
+          if (changed.has(key)) cls.push('call-flash');
+          if (r.status === 'called') cls.push('room-card-called');
+          return `
+            <div class="${cls.join(' ')}">
+              <p class="text-[10px] font-bold uppercase tracking-[0.18em] text-teal-400">${tvEsc(r.room || 'Room')}</p>
+              <p class="tv-token mt-1 text-5xl leading-none text-white">${tvEsc(r.token || '\u2014')}</p>
+              <p class="mt-1 truncate text-[11px] text-slate-400">${tvEsc(r.doctor || r.queue || '')}</p>
+            </div>`;
+        }).join('') || '<p class="text-slate-500">No session open yet.</p>';
+
+        // Announce the rooms whose token just changed, so nobody misses a call
+        // because they were looking at the wrong card.
+        changed.forEach((r) => speak(r));
+      }
+
       const next = $('[data-tv-next]');
       if (next) {
         next.innerHTML = (data.upcoming || []).map((u) => `
           <div class="flex items-center gap-4 rounded-xl bg-white/5 px-5 py-3">
-            <span class="tv-token text-3xl text-white">${u.token}</span>
-            <span class="text-sm text-slate-400">${u.room || ''}</span>
+            <span class="tv-token text-3xl text-white">${tvEsc(u.token)}</span>
+            <span class="min-w-0 text-sm text-slate-400">
+              <span class="block truncate text-slate-300">${tvEsc(u.doctor || '')}</span>
+              ${tvEsc(u.room || '')}
+            </span>
           </div>`).join('') || '<p class="text-slate-500">No one waiting</p>';
       }
       // Announced delays and paused queues are the clinic talking to the room.

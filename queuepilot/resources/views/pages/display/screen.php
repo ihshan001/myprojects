@@ -46,10 +46,20 @@ $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
   <div class="grid flex-1 gap-6 pt-6 lg:grid-cols-[1.35fr_1fr]">
 
     <!-- now serving -->
-    <div class="flex flex-col items-center justify-center rounded-3xl bg-white/[0.04] px-6 py-10 text-center">
+    <div class="flex flex-col rounded-3xl bg-white/[0.04] px-6 py-6">
       <p class="text-xs font-bold uppercase tracking-[0.35em] text-teal-400">Now serving</p>
-      <p class="tv-token mt-4 text-[7rem] leading-none text-white lg:text-[10rem]" data-tv-serving data-token="">—</p>
-      <div class="mt-6 flex items-center gap-3">
+
+      <!-- One doctor: the whole wall is theirs. -->
+      <div data-tv-solo class="flex flex-1 flex-col items-center justify-center text-center">
+        <p class="tv-token mt-4 text-[7rem] leading-none text-white lg:text-[10rem]" data-tv-serving data-token="">—</p>
+        <p class="mt-3 text-xl font-semibold text-slate-300" data-tv-serving-room></p>
+      </div>
+
+      <!-- Several doctors: one card each. Collapsing a five-room clinic into a
+           single token means four rooms of patients never see their number. -->
+      <div data-tv-rooms class="mt-4 hidden flex-1 content-start gap-3 sm:grid-cols-2"></div>
+
+      <div class="mt-6 flex items-center justify-center gap-3">
         <span class="live-pill" data-tv-live><span class="pulse-dot"><span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span></span><span data-tv-live-text>Live</span></span>
         <p class="text-sm text-slate-400">Please have your token ready</p>
       </div>

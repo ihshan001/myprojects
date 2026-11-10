@@ -5502,6 +5502,180 @@ Assert::test('the connected count only counts live connections', function (): vo
 });
 
 
+/* ------------------------------------------------------------------ */
+/* 48. waiting-room payload and "where do I stand?"                    */
+/* ------------------------------------------------------------------ */
+
+// Its own clinics/queues so these assertions never depend on what ran above.
+$dsToday   = date('Y-m-d');
+$posClinic = 1;
+$posQueue  = (int) Db::insert(
+    "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
+     VALUES (?, 1, 'Position probe', 'consultation', 'open', ?, 'P', 0, 3, ?)",
+    [$posClinic, $dsToday, Db::now()]
+);
+(new App\Domain\Queue\QueueService())->startSession($posClinic, $posQueue);
+
+$posIds = [];
+foreach (['Pos One', 'Pos Two', 'Pos Three'] as $i => $name) {
+    $p = $patients->findOrCreate($posClinic, ['full_name' => $name, 'phone' => '077222000' . ($i + 1)]);
+    $posIds[] = (int) (new App\Domain\Queue\QueueService())->issueToken($posClinic, $posQueue, (int) $p['id'], [])['entry_id'];
+}
+// Move the head along so the board has a token being served.
+$qs = new App\Domain\Queue\QueueService();
+$qs->apply($posClinic, $posIds[0], 'call', []);
+$qs->apply($posClinic, $posIds[0], 'start', []);
+
+Assert::test('the waiting-room payload is a superset the poller and the page share', function () use ($posClinic): void {
+    $payload = (new App\Services\DisplayService())->payload($posClinic);
+
+    Assert::true($payload['ok'] ?? false, 'ok');
+    foreach (['now_serving', 'serving', 'rooms', 'upcoming', 'delays', 'paused', 'stats', 'solo'] as $key) {
+        Assert::true(array_key_exists($key, $payload), $key . ' is present');
+    }
+    Assert::true(is_array($payload['serving']), 'serving is a list of every room');
+    Assert::true(is_bool($payload['solo']), 'solo is a boolean');
+});
+
+Assert::test('a multi-room clinic shows every room, not just one token', function () use ($posClinic): void {
+    $payload = (new App\Services\DisplayService())->payload($posClinic);
+
+    // Older code collapsed the clinic to a single `now_serving`, so a patient
+    // watching the TV never saw their own room called. `serving` carries all.
+    $rooms = array_values(array_filter(
+        $payload['rooms'],
+        static fn (array $r): bool => ($r['token'] ?? null) !== null
+    ));
+    Assert::true(count($rooms) >= 1, 'at least one room is serving');
+    $first = $rooms[0];
+    Assert::true(($first['doctor'] ?? null) !== null, 'the doctor is named');
+    Assert::true(array_key_exists('status', $first), 'and the status so "called" can flash');
+    Assert::same(count($rooms), count($payload['serving']), 'serving matches the room cards');
+});
+
+Assert::test('upcoming tokens name the doctor, because token series repeat per room', function () use ($posClinic): void {
+    $payload = (new App\Services\DisplayService())->payload($posClinic);
+    if ($payload['upcoming'] === []) {
+        Assert::true(true, 'nothing waiting at the moment');
+
+        return;
+    }
+    foreach ($payload['upcoming'] as $row) {
+        // Every queue restarts its own A-series, so three rooms can all be
+        // waiting on "A002". Without the doctor the list is ambiguous and
+        // patients walk to the wrong door.
+        Assert::true(($row['doctor'] ?? null) !== null, 'doctor named for ' . ($row['token'] ?? '?'));
+        Assert::true(($row['queue'] ?? null) !== null, 'queue named for ' . ($row['token'] ?? '?'));
+    }
+});
+
+Assert::test('upcoming is in queue order, not the order tokens were typed in', function () use ($posClinic, $posQueue): void {
+    // Read the per-queue list. The clinic-wide `upcoming` is capped at eight
+    // across every room, so a queue created late in the suite can be sliced
+    // off it entirely — which says nothing about this queue's ordering.
+    $payload = (new App\Services\DisplayService())->payload($posClinic);
+    $card = null;
+    foreach ($payload['rooms'] as $r) {
+        if ((int) ($r['queue_id'] ?? 0) === $posQueue) {
+            $card = $r;
+        }
+    }
+    Assert::true($card !== null, 'the probe queue has a room card');
+
+    $labels = array_map(static fn (array $r): string => (string) $r['token'], $card['up_next']);
+    Assert::true(count($labels) >= 2, 'it lists the people still waiting');
+    $sorted = $labels;
+    sort($sorted, SORT_NATURAL);
+    Assert::same($sorted, $labels, 'ascending, so position 2 follows position 1');
+});
+
+Assert::test('where do I stand answers for a real token', function () use ($posClinic, $posQueue, $posIds): void {
+    $label = (string) Db::scalar('SELECT token_label FROM queue_entries WHERE id = ?', [$posIds[1]]);
+    $res = (new App\Services\DisplayService())->myPosition($posClinic, null, $posQueue, $label);
+
+    Assert::true($res['ok'] ?? false, 'found');
+    $p = $res['position'];
+    Assert::same($label, $p['token'], 'the token asked for');
+    Assert::same('waiting', $p['status'], 'this one is still waiting');
+    Assert::same(1, (int) $p['position'], 'first in line once the head moved on');
+    // "Is my queue moving?" is only answerable with this queue's own token.
+    Assert::true(($p['now_serving'] ?? null) !== null, 'the queue says who it is serving');
+    Assert::true(($p['doctor'] ?? null) !== null, 'and who with');
+});
+
+Assert::test('where do I stand never leaks a name or the private track link', function () use ($posClinic, $posQueue, $posIds): void {
+    $label = (string) Db::scalar('SELECT token_label FROM queue_entries WHERE id = ?', [$posIds[1]]);
+    $res = (new App\Services\DisplayService())->myPosition($posClinic, null, $posQueue, $label);
+
+    $flat = json_encode($res, JSON_THROW_ON_ERROR);
+    // The token label is printed on paper and shouted across a room. It must
+    // never be exchangeable for the private link that can cancel the visit.
+    Assert::false(str_contains($flat, 'track_token'), 'no track token');
+    Assert::false(str_contains($flat, 'Pos One'), 'no patient name');
+    Assert::false(str_contains($flat, '077222000'), 'no phone number');
+});
+
+Assert::test('where do I stand refuses a token from another clinic', function () use ($posQueue, $patients): void {
+    // A real fixture in clinic 2 first: probing a tenant that has no rows
+    // proves nothing, because "no rows" is also what a leak looks like.
+    $otherQueue = (int) Db::insert(
+        "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
+         VALUES (2, 3, 'Other clinic probe', 'consultation', 'open', ?, 'Q', 0, 3, ?)",
+        [date('Y-m-d'), Db::now()]
+    );
+    (new App\Domain\Queue\QueueService())->startSession(2, $otherQueue);
+    $op = $patients->findOrCreate(2, ['full_name' => 'Other Clinic Person', 'phone' => '0773330001']);
+    $issued = (new App\Domain\Queue\QueueService())->issueToken(2, $otherQueue, (int) $op['id'], []);
+    $label = (string) Db::scalar('SELECT token_label FROM queue_entries WHERE id = ?', [(int) $issued['entry_id']]);
+
+    try {
+        // Clinic 1's screen asking about its own queue with a clinic-2 label:
+        // the label must not resolve, because it belongs to another tenant.
+        $res = (new App\Services\DisplayService())->myPosition(1, null, $posQueue, $label);
+        Assert::false($res['ok'] ?? false, 'clinic 1 cannot see clinic 2\'s token ' . $label);
+
+        // And asking clinic 1's queue id while standing in clinic 2.
+        $res2 = (new App\Services\DisplayService())->myPosition(2, null, $posQueue, $label);
+        Assert::false($res2['ok'] ?? false, 'clinic 2 cannot read clinic 1\'s queue');
+    } finally {
+        Db::run('DELETE FROM queue_entries WHERE queue_id = ?', [$otherQueue]);
+        Db::run('DELETE FROM queues WHERE id = ?', [$otherQueue]);
+    }
+});
+
+Assert::test('where do I stand rejects junk without touching the database', function () use ($posClinic, $posQueue): void {
+    $svc = new App\Services\DisplayService();
+    Assert::false($svc->myPosition($posClinic, null, $posQueue, '')['ok'], 'empty');
+    Assert::false($svc->myPosition($posClinic, null, $posQueue, '   ')['ok'], 'whitespace');
+    Assert::false($svc->myPosition($posClinic, null, $posQueue, str_repeat('x', 40))['ok'], 'too long');
+    Assert::false($svc->myPosition($posClinic, null, 999999, 'P001')['ok'], 'a queue that does not exist');
+});
+
+Assert::test('a department screen stays inside its own waiting area', function (): void {
+    $deptId = (int) Db::insert(
+        "INSERT INTO departments (clinic_id, name, code, is_active, created_at) VALUES (1, 'Pos Dept', 'POSDEPT', 1, ?)",
+        [Db::now()]
+    );
+    $inDept = (int) Db::insert(
+        "INSERT INTO queues (clinic_id, department_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
+         VALUES (1, ?, 1, 'In department', 'consultation', 'open', ?, 'R', 0, 3, ?)",
+        [$deptId, date('Y-m-d'), Db::now()]
+    );
+    (new App\Domain\Queue\QueueService())->startSession(1, $inDept);
+
+    try {
+        $scoped = (new App\Services\DisplayService())->payload(1, $deptId);
+        Assert::same('Pos Dept', $scoped['department'] ?? null, 'the header names the area');
+        $names = array_column($scoped['rooms'], 'queue');
+        Assert::true(in_array('In department', $names, true), 'its own queue is on the board');
+        Assert::false(in_array('Position probe', $names, true), 'a queue from another area is not');
+    } finally {
+        Db::run('DELETE FROM queues WHERE id = ?', [$inDept]);
+        Db::run('DELETE FROM departments WHERE id = ?', [$deptId]);
+    }
+});
+
+
 $code = Assert::summary();
 Database::cleanup($dbPath);
 echo "\n";

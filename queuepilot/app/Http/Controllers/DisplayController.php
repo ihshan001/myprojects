@@ -98,6 +98,77 @@ final class DisplayController
     }
 
     /**
+     * "Where do I stand?" — read-only position lookup for one patient.
+     *
+     * The patient types the token printed on their slip. No sign-in, no
+     * phone, no tracking link: a slip is a piece of paper and a waiting room
+     * has a screen, and asking someone to tap a URL they were never given
+     * is not an answer.
+     *
+     * Keyed like the board, so it inherits the same bearer credential and the
+     * same revocation. It answers for one clinic (and one waiting area, if
+     * the screen is department-scoped) and returns no patient name and no
+     * track token — a token label is shouted across a room, so it must never
+     * be exchangeable for the private link that could cancel the visit.
+     */
+    public function position(string $key): void
+    {
+        $resolved = (new DisplayKeyService())->resolve($key);
+        $clinicId = $resolved['clinic_id'] ?? null;
+
+        $departmentId   = $resolved['department_id'] ?? null;
+        $departmentName = null;
+        if ($clinicId !== null && $departmentId !== null) {
+            $departmentName = Db::scalar(
+                'SELECT name FROM departments WHERE id = ? AND clinic_id = ?',
+                [$departmentId, $clinicId]
+            );
+        }
+
+        if (!$clinicId) {
+            abort(404, 'This screen link is not valid. Ask the clinic for a new one.');
+        }
+        $clinicId = (int) $clinicId;
+
+        $clinic = Db::one('SELECT * FROM clinics WHERE id = ?', [$clinicId]);
+        if (!$clinic) {
+            abort(404, 'This screen link is not valid.');
+        }
+
+        $display = new \App\Services\DisplayService();
+        $board   = $display->payload($clinicId, $departmentId);
+        $rooms   = $board['rooms'] ?? [];
+
+        $queueId = (int) Request::int('queue');
+        $token   = trim(Request::string('token'));
+
+        // A solo practice has one queue, so asking which doctor would be a
+        // question with a single answer.
+        if ($queueId === 0 && count($rooms) === 1) {
+            $queueId = (int) ($rooms[0]['queue_id'] ?? 0);
+        }
+
+        $result = null;
+        if ($token !== '' && $queueId > 0) {
+            $result = $display->myPosition($clinicId, $departmentId, $queueId, $token);
+        } elseif ($token !== '' && $queueId === 0) {
+            $result = ['ok' => false, 'error' => 'Choose which doctor you are seeing.'];
+        }
+
+        view('display/position', [
+            'title'          => 'Where do I stand?',
+            'key'            => $key,
+            'clinicRecord'   => $clinic,
+            'departmentName' => $departmentName,
+            'rooms'          => $rooms,
+            'solo'           => count($rooms) === 1,
+            'queueId'        => $queueId,
+            'token'          => $token,
+            'result'         => $result,
+        ], false);
+    }
+
+    /**
      * Turn the kiosk on for this clinic and show the address to open on the
      * tablet.
      *

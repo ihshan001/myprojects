@@ -298,6 +298,10 @@ Router::get('/settings/offline', [ClinicController::class, 'offline'], ['auth' =
 Router::get('/api/track/{token}', [ApiController::class, 'track']);
 Router::get('/api/display/{key}', [ApiController::class, 'display']);
 Router::get('/board/{key}', [DisplayController::class, 'publicScreen']);
+// Read-only "where do I stand?" for one patient. Keyed like the board so it
+// needs no sign-in and inherits the same revocation, and declared next to it
+// so nothing broader can shadow the {key} segment.
+Router::get('/board/{key}/position', [DisplayController::class, 'position']);
 Router::get('/live/{key}', [DisplayController::class, 'live']);
 
 // Online booking: 404 for clinics that have not opted in (see PublicController).
