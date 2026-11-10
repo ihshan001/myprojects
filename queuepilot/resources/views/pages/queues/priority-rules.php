@@ -14,6 +14,29 @@
   </div>
 </div>
 
+<!-- Live and counted, not decorative: how many people in the building are
+     being held ahead of the line by a person rather than a rule. -->
+<div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+  <div class="card card-pad flex items-center gap-3">
+    <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+      <svg class="h-4 w-4"><use href="#i-check-circle"/></svg>
+    </span>
+    <div class="min-w-0">
+      <p class="text-lg font-bold leading-tight text-slate-900"><?= (int) ($activeCount ?? 0) ?></p>
+      <p class="truncate text-[11px] text-slate-500">Rules in action</p>
+    </div>
+  </div>
+  <div class="card card-pad flex items-center gap-3">
+    <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
+      <svg class="h-4 w-4"><use href="#i-shield"/></svg>
+    </span>
+    <div class="min-w-0">
+      <p class="text-lg font-bold leading-tight text-slate-900"><?= (int) ($overridingNow ?? 0) ?></p>
+      <p class="truncate text-[11px] text-slate-500">Overriding by hand, right now</p>
+    </div>
+  </div>
+</div>
+
 <?php if (!empty($errors)): ?>
   <div class="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
     <p class="font-semibold">That rule was not saved.</p>
@@ -206,6 +229,78 @@
       <button class="btn-primary w-full" type="submit">Save rule</button>
     </form>
   </div>
+</div>
+
+<!-- ==================== does prioritising actually help? ============== -->
+<?php
+// What priority DID to waiting times, measured rather than asserted.
+//
+// This is an observational comparison, not a controlled trial: a clinic that
+// prioritises children is also a clinic whose children arrive at different
+// hours. So the figure is always labelled "against unprioritised visits in
+// the same period", never as time "saved", and the sample sizes travel with
+// it so a reader can see how thin the evidence is.
+//
+// The sign is kept. Prioritising a group can come out SLOWER than baseline
+// in a given month, and clamping that to a flattering zero would hide the
+// one result a manager most needs to see.
+$dash        = '—';
+$baseMean    = $impact['baseline']['mean'] ?? null;
+$ruleDiff    = $impact['rule']['diff'] ?? null;
+$manualDiff  = $impact['manual']['diff'] ?? null;
+$minutes     = static fn (?float $d): string => $d === null
+    ? $dash
+    : (($d < 0 ? '−' : '') . (int) round(abs($d)) . ' min');
+$tooltip     = static fn (array $g): string => ($g['mean'] ?? null) === null
+    ? 'Fewer than 5 finished visits in this group — a mean of three is noise.'
+    : 'Compared with unprioritised visits in the same period. A minus means this group waited longer.';
+?>
+<div class="card mt-5 overflow-hidden">
+  <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+    <p class="text-xs font-semibold text-slate-600">Did prioritising actually shorten the wait?</p>
+    <p class="text-[11px] text-slate-400">
+      <?= e($from) ?> to <?= e($to) ?> · measured on finished visits, against the
+      <?= (int) ($impact['baseline']['n'] ?? 0) ?> unprioritised ones in the same period
+    </p>
+  </div>
+
+  <?php if (!($impact['enough'] ?? false)): ?>
+    <p class="px-4 py-4 text-[12px] leading-relaxed text-slate-500">
+      Not enough finished visits in this period to compare yet — a group needs at least
+      <?= App\Services\PriorityImpactService::MIN_SAMPLES ?> before its average means anything.
+      Until then a dash is the honest answer, not a zero.
+    </p>
+  <?php else: ?>
+    <div class="grid grid-cols-3 divide-x divide-slate-100 border-b border-slate-100 text-center">
+      <div class="px-3 py-3">
+        <p class="text-xl font-bold text-slate-900"><?= e($baseMean === null ? $dash : ((int) round($baseMean) . 'm')) ?></p>
+        <p class="text-[10px] uppercase tracking-wide text-slate-500">
+          Unprioritised avg. wait (<?= (int) ($impact['baseline']['n'] ?? 0) ?>)
+        </p>
+      </div>
+      <div class="px-3 py-3" title="<?= e($tooltip($impact['rule'] ?? [])) ?>">
+        <p class="text-xl font-bold <?= $ruleDiff === null ? 'text-slate-400' : (($ruleDiff < 0) ? 'text-amber-700' : 'text-emerald-700') ?>">
+          <?= e($minutes($ruleDiff)) ?>
+        </p>
+        <p class="text-[10px] uppercase tracking-wide text-slate-500">
+          By rule (<?= (int) ($impact['rule']['n'] ?? 0) ?>)
+        </p>
+      </div>
+      <div class="px-3 py-3" title="<?= e($tooltip($impact['manual'] ?? [])) ?>">
+        <p class="text-xl font-bold <?= $manualDiff === null ? 'text-slate-400' : (($manualDiff < 0) ? 'text-amber-700' : 'text-emerald-700') ?>">
+          <?= e($minutes($manualDiff)) ?>
+        </p>
+        <p class="text-[10px] uppercase tracking-wide text-slate-500">
+          By hand (<?= (int) ($impact['manual']['n'] ?? 0) ?>)
+        </p>
+      </div>
+    </div>
+    <p class="px-4 py-2.5 text-[11px] leading-relaxed text-slate-500">
+      A minus means that group waited <b class="text-slate-700">longer</b> than unprioritised
+      patients. That is a real result, not a broken number: it usually means the flagged
+      patients were sicker to begin with, or that a rule is firing far more often than intended.
+    </p>
+  <?php endif; ?>
 </div>
 
 <!-- ==================== overuse ==================== -->

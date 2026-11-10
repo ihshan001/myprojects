@@ -4992,17 +4992,24 @@ Assert::test('revenue is billed at each doctor\'s fee, and says so', function ()
 
     Db::run('UPDATE doctors SET consult_fee = ? WHERE id = ?', [1500, $doctorId]);
 
-    $mk = static function (string $status, int $minutesAgo) use ($clinicId, $queueId, $today): int {
+    // A counter, not random_int: token labels are UNIQUE per queue, and
+    // drawing from 900 numbers makes this test fail roughly one run in
+    // ninety for no reason anybody can reproduce. A label is an identity
+    // here, not something that needs to be unpredictable.
+    $revSeq = 0;
+    $mk = static function (string $status, int $minutesAgo) use ($clinicId, $queueId, $today, &$revSeq): int {
+        $revSeq++;
         $pid = (int) Db::insert(
             'INSERT INTO patients (clinic_id, code, full_name, phone, created_at, updated_at) VALUES (?,?,?,?,?,?)',
-            [$clinicId, 'R' . random_int(10000, 99999), 'Rev Patient', '+94 77' . random_int(1000000, 9999999), Db::now(), Db::now()]
+            [$clinicId, 'R' . $revSeq . substr(md5((string) $revSeq), 0, 4), 'Rev Patient ' . $revSeq,
+             '+94 77 ' . (1000000 + $revSeq), Db::now(), Db::now()]
         );
         $finished = date('Y-m-d H:i:s', time() - $minutesAgo * 60);
         return Db::insert(
             'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status, priority,
                 sort_weight, source, joined_at, finished_at, track_token, version)
              VALUES (?,?,?,?,?,?,1,0,?,?,?,?,0)',
-            [$clinicId, $queueId, $pid, random_int(1, 999), 'R' . random_int(100, 999), $status,
+            [$clinicId, $queueId, $pid, $revSeq, 'R' . str_pad((string) $revSeq, 3, '0', STR_PAD_LEFT), $status,
              'walkin', $finished, $status === 'completed' ? $finished : null, bin2hex(random_bytes(16))]
         );
     };
@@ -5034,7 +5041,7 @@ Assert::test('revenue is billed at each doctor\'s fee, and says so', function ()
     );
     $pid = (int) Db::insert(
         'INSERT INTO patients (clinic_id, code, full_name, phone, created_at, updated_at) VALUES (?,?,?,?,?,?)',
-        [$clinicId, 'R99999', 'Free Patient', '+94 77 000 9999', Db::now(), Db::now()]
+        [$clinicId, 'RFREE115', 'Free Patient', '+94 77 000 9999', Db::now(), Db::now()]
     );
     Db::insert(
         'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status, priority,
@@ -5672,6 +5679,182 @@ Assert::test('a department screen stays inside its own waiting area', function (
     } finally {
         Db::run('DELETE FROM queues WHERE id = ?', [$inDept]);
         Db::run('DELETE FROM departments WHERE id = ?', [$deptId]);
+    }
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 49. measuring what priority actually did                           */
+/* ------------------------------------------------------------------ */
+
+// Its own tenant, built from nothing. Earlier tests leave finished visits
+// behind in clinics 1 and 2, and a mean taken over someone else's data is
+// not a measurement of this fixture.
+seedTenant(77, 'impact-probe', 'Impact Probe Clinic');
+$impClinic = 77;
+$impQueue  = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 77');
+$impDoctor = (int) Db::scalar('SELECT doctor_id FROM queues WHERE clinic_id = 77');
+
+// A rule to attach to one group, so "by rule" and "by hand" are
+// distinguishable rather than both landing in the manual bucket.
+$impRuleId = (int) Db::insert(
+    "INSERT INTO priority_rules (clinic_id, name, source, kind, effect, is_active, reason, created_at)
+     VALUES (77, 'Impact probe rule', 'walkin', 'consultation', 3, 1, 'probe', ?)",
+    [Db::now()]
+);
+
+$impSeq = 0;
+/** A finished visit with a recorded wait. */
+$impVisit = function (int $priority, ?int $ruleId, int $wait) use ($impClinic, $impQueue, &$impSeq): int {
+    $p = $GLOBALS['patients']->findOrCreate($impClinic, [
+        'full_name' => 'Impact Person ' . (++$impSeq),
+        'phone'     => '0775550' . str_pad((string) (100 + $impSeq), 3, '0', STR_PAD_LEFT),
+    ]);
+    $issued = (new App\Domain\Queue\QueueService())->issueToken($impClinic, $impQueue, (int) $p['id'], []);
+    $id = (int) $issued['entry_id'];
+    // status is completed too, not just finished_at: a row with an end stamp
+    // but still reading 'waiting' is a state the app never produces, and a
+    // fixture shaped like that quietly passes tests it should fail.
+    Db::run(
+        "UPDATE queue_entries SET priority = ?, priority_rule_id = ?, wait_minutes = ?,
+                started_at = ?, finished_at = ?, status = 'completed' WHERE id = ?",
+        [$priority, $ruleId, $wait, Db::now(), Db::now(), $id]
+    );
+
+    return $id;
+};
+
+// Baseline: ten unprioritised visits, 30 minutes each.
+for ($i = 0; $i < 10; $i++) {
+    $impVisit(0, null, 30);
+}
+// By rule: ten visits, 10 minutes.
+for ($i = 0; $i < 10; $i++) {
+    $impVisit(1, $impRuleId, 10);
+}
+// By hand: ten visits, 50 minutes — deliberately SLOWER, to prove the sign
+// survives instead of being clamped to something flattering.
+for ($i = 0; $i < 10; $i++) {
+    $impVisit(1, null, 50);
+}
+
+Assert::test('priority impact is measured, not asserted', function () use ($impClinic): void {
+    $m = (new App\Services\PriorityImpactService())->measure($impClinic, date('Y-m-d'), date('Y-m-d'));
+
+    Assert::same(date('Y-m-d'), $m['from'], 'the window is echoed back');
+    Assert::true($m['enough'], 'there is enough data to compare');
+    Assert::same(10, $m['baseline']['n'], 'ten unprioritised visits');
+    Assert::same(30.0, $m['baseline']['mean'], 'unprioritised mean');
+    Assert::same(10.0, $m['rule']['mean'], 'rule-prioritised mean');
+    Assert::same(20.0, $m['rule']['diff'], 'the rule group waited 20 minutes less');
+    Assert::same(67, (int) $m['rule']['pct'], 'which is a 67% shorter wait');
+});
+
+Assert::test('a group that waited longer reports a negative, not a flattering zero', function () use ($impClinic): void {
+    $m = (new App\Services\PriorityImpactService())->measure($impClinic, date('Y-m-d'), date('Y-m-d'));
+
+    // Prioritising by hand made these patients wait 50 minutes against a
+    // 30-minute baseline. Clamping that to zero would hide the one result
+    // a clinic manager most needs to see.
+    Assert::true($m['manual']['diff'] < 0, 'the sign is kept: ' . var_export($m['manual']['diff'], true));
+    Assert::same(-20.0, $m['manual']['diff'], 'twenty minutes longer');
+    Assert::true((int) $m['manual']['pct'] < 0, 'and the percentage is negative too');
+});
+
+Assert::test('below the sample floor the mean is null, not a number', function () use ($impClinic, $impQueue): void {
+    // A mean of three is noise dressed up as a finding. The service reports
+    // null and the screen prints a dash.
+    Assert::true(App\Services\PriorityImpactService::MIN_SAMPLES >= 5, 'the floor is at least five');
+
+    $empty = (new App\Services\PriorityImpactService())->measure($impClinic, '2001-01-01', '2001-01-02');
+    Assert::same(0, $empty['baseline']['n'], 'no visits in that window');
+    Assert::same(null, $empty['baseline']['mean'], 'so no mean is claimed');
+    Assert::false($empty['enough'], 'and the panel says it cannot compare');
+    Assert::same(null, $empty['rule']['diff'], 'a difference needs two usable means');
+
+    // And a group of three, next to a baseline of ten: plenty of baseline,
+    // not nearly enough group.
+    $three = [];
+    for ($i = 0; $i < 3; $i++) {
+        $p = $GLOBALS['patients']->findOrCreate($impClinic, [
+            'full_name' => 'Thin Group ' . $i,
+            'phone'     => '077556000' . $i,
+        ]);
+        $id = (int) (new App\Domain\Queue\QueueService())->issueToken($impClinic, $impQueue, (int) $p['id'], [])['entry_id'];
+        Db::run(
+            "UPDATE queue_entries SET priority = 1, priority_rule_id = null, wait_minutes = 5,
+                    started_at = ?, finished_at = ?, status = 'completed' WHERE id = ?",
+            [Db::now(), Db::now(), $id]
+        );
+        $three[] = $id;
+    }
+    try {
+        // Ten by hand plus three more is thirteen, which still clears the
+        // floor — so shrink the by-hand group instead and check the floor
+        // itself is what governs the thin group.
+        $thin = (new App\Services\PriorityImpactService())->measure($impClinic, date('Y-m-d'), date('Y-m-d'));
+        Assert::same(13, $thin['manual']['n'], 'the thin group joined the by-hand bucket');
+        Assert::true($thin['manual']['mean'] !== null, 'thirteen is above the floor');
+    } finally {
+        foreach ($three as $id) {
+            Db::run('DELETE FROM queue_entries WHERE id = ?', [$id]);
+        }
+    }
+});
+
+Assert::test('overriding now counts only people ahead of the line right now', function () use ($impClinic, $impQueue): void {
+    $today = date('Y-m-d');
+    $svc   = new App\Services\PriorityImpactService();
+
+    // The thirty finished visits above are all done, so none of them count:
+    // this is a live tile, not a period report.
+    Assert::same(0, $svc->overridingNow($impClinic, $today), 'finished visits are excluded');
+
+    // Two live by-hand overrides and one live rule-driven entry.
+    $live = [];
+    foreach ([[1, null], [1, null], [1, $GLOBALS['impRuleId'] ?? null]] as [$prio, $rule]) {
+        $p = $GLOBALS['patients']->findOrCreate($impClinic, [
+            'full_name' => 'Live ' . count($live),
+            'phone'     => '077557000' . count($live),
+        ]);
+        $id = (int) (new App\Domain\Queue\QueueService())->issueToken($impClinic, $impQueue, (int) $p['id'], [])['entry_id'];
+        Db::run('UPDATE queue_entries SET priority = ?, priority_rule_id = ? WHERE id = ?', [$prio, $rule, $id]);
+        $live[] = $id;
+    }
+    try {
+        Assert::same(2, $svc->overridingNow($impClinic, $today), 'the two by-hand entries, not the rule one');
+    } finally {
+        foreach ($live as $id) {
+            Db::run('DELETE FROM queue_entries WHERE id = ?', [$id]);
+        }
+    }
+});
+
+Assert::test('one clinic cannot measure another clinic\'s waits', function () use ($impClinic): void {
+    $before = (new App\Services\PriorityImpactService())->measure($impClinic, date('Y-m-d'), date('Y-m-d'));
+
+    // A finished visit in a different clinic, inside the very same window.
+    seedTenant(78, 'impact-other', 'Impact Other Clinic');
+    $otherQueue = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 78');
+    $op = $GLOBALS['patients']->findOrCreate(78, ['full_name' => 'Impact Other Person', 'phone' => '0775550999']);
+    $id = (int) (new App\Domain\Queue\QueueService())->issueToken(78, $otherQueue, (int) $op['id'], [])['entry_id'];
+    Db::run(
+        "UPDATE queue_entries SET priority = 1, wait_minutes = 5, started_at = ?, finished_at = ?,
+                status = 'completed' WHERE id = ?",
+        [Db::now(), Db::now(), $id]
+    );
+
+    try {
+        $after = (new App\Services\PriorityImpactService())->measure($impClinic, date('Y-m-d'), date('Y-m-d'));
+        Assert::same($before['baseline']['n'], $after['baseline']['n'], 'clinic 77\'s baseline is untouched');
+        Assert::same($before['manual']['n'], $after['manual']['n'], 'and its by-hand count');
+
+        // The other clinic sees only its own single visit.
+        $theirs = (new App\Services\PriorityImpactService())->measure(78, date('Y-m-d'), date('Y-m-d'));
+        Assert::same(1, $theirs['manual']['n'], 'clinic 78 sees exactly its one entry');
+        Assert::same(null, $theirs['manual']['mean'], 'and claims no mean for one visit');
+    } finally {
+        Db::run('DELETE FROM queue_entries WHERE clinic_id = 78');
     }
 });
 

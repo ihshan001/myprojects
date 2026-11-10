@@ -33,19 +33,41 @@ final class PriorityRuleController
         return $id;
     }
 
-    public function index(): void
+    /**
+     * Everything the screen reads, built once.
+     *
+     * One builder for every render path. The error path used to assemble its
+     * own shorter array, which meant an invalid rule redisplayed the page
+     * without `overuse`, `from` or `to` — and the view read all three.
+     * Duplicating a payload is how a form that fails validation renders a
+     * different page from one that succeeds.
+     *
+     * @param array<string, mixed> $old
+     * @param array<int, string>   $errors
+     * @return array<string, mixed>
+     */
+    private function payload(int $clinicId, array $old = [], array $errors = []): array
     {
-        $clinicId = $this->clinicId();
         $rules = $this->rules->rules($clinicId, false);
-
         foreach ($rules as &$rule) {
             $rule['matches'] = $this->rules->describeMatch($rule);
         }
         unset($rule);
 
-        view('queues/priority-rules', [
+        // The same window drives the overuse report and the impact
+        // measurement, so the two panels can be read against each other
+        // instead of describing different periods.
+        $from = Request::string('from', date('Y-m-d', strtotime('-30 days')));
+        $to   = Request::string('to', Db::today());
+        $impact = new \App\Services\PriorityImpactService();
+
+        return [
             'title'    => 'Priority rules',
             'rules'    => $rules,
+            'activeCount' => count(array_filter(
+                $rules,
+                static fn (array $r): bool => (int) ($r['is_active'] ?? 0) === 1
+            )),
             'doctors'  => Db::all('SELECT id, name FROM doctors WHERE clinic_id = ? ORDER BY name', [$clinicId]),
             'queues'   => Db::all(
                 "SELECT id, name FROM queues WHERE clinic_id = ? AND session_date >= date('now', '-7 day')
@@ -54,19 +76,26 @@ final class PriorityRuleController
             ),
             'sources'  => PriorityRuleService::SOURCES,
             'kinds'    => PriorityRuleService::KINDS,
-            'old'      => [],
-            'errors'   => [],
+            'old'      => $old,
+            'errors'   => $errors,
             // The rules decide who gets seen first; the overuse report is what
             // shows whether they are still being used as intended. Both on one
             // screen so a rule and its consequences are read together.
-            'overuse'  => (new \App\Services\PriorityAuditService())->report(
-                $clinicId,
-                Request::string('from', date('Y-m-d', strtotime('-30 days'))),
-                Request::string('to', Db::today())
-            ),
-            'from'     => Request::string('from', date('Y-m-d', strtotime('-30 days'))),
-            'to'       => Request::string('to', Db::today()),
-        ]);
+            'overuse'  => (new \App\Services\PriorityAuditService())->report($clinicId, $from, $to),
+            'from'     => $from,
+            'to'       => $to,
+            // Both are measurements rather than decoration, and both are
+            // allowed to come back empty: a clinic that has not finished five
+            // visits in a group gets a dash, because a mean of three is noise
+            // dressed up as a finding.
+            'impact'   => $impact->measure($clinicId, $from, $to),
+            'overridingNow' => $impact->overridingNow($clinicId, Db::today()),
+        ];
+    }
+
+    public function index(): void
+    {
+        view('queues/priority-rules', $this->payload($this->clinicId()));
     }
 
     public function save(): void
@@ -77,26 +106,10 @@ final class PriorityRuleController
         try {
             $ruleId = $this->rules->create($clinicId, $in, Auth::id());
         } catch (\InvalidArgumentException $e) {
-            $rules = $this->rules->rules($clinicId, false);
-            foreach ($rules as &$rule) {
-                $rule['matches'] = $this->rules->describeMatch($rule);
-            }
-            unset($rule);
-
-            view('queues/priority-rules', [
-                'title'   => 'Priority rules',
-                'rules'   => $rules,
-                'doctors' => Db::all('SELECT id, name FROM doctors WHERE clinic_id = ? ORDER BY name', [$clinicId]),
-                'queues'  => Db::all(
-                    "SELECT id, name FROM queues WHERE clinic_id = ? AND session_date >= date('now', '-7 day')
-                      ORDER BY session_date DESC, id DESC",
-                    [$clinicId]
-                ),
-                'sources' => PriorityRuleService::SOURCES,
-                'kinds'   => PriorityRuleService::KINDS,
-                'old'     => $in,
-                'errors'  => [$e->getMessage()],
-            ]);
+            // Redisplay with what was typed. Anything the service refused is
+            // the one thing worth keeping: retyping a rule to change one
+            // field is how a near-miss becomes a wrong rule.
+            view('queues/priority-rules', $this->payload($clinicId, $in, [$e->getMessage()]));
             return;
         }
 
