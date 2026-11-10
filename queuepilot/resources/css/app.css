@@ -967,3 +967,19 @@
   .btab-active {
     @apply text-teal-700;
   }
+
+  /* ------------------------------------------------------- settings tabs
+     One screen, five tabs. The settings page had the clinic profile, the
+     staff list, notification counters, integration switches and account
+     closure all stacked into one scroll. */
+  .st-tabs {
+    @apply flex gap-1 overflow-x-auto border-b border-slate-200 no-print;
+  }
+  .st-tabs::-webkit-scrollbar { display: none; }
+  .st-tab {
+    @apply shrink-0 border-b-2 border-transparent px-3 py-2 text-[13px] font-semibold text-slate-500
+           transition hover:border-slate-300 hover:text-slate-800;
+  }
+  .st-tab.is-active {
+    @apply border-teal-700 text-teal-800;
+  }

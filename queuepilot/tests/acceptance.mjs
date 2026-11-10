@@ -273,7 +273,7 @@ async function main() {
   step = '4. Invite a receptionist';
   let inviteLink = null;
   {
-    const token = await owner.csrf('/settings');
+    const token = await owner.csrf('/settings?tab=team');
     const res = await owner.post('/settings/invites', {
       _token: token,
       email: `reception-${suffix}@acceptance.test`,
@@ -281,7 +281,10 @@ async function main() {
     });
     check('an invitation is sent', res.status === 302 || res.status === 200, `HTTP ${res.status}`);
 
-    const { html } = await owner.get('/settings');
+    // Invitations live on the Team tab now that settings is split into
+    // sections, so the walkthrough has to ask for that tab rather than
+    // assuming one long page.
+    const { html } = await owner.get('/settings?tab=team');
     check('the invitation is listed as pending', html.includes(`reception-${suffix}@acceptance.test`));
     const link = html.match(/\/invite\/([A-Za-z0-9_-]{16,})/);
     inviteLink = link ? link[1] : null;

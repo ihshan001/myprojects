@@ -161,6 +161,7 @@ final class ClinicController
 
         view('settings/index', [
             'title' => 'Settings',
+            'activeTab' => Request::string('tab', 'clinic'),
             'clinicRecord' => $clinic,
             'staff' => Db::all(
                 'SELECT id, name, email, role, is_active, last_login_at FROM users WHERE clinic_id = ? ORDER BY role, name',

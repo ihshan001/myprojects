@@ -6137,6 +6137,46 @@ Assert::test('the header shows a different map per role', function (): void {
 });
 
 
+/* ------------------------------------------------------------------ */
+/* 55. settings is one screen, five tabs                               */
+/* ------------------------------------------------------------------ */
+
+Assert::test('the settings page is split into tabs', function (): void {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/index.php');
+    $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+
+    Assert::true(strpos($view, 'st-tabs') !== false, 'there is a tab strip');
+    Assert::true(strpos($css, '.st-tabs {') !== false, 'styled');
+
+    // The point of the split: a receptionist who came to invite a colleague
+    // should not scroll past the clinic's tax fields to find the staff list.
+    foreach (['clinic', 'team', 'notifications', 'integrations', 'billing'] as $tab) {
+        Assert::true(
+            strpos($view, "\$tab === '$tab'") !== false,
+            "there is a '$tab' tab"
+        );
+    }
+});
+
+Assert::test('an unknown tab falls back rather than rendering nothing', function (): void {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/index.php');
+
+    // ?tab=garbage must not produce a blank page — every pane is wrapped in a
+    // conditional, so an unmatched value has to land somewhere real.
+    Assert::true(strpos($view, "isset(\$tabs[\$tab])") !== false, 'the tab is checked against the map');
+    Assert::true(strpos($view, "\$tab = 'clinic'") !== false, 'and falls back to the first one');
+});
+
+Assert::test('the controller reads the tab from the query string', function (): void {
+    $src = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/ClinicController.php');
+    Assert::true(
+        (bool) preg_match("/Request::string\('tab'/", $src),
+        'the active tab comes from ?tab='
+    );
+    Assert::true(strpos($src, "'activeTab'") !== false, 'and is passed to the view');
+});
+
+
 $code = Assert::summary();
 Database::cleanup($dbPath);
 echo "\n";
