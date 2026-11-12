@@ -24,6 +24,7 @@ if ($u) {
                 ['/admin', 'grid', 'Overview', $isActive('/admin')],
                 ['/admin/monitor', 'heart', 'Platform health', $isActive('/admin/monitor')],
                 ['/admin/clinics', 'building', 'Clinics', $isActive('/admin/clinics')],
+                ['/admin/features', 'flask', 'Feature entitlements', $isActive('/admin/features')],
                 ['/admin/plans', 'card', 'Plans & billing', $isActive('/admin/plans')],
                 ['/admin/billing', 'check-circle', 'Payment verification', $isActive('/admin/billing')],
                 ['/admin/support', 'lifebuoy', 'Support queue', $isActive('/admin/support')],
@@ -52,7 +53,7 @@ if ($u) {
                 ['/app', 'grid', t('nav.live_board', 'Live board'), $isActive('/app')],
                 ['/queue/new', 'plus', t('nav.new_patient', 'New patient'), $isActive('/queue/new')],
             ],
-            'Clinic' => [
+            'Clinic' => array_values(array_filter([
                 ['/appointments', 'calendar', t('nav.appointments', 'Appointments'), $isActive('/appointments')],
                 ['/patients', 'users', t('nav.patients', 'Patients'), $isActive('/patients')],
                 ['/doctors', 'stethoscope', t('nav.doctors', 'Doctors & rooms'), $isActive('/doctors')],
@@ -69,7 +70,12 @@ if ($u) {
                 // them, and the page itself hides the write controls by role.
                 ['/departments', 'grid', 'Departments', $isActive('/departments')],
                 ['/calendar', 'calendar', 'Schedules & holidays', $isActive('/calendar')],
-            ],
+                // Managing the named display keys needs clinic.manage; a
+                // receptionist who cannot open the page should not be shown it.
+                Auth::can('clinic.manage')
+                    ? ['/settings/displays', 'monitor', 'Public screens', $isActive('/settings/displays')]
+                    : null,
+            ])),
             'Insight' => array_values(array_filter([
                 Auth::can('reports.view') ? ['/reports', 'chart', t('nav.reports', 'Reports'), $isActive('/reports')] : null,
                 // Only shown to a clinic owner whose clinic is actually in a

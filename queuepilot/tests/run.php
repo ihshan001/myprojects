@@ -6379,6 +6379,74 @@ Assert::test('a new rule appends to the list rather than jumping it', function (
 });
 
 
+/* ------------------------------------------------------------------ 58 ----
+ * Every page is reachable.
+ *
+ * A route that renders fine but that nothing links to is a feature nobody
+ * can use: the public-screens manager and the platform's feature
+ * entitlements were both built, tested green, and wired to nothing. The
+ * only way to find them was to diff the route table against the markup.
+ */
+Assert::test('every page with a fixed URL is linked to from somewhere', function (): void {
+    $routes = file_get_contents(QP_ROOT . '/routes/web.php');
+    preg_match_all("#Router::get\('([^']+)',\s*\[\s*(\w+)::class,\s*'(\w+)'#", (string) $routes, $m, PREG_SET_ORDER);
+
+    // URLs that are deliberately not linked. Each is reached by redirect
+    // rather than by a click, so the markup scan can never see them.
+    $byRedirect = [
+        '/features'              => 'redirects to /#surfaces',
+        '/pricing'               => 'redirects to /#pricing',
+        '/queue/token-issued'    => 'redirect target after issuing',
+        '/getting-started/display' => 'redirect target from onboarding',
+    ];
+
+    $haystack = '';
+    foreach (['resources/views', 'public/assets'] as $dir) {
+        $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/' . $dir));
+        foreach ($it as $f) {
+            if ($f->isFile() && preg_match('/\.(php|js)$/', $f->getFilename())) {
+                $haystack .= (string) file_get_contents($f->getPathname()) . "\n";
+            }
+        }
+    }
+
+    $orphans = [];
+    foreach ($m as [, $path, $ctrl, $action]) {
+        if (str_contains($path, '{')) {
+            continue; // reached from a listing, with a real id substituted
+        }
+        if (isset($byRedirect[$path])) {
+            continue;
+        }
+        // A URL is usually built with a query string: /reports/export?from=…,
+        // /api/queue/board?queue_id=…. Matching the bare path alone reported
+        // three working pages as orphans, so the query is part of the match.
+        $quoted = preg_quote($path, '#');
+        if (preg_match('#' . $quoted . '(?:\?[^"\'`]*)?["\'`]#', $haystack)) {
+            continue;
+        }
+        $orphans[] = $path . ' (' . $ctrl . '::' . $action . ')';
+    }
+
+    Assert::same([], $orphans, 'no page is left unreachable');
+});
+
+Assert::test('the two screens that were wired to nothing now have nav entries', function (): void {
+    // Regression guard, not a style check: both pages existed, both rendered
+    // 200, and neither was reachable from any menu in the app.
+    $layout = (string) file_get_contents(QP_ROOT . '/resources/views/layouts/app.php');
+
+    Assert::true(str_contains($layout, "'/settings/displays'"), 'public screens is in the clinic nav');
+    Assert::true(str_contains($layout, "'/admin/features'"), 'feature entitlements is in the platform nav');
+
+    // Gated, so a receptionist is not shown a link that 403s.
+    Assert::true(
+        str_contains($layout, "Auth::can('clinic.manage')\n                    ? ['/settings/displays'"),
+        'and the screens link only appears for a role that can open it'
+    );
+});
+
+
 $code = Assert::summary();
 Database::cleanup($dbPath);
 echo "\n";

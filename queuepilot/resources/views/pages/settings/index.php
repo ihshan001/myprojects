@@ -1,4 +1,6 @@
 <?php
+use App\Core\Auth;
+
 $c = $clinicRecord;
 
 /* One screen, five tabs.
@@ -265,6 +267,11 @@ if (!isset($tabs[$tab])) {
       <a href="/display" target="_blank" class="btn-secondary mt-3 w-full">
         <svg class="h-4 w-4"><use href="#i-monitor"/></svg> Open display mode
       </a>
+      <?php if (Auth::can('clinic.manage')): ?>
+        <a href="/settings/displays" class="btn-secondary mt-2 w-full">
+          <svg class="h-4 w-4"><use href="#i-settings"/></svg> Manage screens and keys
+        </a>
+      <?php endif; ?>
     </div>
   <?php endif; ?>
 
