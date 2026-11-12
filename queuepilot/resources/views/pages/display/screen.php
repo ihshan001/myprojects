@@ -164,19 +164,5 @@ $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
 </div>
 
 <script src="<?= e(asset('js/app.js')) ?>" defer></script>
-<script>
-  // Voice announcements toggle (persisted; some clinics prefer silence).
-  (function () {
-    var btn = document.getElementById('tv-speech');
-    var on = localStorage.getItem('qp_speech') !== 'off';
-    function render() { btn.textContent = 'Voice announcements: ' + (on ? 'on' : 'off'); }
-    btn.addEventListener('click', function () {
-      on = !on;
-      localStorage.setItem('qp_speech', on ? 'on' : 'off');
-      render();
-    });
-    render();
-  })();
-</script>
 </body>
 </html>

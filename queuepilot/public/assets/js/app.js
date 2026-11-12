@@ -1260,3 +1260,226 @@
     if (e.key === 'Escape' && !panel.classList.contains('hidden')) close();
   });
 })();
+
+
+/* ------- token desk: pick a found patient -------
+ * Moved here from an inline <script> in new.php.
+ *
+ * The app sends `script-src 'self'` with no 'unsafe-inline' and no nonce, so
+ * an inline block is refused silently: no console entry the nurse would see,
+ * no error page, and a page that looks finished and simply does not respond.
+ * That is how the phone board came to render once and never update, and how
+ * the token desk came to find a patient and then create a duplicate anyway.
+ *
+ * Each block runs only on its own page, so adding them costs one existence
+ * check per page load everywhere else. */
+(function () {
+  if (!document.getElementById('patient_id')) return;
+  (function () {
+    const patientId = document.getElementById('patient_id');
+    const fields = document.getElementById('new-patient-fields');
+    const picked = document.getElementById('picked-patient');
+    const nameEl = document.querySelector('[data-picked-name]');
+    const phoneEl = document.querySelector('[data-picked-phone]');
+
+    function pick(btn) {
+      patientId.value = btn.dataset.pickPatient;
+      nameEl.textContent = btn.dataset.pickName;
+      phoneEl.textContent = btn.dataset.pickPhone || 'no phone on file';
+      picked.classList.remove('hidden');
+      fields.classList.add('hidden');
+      document.querySelectorAll('[data-pick-patient]').forEach((b) => b.classList.remove('border-teal-400', 'bg-teal-50/40'));
+      btn.classList.add('border-teal-400', 'bg-teal-50/40');
+      picked.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
+    document.querySelectorAll('[data-pick-patient]').forEach((btn) => {
+      btn.addEventListener('click', () => pick(btn));
+    });
+
+    document.getElementById('clear-picked').addEventListener('click', () => {
+      patientId.value = '';
+      picked.classList.add('hidden');
+      fields.classList.remove('hidden');
+      document.getElementById('full_name').focus();
+    });
+
+    // Alt+Enter submits from anywhere in the form (receptionist speed)
+    document.addEventListener('keydown', (e) => {
+      if (e.altKey && e.key === 'Enter') {
+        document.getElementById('token-form').requestSubmit();
+      }
+    });
+
+    // Phone: show what will be used for the link, and validate length inline.
+    const phone = document.querySelector('[data-phone]');
+    const hint = document.getElementById('phone-hint');
+    if (phone) {
+      phone.addEventListener('blur', () => {
+        const digits = phone.value.replace(/\D/g, '');
+        if (digits === '') {
+          hint.textContent = 'Optional, for SMS tracking link';
+          hint.className = 'help';
+        } else if (digits.length < 9) {
+          hint.textContent = 'That looks short — use 07X XXX XXXX';
+          hint.className = 'help text-rose-600';
+        } else {
+          hint.textContent = 'Tracking link will be sent to this number';
+          hint.className = 'help text-teal-700';
+        }
+      });
+    }
+  })();
+})();
+
+/* ------- phone waiting-room board polling -------
+ * Moved here from an inline <script> in live.php.
+ *
+ * The app sends `script-src 'self'` with no 'unsafe-inline' and no nonce, so
+ * an inline block is refused silently: no console entry the nurse would see,
+ * no error page, and a page that looks finished and simply does not respond.
+ * That is how the phone board came to render once and never update, and how
+ * the token desk came to find a patient and then create a duplicate anyway.
+ *
+ * Each block runs only on its own page, so adding them costs one existence
+ * check per page load everywhere else. */
+(function () {
+  if (!document.body || !document.body.dataset.boardKey) return;
+  (function () {
+    var key = document.body.dataset.boardKey;
+    var api = '/api/display/' + encodeURIComponent(key);
+    var servingTok = document.getElementById('phone-serving-token');
+    var servingRoom = document.getElementById('phone-serving-room');
+    var servingDoc = document.getElementById('phone-serving-doctor');
+    var soloBlock = document.getElementById('phone-serving-solo');
+    var roomsBlock = document.getElementById('phone-serving-rooms');
+    var upcoming = document.getElementById('phone-upcoming-list');
+    var empty = document.getElementById('phone-empty');
+    var waitingCount = document.getElementById('phone-waiting-count');
+    var status = document.getElementById('phone-status');
+    var notices = document.getElementById('phone-notices');
+    var noticesText = document.getElementById('phone-notices-text');
+
+    function render(data) {
+      if (!data || !data.ok) {
+        status.textContent = 'Offline — try again shortly.';
+        return;
+      }
+
+      var now = new Date();
+      document.getElementById('phone-clock').textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      // Now serving — identical payload to the TV board.
+      if (data.now_serving) {
+        servingTok.textContent = data.now_serving.token || '—';
+        servingRoom.textContent = data.now_serving.room || '—';
+        servingDoc.textContent = data.now_serving.doctor ? ('With ' + data.now_serving.doctor) : '';
+        status.textContent = 'Live';
+      } else {
+        servingTok.textContent = '—';
+        servingRoom.textContent = '—';
+        servingDoc.textContent = '';
+        status.textContent = 'No one serving yet';
+      }
+
+      // Several rooms: one row per doctor. The hero stays for a solo practice,
+      // where a list of one would just be the same thing twice.
+      var rooms = data.serving || [];
+      if (data.solo === true || rooms.length <= 1) {
+        soloBlock.classList.remove('hidden');
+        roomsBlock.classList.add('hidden');
+      } else {
+        soloBlock.classList.add('hidden');
+        roomsBlock.classList.remove('hidden');
+        roomsBlock.innerHTML = rooms.map(function (r) {
+          return '<li class="flex items-center justify-between gap-3 py-2.5">' +
+              '<span class="min-w-0">' +
+                '<span class="block text-[13px] font-semibold text-slate-800">' + ehtml(r.doctor || r.queue || '') + '</span>' +
+                '<span class="block text-[11px] text-slate-500">' + ehtml(r.room || '') + (r.status === 'called' ? ' · called now' : '') + '</span>' +
+              '</span>' +
+              '<span class="font-mono text-2xl font-bold text-slate-900 phone-upcoming">' + ehtml(r.token || '—') + '</span>' +
+            '</li>';
+        }).join('');
+      }
+
+      // Coming up — same tokens as the TV.
+      upcoming.innerHTML = '';
+      var list = data.upcoming || [];
+      if (list.length === 0) {
+        empty.classList.remove('hidden');
+      } else {
+        empty.classList.add('hidden');
+        list.forEach(function (item) {
+          var li = document.createElement('li');
+          li.className = 'flex items-center justify-between p-3 rounded-lg border border-slate-100 bg-slate-50';
+          li.innerHTML =
+            '<span class="font-mono font-bold text-slate-900 phone-upcoming">' + ehtml(item.token || '—') + '</span>' +
+            '<span class="min-w-0 text-right">' +
+              '<span class="block phone-chip text-slate-700">' + ehtml(item.doctor || '') + '</span>' +
+              '<span class="block text-[11px] text-slate-500">' + ehtml(item.room || '') + '</span>' +
+            '</span>';
+          upcoming.appendChild(li);
+        });
+        waitingCount.textContent = list.length + ' ' + (list.length === 1 ? 'waiting' : 'waiting');
+      }
+
+      // Notices — delays and pauses, same as the TV.
+      var bits = [];
+      (data.delays || []).forEach(function (d) {
+        bits.push(d.queue + ' is running ' + d.minutes + ' min late' + (d.note ? ' — ' + d.note : ''));
+      });
+      (data.paused || []).forEach(function (q) {
+        bits.push(q + ' is paused');
+      });
+      if (bits.length) {
+        notices.classList.remove('hidden');
+        noticesText.textContent = bits.join(' · ');
+      } else {
+        notices.classList.add('hidden');
+      }
+    }
+
+    function ehtml(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function fetchBoard() {
+      fetch(api, { credentials: 'same-origin', cache: 'no-store' }).then(function (r) {
+        return r.ok ? r.json() : null;
+      }).then(render).catch(function () {
+        status.textContent = 'Offline — try again shortly.';
+      });
+    }
+
+    fetchBoard();
+    setInterval(fetchBoard, 6000);
+  })();
+})();
+
+/* ------- TV voice announcements toggle -------
+ * Moved here from an inline <script> in screen.php.
+ *
+ * The app sends `script-src 'self'` with no 'unsafe-inline' and no nonce, so
+ * an inline block is refused silently: no console entry the nurse would see,
+ * no error page, and a page that looks finished and simply does not respond.
+ * That is how the phone board came to render once and never update, and how
+ * the token desk came to find a patient and then create a duplicate anyway.
+ *
+ * Each block runs only on its own page, so adding them costs one existence
+ * check per page load everywhere else. */
+(function () {
+  var btn0 = document.getElementById('tv-speech');
+      if (!btn0) return;
+    // Voice announcements toggle (persisted; some clinics prefer silence).
+    (function () {
+      var btn = document.getElementById('tv-speech');
+      var on = localStorage.getItem('qp_speech') !== 'off';
+      function render() { btn.textContent = 'Voice announcements: ' + (on ? 'on' : 'off'); }
+      btn.addEventListener('click', function () {
+        on = !on;
+        localStorage.setItem('qp_speech', on ? 'on' : 'off');
+        render();
+      });
+      render();
+    })();
+})();

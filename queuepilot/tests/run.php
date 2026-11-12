@@ -5942,15 +5942,17 @@ Assert::test('both boards show every room, not one token for the whole clinic', 
 
     // A clinic with five doctors showing a single token means four rooms of
     // patients watch a number that is never theirs.
-    // The TV's markup is in the view but its polling renderer is in app.js;
-    // the phone board carries both inline. Check each where it lives.
+    // Both boards now keep their markup in the view and their polling
+    // renderer in app.js. The phone board's renderer used to sit in an inline
+    // <script>, which `script-src 'self'` refused silently — so the board
+    // rendered once and never updated. Check each where it lives.
     $appJs = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
 
     Assert::true(strpos($tv, 'data-tv-rooms') !== false, 'the TV has a per-room container');
     Assert::true(strpos($appJs, 'data.serving') !== false, 'and app.js renders the room list into it');
     Assert::true(strpos($appJs, 'data.solo') !== false, 'falling back to the hero for a solo practice');
     Assert::true(strpos($phone, 'phone-serving-rooms') !== false, 'the phone board has one too');
-    Assert::true(strpos($phone, 'data.serving') !== false, 'and renders it');
+    Assert::true(strpos($appJs, 'data.serving') !== false, 'and app.js renders that one as well');
 });
 
 Assert::test('the coming-up list names the doctor, because token series repeat', function (): void {
@@ -5960,7 +5962,7 @@ Assert::test('the coming-up list names the doctor, because token series repeat',
     // Every queue restarts its own A-series, so three rooms can all be
     // waiting on "A002". Without the doctor the list is ambiguous.
     Assert::true(strpos($appJs, 'u.doctor') !== false, 'the TV names the doctor');
-    Assert::true(strpos($phone, 'item.doctor') !== false, 'and so does the phone board');
+    Assert::true(strpos($appJs, 'item.doctor') !== false, 'and so does the phone board');
 });
 
 
@@ -6061,6 +6063,53 @@ Assert::test('no inline event handlers anywhere: the CSP blocks them silently', 
         $offenders === [],
         'no view uses an inline handler' . ($offenders === [] ? '' : ': ' . implode(', ', $offenders))
     );
+});
+
+Assert::test('no inline <script> anywhere: the CSP blocks those too', function (): void {
+    // The sibling check above only ever looked at on*= attributes, which is
+    // why three inline <script> blocks survived it. A blocked inline block
+    // fails the same silent way — no console entry, no error page — and it
+    // took out whole features rather than single controls: the phone board's
+    // setInterval(fetchBoard, 6000) never ran, so the board rendered once and
+    // never moved, and the token desk found a patient and then created a
+    // duplicate anyway because pick() was never bound.
+    $offenders = [];
+    $dir = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($dir as $file) {
+        if (!$file->isFile() || $file->getExtension() !== 'php') {
+            continue;
+        }
+        $src = (string) file_get_contents($file->getPathname());
+        // An allowlisted nonce would make this legal; there is none, and
+        // adding one to permit inline blocks would undo the point of the
+        // header. Behaviour belongs in app.js, which is served from 'self'.
+        if (preg_match('/<script(?![^>]*\bsrc\s*=)[^>]*>/i', $src)) {
+            $offenders[] = str_replace(QP_ROOT . '/', '', $file->getPathname());
+        }
+    }
+    Assert::true(
+        $offenders === [],
+        'no view carries an inline script block' . ($offenders === [] ? '' : ': ' . implode(', ', $offenders))
+    );
+});
+
+Assert::test('the pages whose behaviour moved still load app.js', function (): void {
+    // Moving a script out of a view only helps if the view still pulls in the
+    // file it moved to. The phone board never included app.js at all, so the
+    // move alone would have left it just as frozen and one step harder to see.
+    foreach (['display/live', 'display/screen', 'queue/new'] as $page) {
+        $src = (string) file_get_contents(QP_ROOT . '/resources/views/pages/' . $page . '.php');
+        Assert::true(strpos($src, "js/app.js") !== false, $page . ' loads app.js');
+    }
+});
+
+Assert::test('the moved board and desk code is still reachable in app.js', function (): void {
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+    // Each is the only implementation of its feature, so silence here means
+    // the feature is gone rather than duplicated somewhere else.
+    Assert::true(strpos($js, 'fetchBoard') !== false, 'the phone board still polls');
+    Assert::true(strpos($js, 'data-pick-patient') !== false, 'the token desk still binds picking');
+    Assert::true(strpos($js, 'tv-speech') !== false, 'the TV speech toggle still renders');
 });
 
 Assert::test('destructive actions ask in-page, not through the browser', function (): void {
