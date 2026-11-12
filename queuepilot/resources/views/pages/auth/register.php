@@ -1,4 +1,11 @@
 <?php
+/**
+ * Create your clinic — a complete document in the landing's language, paired
+ * with sign-in: brand on the left (deep teal, what gets set up), the form on
+ * the right (paper, ink). Plans, prices and validation are unchanged; only
+ * the room they are presented in moved from the console's slate to the
+ * brand's paper.
+ */
 $errors = App\Core\Session::takeFlash('errors') ?? [];
 $old = App\Core\Session::takeFlash('old') ?? [];
 $val = static fn (string $k, string $d = ''): string => (string) ($old[$k] ?? $d);
@@ -8,42 +15,81 @@ $val = static fn (string $k, string $d = ''): string => (string) ($old[$k] ?? $d
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#06322E">
+  <meta name="robots" content="noindex, nofollow">
   <title>Create your clinic · QueuePilot</title>
   <link rel="icon" href="/assets/img/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="<?= e(asset('build/app.css')) ?>">
 </head>
-<body class="min-h-full bg-slate-50">
+<body class="lp auth-page h-full">
 <?php include QP_ROOT . '/resources/views/partials/icons.php'; ?>
 
-<div class="mx-auto max-w-5xl px-5 py-10">
-  <div class="flex items-center justify-between">
-    <a href="/" class="flex items-center gap-2.5">
-      <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-teal-700 text-sm font-black text-white">Q</span>
-      <span class="text-base font-bold tracking-tight text-slate-900">QueuePilot</span>
+<div class="auth-split">
+  <!-- The brand side: the offer, and exactly what it sets up. -->
+  <aside class="auth-brand">
+    <a class="auth-brand-mark" href="/" aria-label="QueuePilot — home">
+      <span class="h-9 w-9 shrink-0 rounded-[0.625rem] p-0.5" style="background-image:linear-gradient(140deg,#0F766E,#06322E)">
+        <svg viewBox="0 0 32 32" class="h-full w-full" aria-hidden="true">
+          <circle cx="14" cy="14" r="6.4" fill="none" stroke="#fff" stroke-width="2.6"/>
+          <path d="M18.2 18.2 L22.6 22.6" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
+          <circle cx="23.4" cy="23.4" r="2.6" fill="#E0A63C"/>
+        </svg>
+      </span>
+      <span class="lp-display text-[1.1875rem] font-semibold text-white">QueuePilot</span>
     </a>
-    <a href="/login" class="text-xs font-semibold text-slate-600 hover:text-slate-900">Already have an account? Sign in</a>
-  </div>
 
-  <div class="mt-8 grid gap-8 lg:grid-cols-[1.15fr_.85fr]">
-    <div class="card card-pad">
-      <h1 class="text-xl font-bold tracking-tight text-slate-900">Create your clinic</h1>
-      <p class="mt-1 text-sm text-slate-500">14 days free. No card. Your first queue opens automatically.</p>
+    <div class="auth-brand-body">
+      <h2 class="auth-brand-line">Open your first queue today.</h2>
+      <p class="auth-brand-sub">Fourteen days, full access. No card, and nothing to install.</p>
+
+      <p class="auth-panel-head">What gets set up for you</p>
+      <ul class="auth-facts">
+        <?php foreach ([
+            'Three rooms and three specialties you can rename',
+            'Your first doctor with today\'s queue already open',
+            'Token prefix from your clinic name (A001, A002…)',
+            'Patient tracking links enabled',
+            'Waiting-room display key generated',
+        ] as $item): ?>
+          <li class="auth-fact">
+            <svg aria-hidden="true"><use href="#i-check-circle"/></svg>
+            <span><?= e($item) ?></span>
+          </li>
+        <?php endforeach; ?>
+      </ul>
+    </div>
+
+    <p class="auth-brand-foot">
+      <strong class="mb-1.5 block text-[0.625rem] uppercase tracking-[0.18em]" style="color:rgba(246,231,200,.6)">Fair by design</strong>
+      SMS and WhatsApp messages are metered separately at cost plus a small margin, so a quiet month
+      costs less. Nothing is auto-charged, and suspending an account never deletes queue history.
+    </p>
+  </aside>
+
+  <!-- The form side. -->
+  <main class="auth-form-col">
+    <div class="auth-card">
+      <p class="auth-kicker text-right">
+        Already have an account? <a href="/login">Sign in</a>
+      </p>
+      <h1 class="lp-display auth-title">Create your clinic</h1>
+      <p class="auth-sub">14 days free. No card. Your first queue opens automatically.</p>
 
       <?php if ($errors !== []): ?>
-        <div class="mt-5 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+        <div class="auth-errors" role="alert">
           <ul class="list-inside list-disc space-y-0.5">
             <?php foreach ($errors as $msg): ?><li><?= e($msg) ?></li><?php endforeach; ?>
           </ul>
         </div>
       <?php endif; ?>
 
-      <form method="post" action="/register" class="mt-6 space-y-4" novalidate>
+      <form method="post" action="/register" class="auth-form" novalidate>
         <?= csrf_field() ?>
         <div class="grid gap-4 sm:grid-cols-2">
           <div class="sm:col-span-2">
             <label class="label" for="name">Clinic name</label>
             <input class="input <?= isset($errors['name']) ? 'input-error' : '' ?>" id="name" name="name"
-                   required value="<?= e($val('name')) ?>" placeholder="Serenity OPD & Family Clinic">
+                   required value="<?= e($val('name')) ?>" placeholder="Serenity OPD &amp; Family Clinic">
             <p class="help">This appears on patient tracking pages and printed slips.</p>
           </div>
           <div>
@@ -81,13 +127,15 @@ $val = static fn (string $k, string $d = ''): string => (string) ($old[$k] ?? $d
           </div>
         </div>
 
-        <fieldset class="pt-2">
-          <legend class="label">Choose a plan</legend>
+        <fieldset class="rounded-2xl border p-4" style="border-color:var(--lp-line)">
+          <legend class="label px-1">Choose a plan</legend>
           <div class="grid gap-2 sm:grid-cols-2">
             <?php foreach ($plans as $plan): ?>
               <label class="flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition
-                <?= $selected === $plan['code'] ? 'border-teal-600 bg-teal-50/50 ring-1 ring-teal-600/20' : 'border-slate-200 hover:border-slate-300' ?>">
-                <input type="radio" name="plan" value="<?= e($plan['code']) ?>" class="mt-1"
+                <?= $selected === $plan['code']
+                    ? 'border-teal-700 bg-teal-50/60 ring-2 ring-teal-700/25'
+                    : 'border-slate-200 hover:border-slate-300' ?>">
+                <input type="radio" name="plan" value="<?= e($plan['code']) ?>" class="mt-1 accent-teal-700"
                        <?= $selected === $plan['code'] ? 'checked' : '' ?>>
                 <span class="min-w-0">
                   <span class="flex items-baseline gap-2">
@@ -105,53 +153,23 @@ $val = static fn (string $k, string $d = ''): string => (string) ($old[$k] ?? $d
           </div>
         </fieldset>
 
-        <button class="btn-primary w-full btn-lg" type="submit">
-          Create clinic & start trial
+        <button class="lp-btn w-full" type="submit">
+          Create clinic &amp; start trial
           <svg class="h-4 w-4"><use href="#i-arrow-right"/></svg>
         </button>
-        <p class="text-center text-[11px] text-slate-400">
+        <p class="auth-note">
           By creating a clinic you agree that patient data in your clinic is yours, and that
           QueuePilot will not use it for anything except operating your queues.
         </p>
       </form>
+
+      <p class="auth-works">
+        <strong class="font-bold" style="color:var(--lp-ink)">Works on what you have</strong> &mdash;
+        a 1366&times;768 reception desktop, an old Android tablet at the desk, and your patients&rsquo;
+        existing phones. No app install, no special hardware.
+      </p>
     </div>
-
-    <div class="space-y-4">
-      <div class="card card-pad">
-        <h2 class="text-sm font-bold text-slate-900">What gets set up for you</h2>
-        <ul class="mt-3 space-y-2.5 text-[13px] text-slate-600">
-          <?php foreach ([
-              'Three rooms and three specialties you can rename',
-              'Your first doctor with today\'s queue already open',
-              'Token prefix from your clinic name (A001, A002…)',
-              'Patient tracking links enabled',
-              'Waiting-room display key generated',
-          ] as $item): ?>
-            <li class="flex gap-2">
-              <svg class="mt-0.5 h-4 w-4 shrink-0 text-teal-600"><use href="#i-check-circle"/></svg>
-              <span><?= e($item) ?></span>
-            </li>
-          <?php endforeach; ?>
-        </ul>
-      </div>
-
-      <div class="card card-pad bg-slate-900 text-white">
-        <p class="text-xs font-bold uppercase tracking-widest text-teal-400">Fair by design</p>
-        <p class="mt-2 text-[13px] leading-relaxed text-slate-300">
-          SMS and WhatsApp messages are metered separately at cost plus a small margin, so a quiet month
-          costs less. Nothing is auto-charged, and suspending an account never deletes queue history.
-        </p>
-      </div>
-
-      <div class="card card-pad">
-        <p class="text-xs font-bold uppercase tracking-widest text-slate-500">Works on what you have</p>
-        <p class="mt-2 text-[13px] leading-relaxed text-slate-600">
-          A 1366×768 reception desktop, an old Android tablet at the desk, and your patients' existing phones.
-          No app install, no special hardware.
-        </p>
-      </div>
-    </div>
-  </div>
+  </main>
 </div>
 <script src="<?= e(asset('js/app.js')) ?>" defer></script>
 </body>

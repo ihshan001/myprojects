@@ -20,6 +20,7 @@ if ($u) {
         $navSections = [
             'Main' => [
                 ['/admin', 'grid', 'Overview', $isActive('/admin')],
+                ['/admin/monitor', 'activity', 'Platform health', $isActive('/admin/monitor')],
             ],
             'Tenants' => [
                 ['/admin/clinics', 'building', 'Clinics', $isActive('/admin/clinics')],
@@ -86,6 +87,34 @@ if ($u) {
         ]));
 }
 $searchAction = $u ? ($u['role'] === 'super_admin' ? '/admin/clinics' : ($u['role'] === 'doctor' ? '/app' : '/patients')) : '/patients';
+
+/* Desktop header nav.
+   A 221px rail of twenty links is right for a phone drawer but wrong for a
+   wide screen: it spends the width the queue board needs on labels nobody
+   scrolls. So the header shows the handful of destinations a clinic reaches
+   for all day, and groups the rest under "More" — keeping the section names
+   from the drawer, so it is the same map either way. */
+$flatNav = [];
+foreach ($navSections as $section => $items) {
+    foreach ($items as $it) {
+        $flatNav[] = [$section, $it[0], $it[1], $it[2], $it[3]];
+    }
+}
+// Role-aware: the platform console has its own set of destinations, and
+// none of them match a clinic's, so a shared list left the admin header
+// with nothing but "More".
+$primaryHrefs = ($u && $u['role'] === 'super_admin')
+    ? ['/admin', '/admin/clinics', '/admin/organisations', '/admin/features',
+       '/admin/plans', '/admin/billing', '/admin/monitor']
+    : ['/app', '/appointments', '/patients', '/doctors', '/reports'];
+$headerPrimary = array_values(array_filter($flatNav, static fn ($n) => in_array($n[1], $primaryHrefs, true)));
+$headerMore = [];
+foreach ($flatNav as $n) {
+    if (in_array($n[1], $primaryHrefs, true)) continue;
+    $headerMore[$n[0]][] = $n;
+}
+// Footer items the header keeps one click away rather than burying.
+$headerQuick = array_values(array_filter($navFooter, static fn ($n) => in_array($n[0], ['/settings', '/support'], true)));
 ?>
 <!DOCTYPE html>
 <html lang="<?= e($locale ?? 'en') ?>" class="h-full">
@@ -116,82 +145,6 @@ $searchAction = $u ? ($u['role'] === 'super_admin' ? '/admin/clinics' : ($u['rol
   $shortName = implode(' ', array_slice($nameParts, 0, 2));
 ?>
 <div class="shell">
-  <!-- ===================================================== sidebar ===== -->
-  <aside class="sidebar no-print">
-    <div class="flex h-[68px] shrink-0 items-center gap-2.5 px-4">
-      <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-700 shadow-sm">
-        <svg class="h-5 w-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/>
-        </svg>
-      </span>
-      <div class="min-w-0 leading-tight">
-        <p class="truncate text-[15px] font-bold tracking-tight text-ink-900"><?= e($brandName) ?></p>
-        <p class="truncate text-[10.5px] text-ink-500"><?= e($brandTag) ?></p>
-      </div>
-    </div>
-
-    <?php $choices = $branchChoices ?? []; ?>
-    <?php if (count($choices) > 1): ?>
-      <form method="post" action="/branch/switch" class="px-4 pb-2">
-        <?= csrf_field() ?>
-        <input type="hidden" name="back" value="<?= e($path ?? '/app') ?>">
-        <label class="sr-only" for="branch-switch">Working in branch</label>
-        <select id="branch-switch" name="clinic_id" onchange="this.form.submit()"
-                class="w-full rounded-lg border border-hairline bg-white px-2 py-1.5 text-[11px] text-ink-700">
-          <?php foreach ($choices as $b): ?>
-            <option value="<?= (int) $b['id'] ?>" <?= (int) $b['id'] === (int) ($activeBranchId ?? 0) ? 'selected' : '' ?>>
-              <?= e((string) $b['name']) ?><?= $b['is_home'] ? ' (home)' : '' ?>
-            </option>
-          <?php endforeach; ?>
-        </select>
-      </form>
-    <?php endif; ?>
-
-    <nav class="scrollbar-thin flex-1 overflow-y-auto px-3 pb-2 pt-1">
-      <?php foreach ($navSections as $section => $items): ?>
-        <?php if ($items === []) continue; ?>
-        <p class="nav-section-label"><?= e($section) ?></p>
-        <?php foreach ($items as [$href, $icon, $label, $active]): ?>
-          <a href="<?= e($href) ?>" class="nav-item <?= $active ?>"<?= $active ? ' aria-current="page"' : '' ?>>
-            <svg class="h-[17px] w-[17px] shrink-0"><use href="#i-<?= e($icon) ?>"/></svg>
-            <span class="truncate"><?= e($label) ?></span>
-          </a>
-        <?php endforeach; ?>
-      <?php endforeach; ?>
-
-      <?php if ($navFooter !== []): ?>
-        <div class="mt-4 border-t border-hairline pt-2">
-          <?php foreach ($navFooter as [$href, $icon, $label, $active]): ?>
-            <a href="<?= e($href) ?>" class="nav-item <?= $active ?>"<?= $active ? ' aria-current="page"' : '' ?>>
-              <svg class="h-[17px] w-[17px] shrink-0"><use href="#i-<?= e($icon) ?>"/></svg>
-              <span class="truncate"><?= e($label) ?></span>
-            </a>
-          <?php endforeach; ?>
-        </div>
-      <?php endif; ?>
-    </nav>
-
-    <!-- User card. In devtest the chevron opens the role switcher: each port
-         is a different signed-in role, so this is how you move between them. -->
-    <div class="relative shrink-0 p-3" data-role-menu>
-      <?php $switcherStyle = 'pop'; include QP_ROOT . '/resources/views/components/role-switcher.php'; ?>
-      <button type="button" data-role-toggle aria-expanded="false" aria-controls="role-pop"
-              class="flex w-full items-center gap-2.5 rounded-xl border border-hairline bg-white px-2.5 py-2.5 text-left shadow-card transition hover:bg-slate-50">
-        <span class="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-700 text-[12px] font-bold text-white">
-          <?= e($initials) ?>
-          <?php if (!empty($devRole)): ?>
-            <span class="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-amber-400" title="devtest build"></span>
-          <?php endif; ?>
-        </span>
-        <span class="min-w-0 flex-1 leading-tight">
-          <span class="block truncate text-[12.5px] font-bold text-ink-900"><?= e($u['name']) ?></span>
-          <span class="block truncate text-[11px] text-ink-500"><?= e($roleLabel) ?></span>
-        </span>
-        <svg class="h-4 w-4 shrink-0 text-ink-400"><use href="#i-chevron-down"/></svg>
-      </button>
-    </div>
-  </aside>
-
   <!-- ============================================ mobile off-canvas ==== -->
   <div id="nav-overlay" class="nav-overlay no-print" hidden></div>
   <aside id="nav-drawer" class="nav-drawer no-print" aria-label="Navigation" aria-hidden="true">
@@ -235,6 +188,25 @@ $searchAction = $u ? ($u['role'] === 'super_admin' ? '/admin/clinics' : ($u['rol
       <?php endif; ?>
     </nav>
 
+    <?php $choices = $branchChoices ?? []; ?>
+    <?php if (count($choices) > 1): ?>
+      <!-- Was in the sidebar; the drawer is the only nav on a phone, so the
+           branch picker has to be reachable there too. -->
+      <form method="post" action="/branch/switch" class="border-t border-hairline px-3 py-3">
+        <?= csrf_field() ?>
+        <input type="hidden" name="back" value="<?= e($path ?? '/app') ?>">
+        <label class="sr-only" for="branch-switch-drawer">Working in branch</label>
+        <select id="branch-switch-drawer" name="clinic_id" data-autosubmit
+                class="w-full rounded-lg border border-hairline bg-white px-2 py-2 text-[12px] text-ink-700">
+          <?php foreach ($choices as $b): ?>
+            <option value="<?= (int) $b['id'] ?>" <?= (int) $b['id'] === (int) ($activeBranchId ?? 0) ? 'selected' : '' ?>>
+              <?= e((string) $b['name']) ?><?= $b['is_home'] ? ' (home)' : '' ?>
+            </option>
+          <?php endforeach; ?>
+        </select>
+      </form>
+    <?php endif; ?>
+
     <?php $switcherStyle = 'drawer'; include QP_ROOT . '/resources/views/components/role-switcher.php'; ?>
 
     <div class="shrink-0 border-t border-hairline p-3">
@@ -250,32 +222,115 @@ $searchAction = $u ? ($u['role'] === 'super_admin' ? '/admin/clinics' : ($u['rol
 
   <!-- ================================================== main column ==== -->
   <div class="main-col">
-    <!-- Desktop search bar -->
-    <div class="hidden px-6 pt-4 lg:block xl:px-12 no-print">
-      <div class="topbar-card">
-        <svg class="h-4 w-4 shrink-0 text-slate-400"><use href="#i-search"/></svg>
-        <form method="get" action="<?= e($searchAction) ?>" class="min-w-0 flex-1" data-board-search>
-          <label class="sr-only" for="q-desk">Search</label>
-          <input id="q-desk" name="q" type="search" class="topbar-search" autocomplete="off"
-                 placeholder="Search patients, tokens, appointments...">
-        </form>
-        <a href="/notifications" class="relative shrink-0 rounded-lg p-1.5 text-ink-500 transition hover:bg-slate-100" aria-label="Notifications">
-          <svg class="h-[18px] w-[18px]"><use href="#i-bell"/></svg>
-          <?php if ((int) ($bellCount ?? 0) > 0): ?>
-            <span class="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-600 px-1 text-[9px] font-bold text-white"><?= (int) $bellCount ?></span>
-          <?php endif; ?>
+    <!-- ============================================ desktop header === -->
+    <header class="topnav">
+      <div class="topnav-inner">
+        <a href="/app" class="topnav-brand">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-400 to-brand-700">
+            <svg class="h-4 w-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+              <circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/>
+            </svg>
+          </span>
+          <span class="truncate text-[14px] font-bold tracking-tight text-ink-900"><?= e($brandName) ?></span>
         </a>
-        <?php if ($u['role'] === 'clinic_admin' || $u['role'] === 'receptionist'): ?>
-          <a href="/queue/new" class="btn-primary shrink-0 !px-3.5 !py-2 !text-[13px]">
-            <svg class="h-4 w-4"><use href="#i-plus"/></svg>New patient
+
+        <nav class="topnav-links" aria-label="Main">
+          <?php foreach ($headerPrimary as [, $href, $icon, $label, $active]): ?>
+            <a href="<?= e($href) ?>" class="topnav-link <?= $active ? 'is-active' : '' ?>"<?= $active ? ' aria-current="page"' : '' ?>>
+              <?= e($label) ?>
+            </a>
+          <?php endforeach; ?>
+
+          <?php if ($headerMore !== []): ?>
+            <div class="topnav-more" data-nav-more>
+              <button type="button" class="topnav-link" data-nav-more-toggle aria-expanded="false" aria-controls="nav-more-menu">
+                More
+                <svg class="h-3.5 w-3.5"><use href="#i-chevron-down"/></svg>
+              </button>
+              <div class="topnav-menu" id="nav-more-menu" hidden>
+                <?php foreach ($headerMore as $section => $items): ?>
+                  <p class="topnav-menu-label"><?= e($section) ?></p>
+                  <?php foreach ($items as [, $href, $icon, $label, $active]): ?>
+                    <a href="<?= e($href) ?>" class="topnav-menu-item <?= $active ? 'is-active' : '' ?>">
+                      <svg class="h-4 w-4 shrink-0 text-ink-400"><use href="#i-<?= e($icon) ?>"/></svg>
+                      <span class="truncate"><?= e($label) ?></span>
+                    </a>
+                  <?php endforeach; ?>
+                <?php endforeach; ?>
+              </div>
+            </div>
+          <?php endif; ?>
+        </nav>
+
+        <div class="topnav-right">
+          <form method="get" action="<?= e($searchAction) ?>" class="topnav-search" data-board-search>
+            <svg class="h-4 w-4 shrink-0 text-slate-400"><use href="#i-search"/></svg>
+            <label class="sr-only" for="q-desk">Search</label>
+            <input id="q-desk" name="q" type="search" class="topbar-search" autocomplete="off"
+                   placeholder="Search patients, tokens, appointments...">
+          </form>
+
+          <?php $choices = $branchChoices ?? []; ?>
+          <?php if (count($choices) > 1): ?>
+            <form method="post" action="/branch/switch" class="shrink-0">
+              <?= csrf_field() ?>
+              <input type="hidden" name="back" value="<?= e($path ?? '/app') ?>">
+              <label class="sr-only" for="branch-switch">Working in branch</label>
+              <select id="branch-switch" name="clinic_id" data-autosubmit
+                      class="topnav-branch">
+                <?php foreach ($choices as $b): ?>
+                  <option value="<?= (int) $b['id'] ?>" <?= (int) $b['id'] === (int) ($activeBranchId ?? 0) ? 'selected' : '' ?>>
+                    <?= e((string) $b['name']) ?><?= $b['is_home'] ? ' (home)' : '' ?>
+                  </option>
+                <?php endforeach; ?>
+              </select>
+            </form>
+          <?php endif; ?>
+
+          <a href="/notifications" class="topnav-icon" aria-label="Notifications">
+            <svg class="h-[18px] w-[18px]"><use href="#i-bell"/></svg>
+            <?php if ((int) ($bellCount ?? 0) > 0): ?>
+              <span class="topnav-badge"><?= (int) $bellCount ?></span>
+            <?php endif; ?>
           </a>
-        <?php elseif ($u['role'] === 'super_admin'): ?>
-          <a href="/admin/clinics" class="btn-primary shrink-0 !px-3.5 !py-2 !text-[13px]">
-            <svg class="h-4 w-4"><use href="#i-building"/></svg>Clinics
-          </a>
-        <?php endif; ?>
+          <?php foreach ($headerQuick as [$href, $icon, $label, $active]): ?>
+            <a href="<?= e($href) ?>" class="topnav-icon" aria-label="<?= e($label) ?>" title="<?= e($label) ?>">
+              <svg class="h-[18px] w-[18px]"><use href="#i-<?= e($icon) ?>"/></svg>
+            </a>
+          <?php endforeach; ?>
+
+          <?php if ($u['role'] === 'clinic_admin' || $u['role'] === 'receptionist'): ?>
+            <a href="/queue/new" class="btn-primary shrink-0 !px-3 !py-1.5 !text-[13px]">
+              <svg class="h-4 w-4"><use href="#i-plus"/></svg>New patient
+            </a>
+          <?php elseif ($u['role'] === 'super_admin'): ?>
+            <a href="/admin/clinics" class="btn-primary shrink-0 !px-3 !py-1.5 !text-[13px]">
+              <svg class="h-4 w-4"><use href="#i-building"/></svg>Clinics
+            </a>
+          <?php endif; ?>
+
+          <!-- User menu. In devtest the chevron opens the role switcher: each
+               port is a different signed-in role. -->
+          <div class="relative shrink-0" data-role-menu>
+            <?php $switcherStyle = 'pop'; include QP_ROOT . '/resources/views/components/role-switcher.php'; ?>
+            <button type="button" data-role-toggle aria-expanded="false" aria-controls="role-pop"
+                    class="topnav-user">
+              <span class="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-700 text-[11px] font-bold text-white">
+                <?= e($initials) ?>
+                <?php if (!empty($devRole)): ?>
+                  <span class="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-amber-400" title="devtest build"></span>
+                <?php endif; ?>
+              </span>
+              <span class="hidden min-w-0 leading-tight xl:block">
+                <span class="block truncate text-[12px] font-bold text-ink-900"><?= e($u['name']) ?></span>
+                <span class="block truncate text-[10px] text-ink-500"><?= e($roleLabel) ?></span>
+              </span>
+              <svg class="h-3.5 w-3.5 shrink-0 text-ink-400"><use href="#i-chevron-down"/></svg>
+            </button>
+          </div>
+        </div>
       </div>
-    </div>
+    </header>
 
     <!-- Mobile header -->
     <div class="sticky top-0 z-30 bg-canvas/95 backdrop-blur lg:hidden no-print"

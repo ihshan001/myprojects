@@ -69,7 +69,7 @@ $verbsFor = static function (string $status) use ($canPriority): array {
           <?php if (count($queues) > 3): ?>
             <form method="get" action="/app" class="shrink-0 pb-1">
               <label class="sr-only" for="queue-pick">Jump to another doctor</label>
-              <select id="queue-pick" name="queue" onchange="this.form.submit()"
+              <select id="queue-pick" name="queue" data-autosubmit
                       class="qselect h-8 cursor-pointer truncate rounded border-0 bg-transparent py-0 pl-0 pr-5 text-[12px] font-medium text-ink-500 focus:ring-0">
                 <option value="" selected>All doctors</option>
                 <?php foreach (array_slice($queues, 3) as $q): ?>
@@ -118,7 +118,7 @@ $verbsFor = static function (string $status) use ($canPriority): array {
               <p class="text-[11px] text-ink-500 tabular"><?= e(fmt_time($inRoom['started_at'] ?? $inRoom['joined_at'], 'g:i A')) ?></p>
             </div>
             <?php if ($acts !== []): ?>
-              <div class="flex w-full shrink-0 flex-wrap justify-end gap-1.5 sm:w-auto">
+              <div class="flex w-full shrink-0 flex-wrap justify-end gap-1.5 md:w-auto">
                 <?php foreach ($acts as $a):
                   $tone = $a === 'complete' ? 'act-done' : ($a === 'cancel' ? 'act-stop' : 'act-mute');
                   $word = ['complete' => 'Completed', 'transfer' => 'Transfer', 'cancel' => 'Cancel'][$a] ?? ucfirst($a); ?>
@@ -151,7 +151,7 @@ $verbsFor = static function (string $status) use ($canPriority): array {
               <p class="truncate text-[15px] font-bold text-ink-900 sm:text-[17px]"><?= e($nextUp['full_name']) ?></p>
               <p class="truncate text-[12px] text-ink-500"><?= e(implode(' · ', $bits)) ?></p>
             </div>
-            <div class="flex w-full shrink-0 flex-col items-end gap-2 sm:w-auto">
+            <div class="flex w-full shrink-0 flex-col items-end gap-2 md:w-auto">
               <div class="flex w-full items-center justify-end gap-3">
                 <div class="text-center">
                   <p class="text-[10px] leading-tight text-ink-500">Est. wait</p>

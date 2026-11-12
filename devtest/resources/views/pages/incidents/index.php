@@ -10,7 +10,7 @@
     </p>
   </div>
   </div>
-  <a class="btn-secondary btn-sm" href="/admin/monitor">Platform health</a>
+
 </div>
 
 <?php if (!empty($errors)): ?>

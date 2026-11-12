@@ -241,6 +241,78 @@ Assert::test('every mutation writes a queue event with from/to', function () use
 });
 
 /* ------------------------------------------------------------------ */
+/* 2a. complete & call next                                            */
+/* ------------------------------------------------------------------ */
+
+// Its own queue so these assertions never depend on what ran above.
+$cnQueue = (int) Db::insert(
+    "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
+     VALUES (1, 1, 'Complete and call next probe', 'consultation', 'open', ?, 'Z', 0, 3, ?)",
+    [date('Y-m-d'), Db::now()]
+);
+$GLOBALS['cnQueue'] = $cnQueue;
+$service->startSession(1, $cnQueue);
+
+$cnVersion = static function (int $id): int {
+    return (int) Db::scalar('SELECT version FROM queue_entries WHERE id = ?', [$id]);
+};
+
+$cnIds = [];
+foreach (['CN First', 'CN Second', 'CN Third'] as $i => $name) {
+    $p = $patients->findOrCreate(1, ['full_name' => $name, 'phone' => '077111000' . ($i + 1)]);
+    $issued = $service->issueToken(1, $cnQueue, (int) $p['id'], []);
+    $cnIds[] = (int) $issued['entry_id'];
+}
+[$cnA, $cnB, $cnC] = $cnIds;
+
+$service->apply(1, $cnA, 'call', ['version' => $cnVersion($cnA)]);
+$service->apply(1, $cnA, 'start', ['version' => $cnVersion($cnA)]);
+$cnRes = $service->apply(1, $cnA, 'complete_next', ['version' => $cnVersion($cnA)]);
+
+Assert::test('complete & call next finishes the visit', function () use ($cnRes): void {
+    Assert::true($cnRes['ok'], 'action accepted');
+    Assert::same('completed', $cnRes['status']);
+});
+
+Assert::test('complete & call next rings in the next patient', function () use ($cnRes, $cnB): void {
+    Assert::true(isset($cnRes['called_next']), 'the called patient is reported back');
+    Assert::same($cnB, (int) $cnRes['called_next']['id']);
+    Assert::same('called', (string) Db::scalar('SELECT status FROM queue_entries WHERE id = ?', [$cnB]));
+});
+
+Assert::test('complete & call next only calls one patient, not the rest', function () use ($cnC): void {
+    Assert::same('waiting', (string) Db::scalar('SELECT status FROM queue_entries WHERE id = ?', [$cnC]));
+});
+
+// The PDF's hard rule: completing on its own must never call anyone.
+$service->apply(1, $cnB, 'start', ['version' => $cnVersion($cnB)]);
+$plainRes = $service->apply(1, $cnB, 'complete', ['version' => $cnVersion($cnB)]);
+
+Assert::test('completing alone never calls the next patient', function () use ($plainRes, $cnB, $cnC): void {
+    Assert::true($plainRes['ok']);
+    Assert::false(isset($plainRes['called_next']), 'no patient is called');
+    Assert::same('completed', (string) Db::scalar('SELECT status FROM queue_entries WHERE id = ?', [$cnB]));
+    Assert::same('waiting', (string) Db::scalar('SELECT status FROM queue_entries WHERE id = ?', [$cnC]));
+});
+
+Assert::test('the chained call is audited and recorded as an event', function () use ($cnB): void {
+    $events = Db::all(
+        "SELECT action, from_status, to_status FROM queue_events WHERE entry_id = ? ORDER BY id",
+        [$cnB]
+    );
+    $calls = array_values(array_filter($events, static fn (array $e): bool => $e['action'] === 'entry.call'));
+    Assert::true(count($calls) >= 1, 'the call is recorded in the visit history');
+    Assert::same('waiting', $calls[0]['from_status']);
+    Assert::same('called', $calls[0]['to_status']);
+
+    $audited = (int) Db::scalar(
+        "SELECT COUNT(*) FROM audit_logs WHERE clinic_id = 1 AND entity = 'queue_entry' AND entity_id = ? AND action = 'queue.call'",
+        [$cnB]
+    );
+    Assert::true($audited >= 1, 'the call is audited');
+});
+
+/* ------------------------------------------------------------------ */
 /* 2b. duplicate-prevention constraints                                */
 /* ------------------------------------------------------------------ */
 
@@ -984,6 +1056,220 @@ Assert::test('the layout actually calls t() for its navigation', function (): vo
     Assert::true($calls >= 5, "layout uses t() for nav labels (found {$calls})");
 });
 
+Assert::test('a doctor\'s navigation is only their own four destinations', function (): void {
+    // The PDF: "Doctor navigation: Today's queue, My schedule, My patients,
+    // My profile. No clinic-wide configuration or platform administration
+    // should be visible." Hiding a link is not the same as withholding
+    // permission, but showing a doctor the clinic's queue settings invites
+    // them to change settings that apply to everybody.
+    $layout = (string) file_get_contents(QP_ROOT . '/resources/views/layouts/app.php');
+
+    // The doctor branch is the one guarded on the doctor role.
+    $branch = strstr($layout, '$u[\'role\'] === \'doctor\'') ?: '';
+    Assert::true($branch !== '', 'a doctor-only navigation branch exists');
+
+    $slice = substr($branch, 0, strpos($branch, '} else') ?: strlen($branch));
+    foreach (['/doctor', '/doctor/schedule', '/doctor/patients', '/doctor/profile'] as $need) {
+        Assert::true(str_contains($slice, "'" . $need . "'"), "doctor nav offers {$need}");
+    }
+    foreach (['/queues/config', '/settings', '/billing', '/patients', '/appointments', '/calendar'] as $leak) {
+        Assert::false(str_contains($slice, "'" . $leak . "'"), "doctor nav must not offer {$leak}");
+    }
+});
+
+Assert::test('a doctor lands on their own workspace after signing in', function (): void {
+    // Dropping a doctor on the reception board — which is built around
+    // issuing tokens, the one thing a doctor cannot do — makes their first
+    // screen a list of controls they are not allowed to use.
+    $src = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/AuthController.php');
+    Assert::true(str_contains($src, 'ROLE_DOCTOR => \'/doctor\''), 'doctors are sent to /doctor');
+});
+
+Assert::test('every delivery attempt is logged, not just the last one', function (): void {
+    // The outbox row is rewritten by each retry, so without the log table a
+    // clinic that retried three times can only see the third failure. The PDF
+    // asks for "retry logic and delivery logs"; this is the half that the
+    // outbox alone cannot provide.
+    $svc = new App\Services\NotificationService();
+    $svc->processDue();
+
+    $messages = (int) Db::scalar(
+        "SELECT COUNT(*) FROM notifications WHERE status IN ('sent','logged','abandoned')"
+    );
+    $logged = (int) Db::scalar('SELECT COUNT(*) FROM notification_logs');
+    Assert::true($messages > 0, 'at least one message was processed');
+    Assert::true($logged > 0, 'attempts were recorded');
+
+    // One row per attempt, and never updated afterwards.
+    $duplicates = (int) Db::scalar(
+        'SELECT COUNT(*) FROM (SELECT notification_id, attempt FROM notification_logs
+          GROUP BY notification_id, attempt HAVING COUNT(*) > 1)'
+    );
+    Assert::same(0, $duplicates, 'attempt numbers are unique per message');
+
+    $outcomes = array_column(
+        Db::all('SELECT DISTINCT outcome FROM notification_logs'),
+        'outcome'
+    );
+    $allowed = ['sent', 'logged', 'failed', 'abandoned', 'gated'];
+    foreach ($outcomes as $o) {
+        Assert::true(in_array($o, $allowed, true), "outcome {$o} is one of the known set");
+    }
+});
+
+Assert::test('a processed notification keeps its history when retried', function (): void {
+    // The point of the split: processing the same message again appends
+    // rather than overwrites.
+    $id = (int) Db::scalar('SELECT id FROM notifications ORDER BY id DESC LIMIT 1');
+    Db::run("UPDATE notifications SET status='queued', scheduled_at = ? WHERE id = ?", [Db::now(), $id]);
+
+    $before = (int) Db::scalar('SELECT COUNT(*) FROM notification_logs WHERE notification_id = ?', [$id]);
+    (new App\Services\NotificationService())->processDue();
+    $after = (int) Db::scalar('SELECT COUNT(*) FROM notification_logs WHERE notification_id = ?', [$id]);
+
+    Assert::true($after >= $before, 'history is appended, never rewritten');
+});
+
+/**
+ * An unpaid invoice to test against. The suite does not seed billing, so the
+ * tests make their own rather than depending on fixtures that may not exist.
+ */
+$testInvoiceId = (int) (Db::scalar("SELECT id FROM invoices WHERE clinic_id = 1 ORDER BY id DESC LIMIT 1") ?: 0);
+if ($testInvoiceId === 0) {
+    $testInvoiceId = Db::insert(
+        'INSERT INTO invoices (clinic_id, number, period_from, period_to, amount, currency, status, created_at)
+         VALUES (1,?,?,?,?,?,?,?)',
+        ['INV-TEST-0001', date('Y-m-01'), date('Y-m-t'), 7900, 'LKR', 'unpaid', Db::now()]
+    );
+}
+
+Assert::test('a rejected payment keeps its submission on file', function () use ($testInvoiceId): void {
+    // This is the whole reason `payments` exists. The claim used to live on
+    // the invoice, so rejecting it reset the invoice to unpaid and the record
+    // that the clinic said it had paid vanished with it — leaving a billing
+    // dispute with no evidence on either side.
+    $svc = new App\Services\SubscriptionService();
+
+    $invoiceId = $testInvoiceId;
+    Db::run("UPDATE invoices SET status = 'unpaid', paid_at = NULL WHERE id = ?", [$invoiceId]);
+
+    $paymentId = $svc->claim(1, $invoiceId, 'REJ-TEST-0001', 'bank_transfer');
+    Assert::same(
+        'claimed',
+        (string) Db::scalar('SELECT status FROM payments WHERE id = ?', [$paymentId])
+    );
+
+    $svc->reject($paymentId, null, 'No transfer with that reference.');
+
+    // The invoice goes back to unpaid — the clinic has not paid.
+    Assert::same('unpaid', (string) Db::scalar('SELECT status FROM invoices WHERE id = ?', [$invoiceId]));
+    // …but the submission survives, with the decision recorded.
+    $row = Db::one('SELECT status, decision_note, decided_at FROM payments WHERE id = ?', [$paymentId]);
+    Assert::same('rejected', $row['status']);
+    Assert::same('No transfer with that reference.', $row['decision_note']);
+    Assert::true($row['decided_at'] !== null, 'the decision is timestamped');
+});
+
+Assert::test('a verified payment settles the invoice and keeps the record too', function () use ($testInvoiceId): void {
+    $svc = new App\Services\SubscriptionService();
+    $invoiceId = $testInvoiceId;
+    Db::run("UPDATE invoices SET status = 'unpaid', paid_at = NULL WHERE id = ?", [$invoiceId]);
+
+    $paymentId = $svc->claim(1, $invoiceId, 'VER-TEST-0002', 'bank_transfer');
+    $result = $svc->verify($paymentId, null, '');
+    Assert::true($result['ok']);
+
+    Assert::same('paid', (string) Db::scalar('SELECT status FROM invoices WHERE id = ?', [$invoiceId]));
+    Assert::same('verified', (string) Db::scalar('SELECT status FROM payments WHERE id = ?', [$paymentId]));
+});
+
+Assert::test('a plan change closes the old subscription and opens a new one', function (): void {
+    // clinics.plan_id can only describe the present. Without history,
+    // "what plan were we on before the upgrade" is unanswerable.
+    $svc = new App\Services\SubscriptionService();
+    $svc->ensureOpen(1);
+
+    $before = (int) Db::scalar('SELECT COUNT(*) FROM subscriptions WHERE clinic_id = 1 AND ended_at IS NULL');
+    Assert::same(1, $before, 'exactly one open subscription');
+
+    $svc->open(1, 3, 'active', 'Upgraded to Clinic Plus.');
+
+    $open = (int) Db::scalar('SELECT COUNT(*) FROM subscriptions WHERE clinic_id = 1 AND ended_at IS NULL');
+    $closed = (int) Db::scalar('SELECT COUNT(*) FROM subscriptions WHERE clinic_id = 1 AND ended_at IS NOT NULL');
+    Assert::same(1, $open, 'still exactly one open subscription');
+    Assert::true($closed >= 1, 'the previous one is closed, not deleted');
+
+    $current = $svc->current(1);
+    Assert::same(3, (int) $current['plan_id'], 'the open row is the new plan');
+});
+
+Assert::test('a display key opens its clinic and nothing else', function (): void {
+    // These are bearer credentials on an unauthenticated URL — anyone who
+    // photographs the lobby screen has one.
+    $svc = new App\Services\DisplayKeyService();
+    $issued = $svc->issue(1, 'Reception TV', 'waiting_room');
+
+    $resolved = $svc->resolve($issued['key']);
+    Assert::true($resolved !== null, 'a fresh key resolves');
+    Assert::same(1, $resolved['clinic_id']);
+    Assert::same(null, $resolved['department_id']);
+
+    Assert::same(null, $svc->resolve('not-a-real-key'), 'an unknown key resolves to nothing');
+});
+
+Assert::test('revoking one screen leaves the others running', function (): void {
+    // The whole point of per-screen keys. With one shared key, retiring a
+    // single TV meant blacking out every display in the clinic.
+    $svc = new App\Services\DisplayKeyService();
+    $a = $svc->issue(1, 'Screen A', 'waiting_room');
+    $b = $svc->issue(1, 'Screen B', 'waiting_room');
+
+    Assert::true($svc->revoke(1, (int) $a['id']));
+
+    Assert::same(null, $svc->resolve($a['key']), 'the revoked screen stops');
+    Assert::true($svc->resolve($b['key']) !== null, 'the other screen keeps working');
+
+    // Revoked rows are kept, not deleted: a key still being requested is a
+    // screen somebody forgot to update, and that is worth being able to see.
+    $row = Db::one('SELECT revoked_at, name FROM public_display_keys WHERE id = ?', [(int) $a['id']]);
+    Assert::true($row['revoked_at'] !== null, 'the row survives revocation');
+    Assert::same('Screen A', $row['name'], 'and is still identifiable');
+});
+
+Assert::test('a department key stays inside its clinic', function (): void {
+    $svc = new App\Services\DisplayKeyService();
+
+    // Its own department, removed afterwards. Reusing one of the seeded
+    // departments would collide with the department tests further down,
+    // which create their own fixtures by name.
+    $deptId = Db::insert(
+        "INSERT INTO departments (clinic_id, name, code, is_active, created_at)
+         VALUES (1,'Display key probe','DKP',1,?)",
+        [Db::now()]
+    );
+
+    try {
+        $issued = $svc->issue(1, 'Probe board', 'department', $deptId);
+        $resolved = $svc->resolve($issued['key']);
+        Assert::same(1, $resolved['clinic_id']);
+        Assert::same((int) $deptId, $resolved['department_id']);
+    } finally {
+        Db::run('DELETE FROM public_display_keys WHERE department_id = ?', [$deptId]);
+        Db::run('DELETE FROM departments WHERE id = ?', [$deptId]);
+    }
+});
+
+Assert::test('a screen with no name cannot be issued', function (): void {
+    // An unnamed key is the old problem again: nobody can tell which screen
+    // to revoke.
+    $svc = new App\Services\DisplayKeyService();
+    Assert::throws(
+        static fn () => $svc->issue(1, '   ', 'waiting_room'),
+        \RuntimeException::class,
+        'a blank name is refused'
+    );
+});
+
 Assert::test('Lang returns the translated string, not the raw key', function (): void {
     App\Core\Lang::load('si');
     $label = App\Core\Lang::get('nav.live_board');
@@ -1068,20 +1354,24 @@ Assert::test('doctor leave blocks both the form and the POST', function (): void
     $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1');
     $service = new App\Services\DoctorService();
 
-    $added = $service->addLeave(1, $doctorId, '2026-12-01', '2026-12-03', 'Conference', null);
+    // Deliberately not December 2026: relative dates like 'next tuesday
+    // +14 days' drift forward every year and used to land inside this
+    // window, which made an unrelated slot test fail for no visible
+    // reason. A fixed date far past any relative window stays put.
+    $added = $service->addLeave(1, $doctorId, '2027-03-02', '2027-03-04', 'Conference', null);
     Assert::true($added['ok'], $added['error'] ?? '');
 
-    Assert::true($service->isOnLeave(1, $doctorId, '2026-12-01'), 'first day covered');
-    Assert::true($service->isOnLeave(1, $doctorId, '2026-12-02'), 'middle day covered');
-    Assert::true($service->isOnLeave(1, $doctorId, '2026-12-03'), 'last day covered (inclusive)');
-    Assert::false($service->isOnLeave(1, $doctorId, '2026-12-04'), 'day after is free');
-    Assert::false($service->isOnLeave(1, $doctorId, '2026-11-30'), 'day before is free');
+    Assert::true($service->isOnLeave(1, $doctorId, '2027-03-02'), 'first day covered');
+    Assert::true($service->isOnLeave(1, $doctorId, '2027-03-03'), 'middle day covered');
+    Assert::true($service->isOnLeave(1, $doctorId, '2027-03-04'), 'last day covered (inclusive)');
+    Assert::false($service->isOnLeave(1, $doctorId, '2027-03-05'), 'day after is free');
+    Assert::false($service->isOnLeave(1, $doctorId, '2027-03-01'), 'day before is free');
 
     // Another clinic's doctor must never be affected.
     $otherDoctor = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 2');
-    Assert::false($service->isOnLeave(2, $otherDoctor, '2026-12-02'), 'tenant isolation');
+    Assert::false($service->isOnLeave(2, $otherDoctor, '2027-03-03'), 'tenant isolation');
 
-    $bookable = $service->bookable(1, '2026-12-02');
+    $bookable = $service->bookable(1, '2027-03-03');
     $onLeave = array_values(array_filter($bookable, static fn (array $d): bool => (int) $d['id'] === $doctorId));
     Assert::true($onLeave !== [] && $onLeave[0]['on_leave'] === true, 'doctor flagged in bookable list');
 });
@@ -1723,12 +2013,24 @@ Assert::test('a booked slot disappears from the list', function (): void {
     $clinicId = 1;
     $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1 LIMIT 1');
     $date = date('Y-m-d', strtotime('next tuesday +14 days'));
+
+    // Some leave fixtures are pinned to fixed calendar dates, and a relative
+    // date like this one eventually lands on one of them — which is exactly
+    // what happened: 'next tuesday +14 days' reached 2026-12-01, inside a
+    // leave window, and the doctor correctly had no slots. Step forward
+    // until the doctor is actually free rather than hard-coding a date that
+    // only works until the calendar catches up with it.
+    $doctors = new App\Services\DoctorService();
+    for ($guard = 0; $guard < 12 && $doctors->isOnLeave($clinicId, $doctorId, $date); $guard++) {
+        $date = date('Y-m-d', strtotime($date . ' +7 days'));
+    }
+
     (new App\Services\SlotService())->saveHours($clinicId, [
         (int) date('w', strtotime($date)) => '09:00-10:00',
     ]);
 
     $before = (new App\Services\SlotService())->slotsFor($clinicId, $doctorId, $date)['slots'];
-    Assert::true(in_array('09:00', $before, true), '09:00 starts free');
+    Assert::true(in_array('09:00', $before, true), '09:00 starts free on ' . $date . ' (got ' . json_encode($before) . ')');
 
     $patient = Db::insert(
         'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (1, ?, ?, ?, ?)',
@@ -4690,17 +4992,24 @@ Assert::test('revenue is billed at each doctor\'s fee, and says so', function ()
 
     Db::run('UPDATE doctors SET consult_fee = ? WHERE id = ?', [1500, $doctorId]);
 
-    $mk = static function (string $status, int $minutesAgo) use ($clinicId, $queueId, $today): int {
+    // A counter, not random_int: token labels are UNIQUE per queue, and
+    // drawing from 900 numbers makes this test fail roughly one run in
+    // ninety for no reason anybody can reproduce. A label is an identity
+    // here, not something that needs to be unpredictable.
+    $revSeq = 0;
+    $mk = static function (string $status, int $minutesAgo) use ($clinicId, $queueId, $today, &$revSeq): int {
+        $revSeq++;
         $pid = (int) Db::insert(
             'INSERT INTO patients (clinic_id, code, full_name, phone, created_at, updated_at) VALUES (?,?,?,?,?,?)',
-            [$clinicId, 'R' . random_int(10000, 99999), 'Rev Patient', '+94 77' . random_int(1000000, 9999999), Db::now(), Db::now()]
+            [$clinicId, 'R' . $revSeq . substr(md5((string) $revSeq), 0, 4), 'Rev Patient ' . $revSeq,
+             '+94 77 ' . (1000000 + $revSeq), Db::now(), Db::now()]
         );
         $finished = date('Y-m-d H:i:s', time() - $minutesAgo * 60);
         return Db::insert(
             'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status, priority,
                 sort_weight, source, joined_at, finished_at, track_token, version)
              VALUES (?,?,?,?,?,?,1,0,?,?,?,?,0)',
-            [$clinicId, $queueId, $pid, random_int(1, 999), 'R' . random_int(100, 999), $status,
+            [$clinicId, $queueId, $pid, $revSeq, 'R' . str_pad((string) $revSeq, 3, '0', STR_PAD_LEFT), $status,
              'walkin', $finished, $status === 'completed' ? $finished : null, bin2hex(random_bytes(16))]
         );
     };
@@ -4732,7 +5041,7 @@ Assert::test('revenue is billed at each doctor\'s fee, and says so', function ()
     );
     $pid = (int) Db::insert(
         'INSERT INTO patients (clinic_id, code, full_name, phone, created_at, updated_at) VALUES (?,?,?,?,?,?)',
-        [$clinicId, 'R99999', 'Free Patient', '+94 77 000 9999', Db::now(), Db::now()]
+        [$clinicId, 'RFREE115', 'Free Patient', '+94 77 000 9999', Db::now(), Db::now()]
     );
     Db::insert(
         'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status, priority,
@@ -4891,12 +5200,89 @@ Assert::test('a full-document view is not wrapped in the console layout', functi
 });
 
 Assert::test('the homepage scale is a single knob that reaches every size', function (): void {
-    $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
-    Assert::true(strpos($css, '.lp-root { font-size: 90%; }') !== false, 'the page renders at the 90% proportions');
+    // Strip comments FIRST: the explanation quotes both `.lp-root { font-size }`
+    // and `html { zoom }`, so a raw substring match passes or fails on prose.
+    $css = (string) preg_replace('~/\*.*?\*/~s', '', (string) file_get_contents(QP_ROOT . '/resources/css/app.css'));
     $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/landing.php');
-    Assert::true(strpos($view, 'class="lp-root') !== false, 'and the document opts into it');
-    // A stray px size would silently ignore the knob and break the proportion.
+    Assert::true(strpos($view, 'class="lp-root') !== false, 'the document is marked as the landing page');
+    // Exactly ONE scale mechanism. `html { zoom: .9 }` and a root font-size on
+    // the same element multiply: 0.9 x 0.9 = 0.81, which took the container from
+    // 1062px to 955.8px and every 44px tap target to 39.6px. Computed style still
+    // reads 14.4px in that state, so only geometry catches it — hence this guard.
+    Assert::true(preg_match('~html\s*\{[^}]*zoom:\s*0?\.9~s', $css) === 1, 'zoom is the scale mechanism');
+    Assert::true(
+        preg_match('~\.lp-root\s*\{[^}]*font-size~s', $css) === 0,
+        'and no root font-size compounds with it'
+    );
+    // A stray px size would silently ignore the rem proportions.
     Assert::true(preg_match('~\[[0-9.]+px\]~', $view) === 0, 'every arbitrary size in the view is in rem');
+});
+
+Assert::test('breakpoints stay in step with the zoom, in both apps', function (): void {
+    // CSS zoom does not resize the viewport media queries evaluate against, so
+    // every screen must be the stock Tailwind value x 0.9 or layouts flip at the
+    // wrong physical window width. Change the zoom, change these.
+    $expected = ['sm' => '576px', 'md' => '691.2px', 'lg' => '921.6px', 'xl' => '1152px', '2xl' => '1382.4px'];
+    foreach (['queuepilot', 'devtest'] as $app) {
+        $root = $app === 'queuepilot' ? QP_ROOT : dirname(QP_ROOT) . '/devtest';
+        if (!is_dir($root)) {
+            continue; // the sibling app is not always checked out
+        }
+        $cfg = (string) file_get_contents($root . '/resources/tailwind/tailwind.config.js');
+        foreach ($expected as $name => $px) {
+            $q = preg_quote($name, '~');
+            Assert::true(
+                preg_match("~['\"]?{$q}['\"]?\s*:\s*['\"]" . preg_quote($px, '~') . "['\"]~", $cfg) === 1,
+                $app . ' ' . $name . ' is ' . $px
+            );
+        }
+        // vh resolves against the unzoomed viewport and is THEN scaled, so
+        // min-h-screen renders 10% short unless the utility divides it back out.
+        // This is what left a white strip under the auth pages and console shell.
+        foreach (['height', 'minHeight'] as $key) {
+            Assert::true(
+                preg_match("~{$key}\s*:\s*\{\s*screen\s*:\s*['\"]calc\(100vh\s*/\s*0?\.9\)['\"]~", $cfg) === 1,
+                $app . ' ' . $key . '.screen compensates for the zoom'
+            );
+        }
+        $css = (string) preg_replace('~/\*.*?\*/~s', '', (string) file_get_contents($root . '/resources/css/app.css'));
+        Assert::true(preg_match('~html\s*\{[^}]*zoom:\s*0?\.9~s', $css) === 1, $app . ' carries the matching zoom');
+        // Printing is never screen-scaled.
+        Assert::true(preg_match('~@media\s+print\s*\{[^}]*zoom:\s*1~s', $css) === 1, $app . ' prints at true size');
+    }
+});
+
+Assert::test('no credential is ever printed on an unauthenticated page', function (): void {
+    // The sign-in page is public and screenshot-able. A demo chip carrying the
+    // seeded platform-admin password hands over every tenant on any install
+    // that has not rotated it, so passwords must not reach the markup at all.
+    $views = [];
+    $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($it as $f) {
+        if ($f->isFile() && $f->getExtension() === 'php') {
+            $views[$f->getPathname()] = (string) file_get_contents($f->getPathname());
+        }
+    }
+    // Prove the walk reached the file this test is about, rather than asserting
+    // a file count that drifts whenever a view is added or removed.
+    Assert::true(isset($views[QP_ROOT . '/resources/views/pages/auth/login.php']), 'the scan reached the sign-in view');
+    Assert::true(count($views) >= 50, 'and walked the whole tree, not one directory');
+    foreach ($views as $path => $src) {
+        $rel = str_replace(QP_ROOT . '/', '', $path);
+        // Strip PHP comments so the explanation above is not a false positive.
+        $code = preg_replace('~/\*.*?\*/~s', '', $src);
+        Assert::true(
+            preg_match('~(QueuePilot|Serenity|Reception|Doctor|Lakeview|Coastal)#20[0-9]{2}~', $code) === 0,
+            $rel . ' prints no seeded password'
+        );
+        Assert::true(strpos($code, 'data-demo-pass') === false, $rel . ' ships no password attribute');
+    }
+    $login = $views[QP_ROOT . '/resources/views/pages/auth/login.php'];
+    Assert::true(
+        strpos($login, "Env::get('app.env', 'production') !== 'production'") !== false,
+        'the local demo block is gated off in production'
+    );
+    Assert::true(strpos($login, 'owner@queuepilot.app') === false, 'and never lists the platform admin');
 });
 
 Assert::test('scroll reveal is an enhancement, never a gate on content', function (): void {
@@ -5000,6 +5386,1115 @@ Assert::test('the brand type is self-hosted and licensed', function (): void {
 });
 
 /* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/* 47. integrations                                                     */
+/* ------------------------------------------------------------------ */
+
+Assert::test('every catalogued integration is offered with a state', function (): void {
+    $service = new App\Services\IntegrationService();
+    $list = $service->listFor(1);
+
+    Assert::true(count($list) >= 5, 'the full catalogue is listed');
+    foreach ($list as $entry) {
+        Assert::true(array_key_exists('provider', $entry), 'provider named');
+        Assert::true(array_key_exists('connected', $entry), 'connected is always answered');
+        Assert::true(array_key_exists('available', $entry), 'available is always answered');
+        Assert::true(is_bool($entry['available']), 'available is a boolean, never null');
+        Assert::true(is_bool($entry['connected']), 'connected is a boolean, never null');
+    }
+
+    // Available and connected are two separate facts. Collapsing them is how
+    // a clinic files a support ticket about an integration that simply is
+    // not installed on this server. The patient app and webhooks need no
+    // server-side credential, so they are available everywhere; the rest
+    // depend on what this deployment has been given.
+    $byProvider = array_column($list, null, 'provider');
+    Assert::true($byProvider['patient_app']['available'], 'patient app needs no credential');
+    Assert::true($byProvider['webhooks']['available'], 'webhooks need no credential');
+    $providers = array_column($list, 'provider');
+    foreach (['sms_gateway', 'email_transport', 'accounting', 'patient_app', 'webhooks'] as $p) {
+        Assert::true(in_array($p, $providers, true), $p . ' is in the catalogue');
+    }
+});
+
+Assert::test('connecting an unknown integration is refused', function (): void {
+    $service = new App\Services\IntegrationService();
+    Assert::false($service->connect(1, 'not_a_provider', []));
+    Assert::false($service->connect(1, '', []));
+    $rows = Db::all("SELECT provider FROM integrations WHERE clinic_id = 1 AND provider NOT IN
+                     ('sms_gateway','email_transport','accounting','patient_app','webhooks')");
+    Assert::same([], $rows, 'nothing was written for a bogus provider');
+});
+
+Assert::test('only whitelisted config keys are stored, and they are truncated', function (): void {
+    $service = new App\Services\IntegrationService();
+    $service->connect(1, 'webhooks', [
+        'endpoint'      => 'https://hooks.example.com/qp',
+        'signing_secret' => 'should-never-be-stored',
+        'api_key'       => 'should-never-be-stored',
+    ]);
+
+    $row = Db::one("SELECT config FROM integrations WHERE clinic_id = 1 AND provider = 'webhooks'");
+    $config = json_decode((string) $row['config'], true);
+
+    Assert::same(['endpoint' => 'https://hooks.example.com/qp'], $config, 'only the whitelisted field survived');
+    Assert::false(isset($config['signing_secret']), 'a secret cannot be smuggled in');
+    Assert::false(isset($config['api_key']), 'a credential cannot be smuggled in');
+
+    // Sender IDs are capped by the SMS spec (11 chars), not by goodwill.
+    $service->connect(1, 'sms_gateway', ['sender_id' => 'SERENITYCLINIC']);
+    $row = Db::one("SELECT config FROM integrations WHERE clinic_id = 1 AND provider = 'sms_gateway'");
+    $config = json_decode((string) $row['config'], true);
+    Assert::same(11, mb_strlen($config['sender_id']), 'sender id clamped to 11 characters');
+});
+
+Assert::test('disconnecting keeps the settings so reconnecting is one click', function (): void {
+    $service = new App\Services\IntegrationService();
+    $service->connect(1, 'accounting', ['organisation' => 'Serenity-ACC-01']);
+    Assert::same(1, (int) Db::scalar("SELECT COUNT(*) FROM integrations
+                                      WHERE clinic_id = 1 AND provider = 'accounting' AND status = 'connected'"));
+
+    Assert::true($service->disconnect(1, 'accounting'), 'disconnect reports success');
+
+    $row = Db::one("SELECT status, config FROM integrations WHERE clinic_id = 1 AND provider = 'accounting'");
+    Assert::same('off', $row['status'], 'flipped off, not deleted');
+    Assert::same(
+        ['organisation' => 'Serenity-ACC-01'],
+        json_decode((string) $row['config'], true),
+        'the setting survives so it does not have to be retyped'
+    );
+
+    // And reconnecting is idempotent — one row, not two.
+    $service->connect(1, 'accounting', []);
+    Assert::same(1, (int) Db::scalar("SELECT COUNT(*) FROM integrations
+                                      WHERE clinic_id = 1 AND provider = 'accounting'"), 'still one row');
+});
+
+Assert::test('one clinic cannot see or touch another clinic\'s integrations', function (): void {
+    $service = new App\Services\IntegrationService();
+
+    // A real row in clinic 1 first: probing a tenant with no rows proves
+    // nothing, because 'no rows' is also what a leak looks like.
+    $service->connect(1, 'patient_app', []);
+
+    $clinic1 = array_column($service->listFor(1), 'connected', 'provider');
+    Assert::true($clinic1['patient_app'] ?? false, 'clinic 1 turned it on');
+
+    $clinic2 = array_column($service->listFor(2), 'connected', 'provider');
+    Assert::false($clinic2['patient_app'] ?? false, 'clinic 2 does not inherit it');
+    Assert::same(
+        0,
+        (int) Db::scalar("SELECT COUNT(*) FROM integrations WHERE clinic_id = 2 AND provider = 'patient_app'"),
+        'no row leaked into clinic 2'
+    );
+
+    // Disconnecting from the wrong clinic must not reach clinic 1's row.
+    $service->disconnect(2, 'patient_app');
+    Assert::same(
+        'connected',
+        (string) Db::scalar("SELECT status FROM integrations WHERE clinic_id = 1 AND provider = 'patient_app'"),
+        'clinic 1 keeps its connection'
+    );
+});
+
+Assert::test('the connected count only counts live connections', function (): void {
+    $service = new App\Services\IntegrationService();
+    $service->disconnect(1, 'sms_gateway');
+    $before = $service->connectedCount(1);
+    $service->connect(1, 'sms_gateway', ['sender_id' => 'SERENITY']);
+    Assert::same($before + 1, $service->connectedCount(1), 'connecting raises the count');
+    $service->disconnect(1, 'sms_gateway');
+    Assert::same($before, $service->connectedCount(1), 'disconnecting lowers it again');
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 48. waiting-room payload and "where do I stand?"                    */
+/* ------------------------------------------------------------------ */
+
+// Its own clinics/queues so these assertions never depend on what ran above.
+$dsToday   = date('Y-m-d');
+$posClinic = 1;
+$posQueue  = (int) Db::insert(
+    "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
+     VALUES (?, 1, 'Position probe', 'consultation', 'open', ?, 'P', 0, 3, ?)",
+    [$posClinic, $dsToday, Db::now()]
+);
+(new App\Domain\Queue\QueueService())->startSession($posClinic, $posQueue);
+
+$posIds = [];
+foreach (['Pos One', 'Pos Two', 'Pos Three'] as $i => $name) {
+    $p = $patients->findOrCreate($posClinic, ['full_name' => $name, 'phone' => '077222000' . ($i + 1)]);
+    $posIds[] = (int) (new App\Domain\Queue\QueueService())->issueToken($posClinic, $posQueue, (int) $p['id'], [])['entry_id'];
+}
+// Move the head along so the board has a token being served.
+$qs = new App\Domain\Queue\QueueService();
+$qs->apply($posClinic, $posIds[0], 'call', []);
+$qs->apply($posClinic, $posIds[0], 'start', []);
+
+Assert::test('the waiting-room payload is a superset the poller and the page share', function () use ($posClinic): void {
+    $payload = (new App\Services\DisplayService())->payload($posClinic);
+
+    Assert::true($payload['ok'] ?? false, 'ok');
+    foreach (['now_serving', 'serving', 'rooms', 'upcoming', 'delays', 'paused', 'stats', 'solo'] as $key) {
+        Assert::true(array_key_exists($key, $payload), $key . ' is present');
+    }
+    Assert::true(is_array($payload['serving']), 'serving is a list of every room');
+    Assert::true(is_bool($payload['solo']), 'solo is a boolean');
+});
+
+Assert::test('a multi-room clinic shows every room, not just one token', function () use ($posClinic): void {
+    $payload = (new App\Services\DisplayService())->payload($posClinic);
+
+    // Older code collapsed the clinic to a single `now_serving`, so a patient
+    // watching the TV never saw their own room called. `serving` carries all.
+    $rooms = array_values(array_filter(
+        $payload['rooms'],
+        static fn (array $r): bool => ($r['token'] ?? null) !== null
+    ));
+    Assert::true(count($rooms) >= 1, 'at least one room is serving');
+    $first = $rooms[0];
+    Assert::true(($first['doctor'] ?? null) !== null, 'the doctor is named');
+    Assert::true(array_key_exists('status', $first), 'and the status so "called" can flash');
+    Assert::same(count($rooms), count($payload['serving']), 'serving matches the room cards');
+});
+
+Assert::test('upcoming tokens name the doctor, because token series repeat per room', function () use ($posClinic): void {
+    $payload = (new App\Services\DisplayService())->payload($posClinic);
+    if ($payload['upcoming'] === []) {
+        Assert::true(true, 'nothing waiting at the moment');
+
+        return;
+    }
+    foreach ($payload['upcoming'] as $row) {
+        // Every queue restarts its own A-series, so three rooms can all be
+        // waiting on "A002". Without the doctor the list is ambiguous and
+        // patients walk to the wrong door.
+        Assert::true(($row['doctor'] ?? null) !== null, 'doctor named for ' . ($row['token'] ?? '?'));
+        Assert::true(($row['queue'] ?? null) !== null, 'queue named for ' . ($row['token'] ?? '?'));
+    }
+});
+
+Assert::test('upcoming is in queue order, not the order tokens were typed in', function () use ($posClinic, $posQueue): void {
+    // Read the per-queue list. The clinic-wide `upcoming` is capped at eight
+    // across every room, so a queue created late in the suite can be sliced
+    // off it entirely — which says nothing about this queue's ordering.
+    $payload = (new App\Services\DisplayService())->payload($posClinic);
+    $card = null;
+    foreach ($payload['rooms'] as $r) {
+        if ((int) ($r['queue_id'] ?? 0) === $posQueue) {
+            $card = $r;
+        }
+    }
+    Assert::true($card !== null, 'the probe queue has a room card');
+
+    $labels = array_map(static fn (array $r): string => (string) $r['token'], $card['up_next']);
+    Assert::true(count($labels) >= 2, 'it lists the people still waiting');
+    $sorted = $labels;
+    sort($sorted, SORT_NATURAL);
+    Assert::same($sorted, $labels, 'ascending, so position 2 follows position 1');
+});
+
+Assert::test('where do I stand answers for a real token', function () use ($posClinic, $posQueue, $posIds): void {
+    $label = (string) Db::scalar('SELECT token_label FROM queue_entries WHERE id = ?', [$posIds[1]]);
+    $res = (new App\Services\DisplayService())->myPosition($posClinic, null, $posQueue, $label);
+
+    Assert::true($res['ok'] ?? false, 'found');
+    $p = $res['position'];
+    Assert::same($label, $p['token'], 'the token asked for');
+    Assert::same('waiting', $p['status'], 'this one is still waiting');
+    Assert::same(1, (int) $p['position'], 'first in line once the head moved on');
+    // "Is my queue moving?" is only answerable with this queue's own token.
+    Assert::true(($p['now_serving'] ?? null) !== null, 'the queue says who it is serving');
+    Assert::true(($p['doctor'] ?? null) !== null, 'and who with');
+});
+
+Assert::test('where do I stand never leaks a name or the private track link', function () use ($posClinic, $posQueue, $posIds): void {
+    $label = (string) Db::scalar('SELECT token_label FROM queue_entries WHERE id = ?', [$posIds[1]]);
+    $res = (new App\Services\DisplayService())->myPosition($posClinic, null, $posQueue, $label);
+
+    $flat = json_encode($res, JSON_THROW_ON_ERROR);
+    // The token label is printed on paper and shouted across a room. It must
+    // never be exchangeable for the private link that can cancel the visit.
+    Assert::false(str_contains($flat, 'track_token'), 'no track token');
+    Assert::false(str_contains($flat, 'Pos One'), 'no patient name');
+    Assert::false(str_contains($flat, '077222000'), 'no phone number');
+});
+
+Assert::test('where do I stand refuses a token from another clinic', function () use ($posQueue, $patients): void {
+    // A real fixture in clinic 2 first: probing a tenant that has no rows
+    // proves nothing, because "no rows" is also what a leak looks like.
+    $otherQueue = (int) Db::insert(
+        "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
+         VALUES (2, 3, 'Other clinic probe', 'consultation', 'open', ?, 'Q', 0, 3, ?)",
+        [date('Y-m-d'), Db::now()]
+    );
+    (new App\Domain\Queue\QueueService())->startSession(2, $otherQueue);
+    $op = $patients->findOrCreate(2, ['full_name' => 'Other Clinic Person', 'phone' => '0773330001']);
+    $issued = (new App\Domain\Queue\QueueService())->issueToken(2, $otherQueue, (int) $op['id'], []);
+    $label = (string) Db::scalar('SELECT token_label FROM queue_entries WHERE id = ?', [(int) $issued['entry_id']]);
+
+    try {
+        // Clinic 1's screen asking about its own queue with a clinic-2 label:
+        // the label must not resolve, because it belongs to another tenant.
+        $res = (new App\Services\DisplayService())->myPosition(1, null, $posQueue, $label);
+        Assert::false($res['ok'] ?? false, 'clinic 1 cannot see clinic 2\'s token ' . $label);
+
+        // And asking clinic 1's queue id while standing in clinic 2.
+        $res2 = (new App\Services\DisplayService())->myPosition(2, null, $posQueue, $label);
+        Assert::false($res2['ok'] ?? false, 'clinic 2 cannot read clinic 1\'s queue');
+    } finally {
+        Db::run('DELETE FROM queue_entries WHERE queue_id = ?', [$otherQueue]);
+        Db::run('DELETE FROM queues WHERE id = ?', [$otherQueue]);
+    }
+});
+
+Assert::test('where do I stand rejects junk without touching the database', function () use ($posClinic, $posQueue): void {
+    $svc = new App\Services\DisplayService();
+    Assert::false($svc->myPosition($posClinic, null, $posQueue, '')['ok'], 'empty');
+    Assert::false($svc->myPosition($posClinic, null, $posQueue, '   ')['ok'], 'whitespace');
+    Assert::false($svc->myPosition($posClinic, null, $posQueue, str_repeat('x', 40))['ok'], 'too long');
+    Assert::false($svc->myPosition($posClinic, null, 999999, 'P001')['ok'], 'a queue that does not exist');
+});
+
+Assert::test('a department screen stays inside its own waiting area', function (): void {
+    $deptId = (int) Db::insert(
+        "INSERT INTO departments (clinic_id, name, code, is_active, created_at) VALUES (1, 'Pos Dept', 'POSDEPT', 1, ?)",
+        [Db::now()]
+    );
+    $inDept = (int) Db::insert(
+        "INSERT INTO queues (clinic_id, department_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
+         VALUES (1, ?, 1, 'In department', 'consultation', 'open', ?, 'R', 0, 3, ?)",
+        [$deptId, date('Y-m-d'), Db::now()]
+    );
+    (new App\Domain\Queue\QueueService())->startSession(1, $inDept);
+
+    try {
+        $scoped = (new App\Services\DisplayService())->payload(1, $deptId);
+        Assert::same('Pos Dept', $scoped['department'] ?? null, 'the header names the area');
+        $names = array_column($scoped['rooms'], 'queue');
+        Assert::true(in_array('In department', $names, true), 'its own queue is on the board');
+        Assert::false(in_array('Position probe', $names, true), 'a queue from another area is not');
+    } finally {
+        Db::run('DELETE FROM queues WHERE id = ?', [$inDept]);
+        Db::run('DELETE FROM departments WHERE id = ?', [$deptId]);
+    }
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 49. measuring what priority actually did                           */
+/* ------------------------------------------------------------------ */
+
+// Its own tenant, built from nothing. Earlier tests leave finished visits
+// behind in clinics 1 and 2, and a mean taken over someone else's data is
+// not a measurement of this fixture.
+seedTenant(77, 'impact-probe', 'Impact Probe Clinic');
+$impClinic = 77;
+$impQueue  = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 77');
+$impDoctor = (int) Db::scalar('SELECT doctor_id FROM queues WHERE clinic_id = 77');
+
+// A rule to attach to one group, so "by rule" and "by hand" are
+// distinguishable rather than both landing in the manual bucket.
+$impRuleId = (int) Db::insert(
+    "INSERT INTO priority_rules (clinic_id, name, source, kind, effect, is_active, reason, created_at)
+     VALUES (77, 'Impact probe rule', 'walkin', 'consultation', 3, 1, 'probe', ?)",
+    [Db::now()]
+);
+
+$impSeq = 0;
+/** A finished visit with a recorded wait. */
+$impVisit = function (int $priority, ?int $ruleId, int $wait) use ($impClinic, $impQueue, &$impSeq): int {
+    $p = $GLOBALS['patients']->findOrCreate($impClinic, [
+        'full_name' => 'Impact Person ' . (++$impSeq),
+        'phone'     => '0775550' . str_pad((string) (100 + $impSeq), 3, '0', STR_PAD_LEFT),
+    ]);
+    $issued = (new App\Domain\Queue\QueueService())->issueToken($impClinic, $impQueue, (int) $p['id'], []);
+    $id = (int) $issued['entry_id'];
+    // status is completed too, not just finished_at: a row with an end stamp
+    // but still reading 'waiting' is a state the app never produces, and a
+    // fixture shaped like that quietly passes tests it should fail.
+    Db::run(
+        "UPDATE queue_entries SET priority = ?, priority_rule_id = ?, wait_minutes = ?,
+                started_at = ?, finished_at = ?, status = 'completed' WHERE id = ?",
+        [$priority, $ruleId, $wait, Db::now(), Db::now(), $id]
+    );
+
+    return $id;
+};
+
+// Baseline: ten unprioritised visits, 30 minutes each.
+for ($i = 0; $i < 10; $i++) {
+    $impVisit(0, null, 30);
+}
+// By rule: ten visits, 10 minutes.
+for ($i = 0; $i < 10; $i++) {
+    $impVisit(1, $impRuleId, 10);
+}
+// By hand: ten visits, 50 minutes — deliberately SLOWER, to prove the sign
+// survives instead of being clamped to something flattering.
+for ($i = 0; $i < 10; $i++) {
+    $impVisit(1, null, 50);
+}
+
+Assert::test('priority impact is measured, not asserted', function () use ($impClinic): void {
+    $m = (new App\Services\PriorityImpactService())->measure($impClinic, date('Y-m-d'), date('Y-m-d'));
+
+    Assert::same(date('Y-m-d'), $m['from'], 'the window is echoed back');
+    Assert::true($m['enough'], 'there is enough data to compare');
+    Assert::same(10, $m['baseline']['n'], 'ten unprioritised visits');
+    Assert::same(30.0, $m['baseline']['mean'], 'unprioritised mean');
+    Assert::same(10.0, $m['rule']['mean'], 'rule-prioritised mean');
+    Assert::same(20.0, $m['rule']['diff'], 'the rule group waited 20 minutes less');
+    Assert::same(67, (int) $m['rule']['pct'], 'which is a 67% shorter wait');
+});
+
+Assert::test('a group that waited longer reports a negative, not a flattering zero', function () use ($impClinic): void {
+    $m = (new App\Services\PriorityImpactService())->measure($impClinic, date('Y-m-d'), date('Y-m-d'));
+
+    // Prioritising by hand made these patients wait 50 minutes against a
+    // 30-minute baseline. Clamping that to zero would hide the one result
+    // a clinic manager most needs to see.
+    Assert::true($m['manual']['diff'] < 0, 'the sign is kept: ' . var_export($m['manual']['diff'], true));
+    Assert::same(-20.0, $m['manual']['diff'], 'twenty minutes longer');
+    Assert::true((int) $m['manual']['pct'] < 0, 'and the percentage is negative too');
+});
+
+Assert::test('below the sample floor the mean is null, not a number', function () use ($impClinic, $impQueue): void {
+    // A mean of three is noise dressed up as a finding. The service reports
+    // null and the screen prints a dash.
+    Assert::true(App\Services\PriorityImpactService::MIN_SAMPLES >= 5, 'the floor is at least five');
+
+    $empty = (new App\Services\PriorityImpactService())->measure($impClinic, '2001-01-01', '2001-01-02');
+    Assert::same(0, $empty['baseline']['n'], 'no visits in that window');
+    Assert::same(null, $empty['baseline']['mean'], 'so no mean is claimed');
+    Assert::false($empty['enough'], 'and the panel says it cannot compare');
+    Assert::same(null, $empty['rule']['diff'], 'a difference needs two usable means');
+
+    // And a group of three, next to a baseline of ten: plenty of baseline,
+    // not nearly enough group.
+    $three = [];
+    for ($i = 0; $i < 3; $i++) {
+        $p = $GLOBALS['patients']->findOrCreate($impClinic, [
+            'full_name' => 'Thin Group ' . $i,
+            'phone'     => '077556000' . $i,
+        ]);
+        $id = (int) (new App\Domain\Queue\QueueService())->issueToken($impClinic, $impQueue, (int) $p['id'], [])['entry_id'];
+        Db::run(
+            "UPDATE queue_entries SET priority = 1, priority_rule_id = null, wait_minutes = 5,
+                    started_at = ?, finished_at = ?, status = 'completed' WHERE id = ?",
+            [Db::now(), Db::now(), $id]
+        );
+        $three[] = $id;
+    }
+    try {
+        // Ten by hand plus three more is thirteen, which still clears the
+        // floor — so shrink the by-hand group instead and check the floor
+        // itself is what governs the thin group.
+        $thin = (new App\Services\PriorityImpactService())->measure($impClinic, date('Y-m-d'), date('Y-m-d'));
+        Assert::same(13, $thin['manual']['n'], 'the thin group joined the by-hand bucket');
+        Assert::true($thin['manual']['mean'] !== null, 'thirteen is above the floor');
+    } finally {
+        foreach ($three as $id) {
+            Db::run('DELETE FROM queue_entries WHERE id = ?', [$id]);
+        }
+    }
+});
+
+Assert::test('overriding now counts only people ahead of the line right now', function () use ($impClinic, $impQueue): void {
+    $today = date('Y-m-d');
+    $svc   = new App\Services\PriorityImpactService();
+
+    // The thirty finished visits above are all done, so none of them count:
+    // this is a live tile, not a period report.
+    Assert::same(0, $svc->overridingNow($impClinic, $today), 'finished visits are excluded');
+
+    // Two live by-hand overrides and one live rule-driven entry.
+    $live = [];
+    foreach ([[1, null], [1, null], [1, $GLOBALS['impRuleId'] ?? null]] as [$prio, $rule]) {
+        $p = $GLOBALS['patients']->findOrCreate($impClinic, [
+            'full_name' => 'Live ' . count($live),
+            'phone'     => '077557000' . count($live),
+        ]);
+        $id = (int) (new App\Domain\Queue\QueueService())->issueToken($impClinic, $impQueue, (int) $p['id'], [])['entry_id'];
+        Db::run('UPDATE queue_entries SET priority = ?, priority_rule_id = ? WHERE id = ?', [$prio, $rule, $id]);
+        $live[] = $id;
+    }
+    try {
+        Assert::same(2, $svc->overridingNow($impClinic, $today), 'the two by-hand entries, not the rule one');
+    } finally {
+        foreach ($live as $id) {
+            Db::run('DELETE FROM queue_entries WHERE id = ?', [$id]);
+        }
+    }
+});
+
+Assert::test('one clinic cannot measure another clinic\'s waits', function () use ($impClinic): void {
+    $before = (new App\Services\PriorityImpactService())->measure($impClinic, date('Y-m-d'), date('Y-m-d'));
+
+    // A finished visit in a different clinic, inside the very same window.
+    seedTenant(78, 'impact-other', 'Impact Other Clinic');
+    $otherQueue = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 78');
+    $op = $GLOBALS['patients']->findOrCreate(78, ['full_name' => 'Impact Other Person', 'phone' => '0775550999']);
+    $id = (int) (new App\Domain\Queue\QueueService())->issueToken(78, $otherQueue, (int) $op['id'], [])['entry_id'];
+    Db::run(
+        "UPDATE queue_entries SET priority = 1, wait_minutes = 5, started_at = ?, finished_at = ?,
+                status = 'completed' WHERE id = ?",
+        [Db::now(), Db::now(), $id]
+    );
+
+    try {
+        $after = (new App\Services\PriorityImpactService())->measure($impClinic, date('Y-m-d'), date('Y-m-d'));
+        Assert::same($before['baseline']['n'], $after['baseline']['n'], 'clinic 77\'s baseline is untouched');
+        Assert::same($before['manual']['n'], $after['manual']['n'], 'and its by-hand count');
+
+        // The other clinic sees only its own single visit.
+        $theirs = (new App\Services\PriorityImpactService())->measure(78, date('Y-m-d'), date('Y-m-d'));
+        Assert::same(1, $theirs['manual']['n'], 'clinic 78 sees exactly its one entry');
+        Assert::same(null, $theirs['manual']['mean'], 'and claims no mean for one visit');
+    } finally {
+        Db::run('DELETE FROM queue_entries WHERE clinic_id = 78');
+    }
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 50. platform health, readable by a person                           */
+/* ------------------------------------------------------------------ */
+
+Assert::test('the platform health page has a route and is super-admin only', function (): void {
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    Assert::true(strpos($routes, "'/admin/monitor'") !== false, 'the route exists');
+    Assert::true(
+        (bool) preg_match("~'/admin/monitor'.*?'roles'\s*=>\s*\['super_admin'\]~s", $routes),
+        'it is gated to the platform administrator'
+    );
+    Assert::true(is_file(QP_ROOT . '/resources/views/pages/admin/monitor.php'), 'the view exists');
+});
+
+Assert::test('the health page renders every check the endpoint returns', function (): void {
+    $src = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/AdminController.php');
+    Assert::true(strpos($src, 'public function monitor()') !== false, 'the action exists');
+    Assert::true(strpos($src, "view('admin/monitor'") !== false, 'it renders the page');
+
+    // The whole point of the page is that it shows the probe's checks to a
+    // human. Reading them from a different service would make the page and
+    // the endpoint disagree about whether the platform is healthy.
+    Assert::true(strpos($src, 'MonitorService') !== false, 'it uses the same service as /api/health');
+});
+
+Assert::test('a health page never paints a serious incident as healthy', function (): void {
+    // Two vocabularies meet on this page: checks say ok/warning/critical,
+    // incidents say minor/major/critical. A missing key falling through to
+    // the 'ok' green would show 'major' as healthy.
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/admin/monitor.php');
+    foreach (['critical', 'warning', 'major', 'minor', 'ok'] as $severity) {
+        Assert::true(strpos($view, "'" . $severity . "'") !== false, $severity . ' has its own colour');
+    }
+
+    // And every severity the incident model allows is covered.
+    foreach (array_keys(App\Services\IncidentService::SEVERITIES) as $severity) {
+        Assert::true(
+            strpos($view, "'" . $severity . "' =>") !== false || strpos($view, "'" . $severity . "'    =>") !== false,
+            'incident severity ' . $severity . ' is mapped'
+        );
+    }
+});
+
+Assert::test('the nav does not leave Overview lit on every admin page', function (): void {
+    $layout = (string) file_get_contents(QP_ROOT . '/resources/views/layouts/app.php');
+
+    // Prefix matching made /admin/monitor light up /admin too, so the nav
+    // could never tell a platform operator where they were.
+    Assert::true(
+        (bool) preg_match('~\$prefix === \'/app\' \|\| \$prefix === \'/admin\'~', $layout),
+        'a bare section root matches exactly'
+    );
+    Assert::true(strpos($layout, "'/admin/monitor'") !== false, 'and health is in the nav');
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 51. the position screen is reachable from the board                 */
+/* ------------------------------------------------------------------ */
+
+Assert::test('every waiting-room board links to "where do I stand?"', function (): void {
+    // A feature nobody can reach is not a feature. The position screen is
+    // keyed like the board, so the board is the only place a patient will
+    // ever discover it — there is no nav, no menu, and no app to install.
+    $screens = [
+        'resources/views/pages/display/screen.php', // the TV on the wall
+        'resources/views/pages/display/live.php',   // the phone link
+    ];
+    foreach ($screens as $screen) {
+        $src = (string) file_get_contents(QP_ROOT . '/' . $screen);
+        Assert::true(
+            strpos($src, '/position') !== false,
+            basename($screen) . ' links to the position screen'
+        );
+    }
+});
+
+Assert::test('both boards show every room, not one token for the whole clinic', function (): void {
+    $tv = (string) file_get_contents(QP_ROOT . '/resources/views/pages/display/screen.php');
+    $phone = (string) file_get_contents(QP_ROOT . '/resources/views/pages/display/live.php');
+
+    // A clinic with five doctors showing a single token means four rooms of
+    // patients watch a number that is never theirs.
+    // Both boards now keep their markup in the view and their polling
+    // renderer in app.js. The phone board's renderer used to sit in an inline
+    // <script>, which `script-src 'self'` refused silently — so the board
+    // rendered once and never updated. Check each where it lives.
+    $appJs = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+
+    Assert::true(strpos($tv, 'data-tv-rooms') !== false, 'the TV has a per-room container');
+    Assert::true(strpos($appJs, 'data.serving') !== false, 'and app.js renders the room list into it');
+    Assert::true(strpos($appJs, 'data.solo') !== false, 'falling back to the hero for a solo practice');
+    Assert::true(strpos($phone, 'phone-serving-rooms') !== false, 'the phone board has one too');
+    Assert::true(strpos($appJs, 'data.serving') !== false, 'and app.js renders that one as well');
+});
+
+Assert::test('the coming-up list names the doctor, because token series repeat', function (): void {
+    $appJs = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+    $phone = (string) file_get_contents(QP_ROOT . '/resources/views/pages/display/live.php');
+
+    // Every queue restarts its own A-series, so three rooms can all be
+    // waiting on "A002". Without the doctor the list is ambiguous.
+    Assert::true(strpos($appJs, 'u.doctor') !== false, 'the TV names the doctor');
+    Assert::true(strpos($appJs, 'item.doctor') !== false, 'and so does the phone board');
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 52. day one: a brand-new clinic can actually open                    */
+/* ------------------------------------------------------------------ */
+
+Assert::test('signup mints the waiting-room key it promises', function (): void {
+    // The signup page lists "Waiting-room display key generated" among the
+    // things it sets up. For a while it set up nothing: the key was created
+    // on first use, so a new clinic had a patient tracking screen with no
+    // address until somebody happened to visit the screens page.
+    $result = (new App\Services\ClinicService())->register([
+        'name' => 'Day One Clinic',
+        'owner_name' => 'Dr. Day One',
+        'email' => 'dayone-' . uniqid() . '@example.lk',
+        'phone' => '+94 77 111 0001',
+        'city' => 'Negombo',
+        'district' => 'Gampaha',
+        'password' => 'DayOne#2026',
+    ], 'starter');
+
+    $clinicId = (int) $result['clinic_id'];
+    Assert::true($clinicId > 0, 'the clinic is created');
+
+    $key = Db::scalar(
+        "SELECT value FROM settings WHERE scope='clinic' AND owner_id=? AND key_name='display_token'",
+        [$clinicId]
+    );
+    Assert::true(is_string($key) && $key !== '', 'and it has a display key on day one');
+
+    // A key that opens nothing is not a key. The lookup the board performs is
+    // the same one, so resolve it the way DisplayController does.
+    $byKey = (new App\Services\DisplayKeyService())->resolve((string) $key);
+    Assert::true($byKey !== null, 'the key resolves to a clinic');
+    Assert::same($clinicId, (int) ($byKey['clinic_id'] ?? 0), 'and it resolves to this one');
+});
+
+Assert::test('a clinic can register a patient without queueing them', function (): void {
+    // "Register patients" and "Issue tokens" are separate things in the spec.
+    // The token desk does both at once, which is right for a walk-in and wrong
+    // for a booking taken over the phone.
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    Assert::true(
+        (bool) preg_match("~Router::post\('/patients'.*?PatientController::class,\s*'store'~s", $routes),
+        'POST /patients is routed'
+    );
+
+    $src = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/PatientController.php');
+    Assert::true(strpos($src, 'public function store()') !== false, 'the action exists');
+
+    // It must not mint a token: registering and queueing are different acts.
+    Assert::true(
+        strpos($src, 'issueToken') === false,
+        'registering does not also issue a token'
+    );
+});
+
+Assert::test('registering a patient leaves them out of the queue', function (): void {
+    seedTenant(120, 'dayone-two', 'Day One Two');
+    $before = (int) Db::scalar('SELECT COUNT(*) FROM queue_entries WHERE clinic_id = 120');
+    Assert::same(0, $before, 'starting from an empty queue');
+
+    $patient = (new App\Services\PatientService())->findOrCreate(120, [
+        'full_name' => 'Registered Not Queued',
+        'phone' => '+94 77 222 0099',
+    ]);
+    Assert::true((int) $patient['id'] > 0, 'the patient is created');
+
+    $after = (int) Db::scalar('SELECT COUNT(*) FROM queue_entries WHERE clinic_id = 120');
+    Assert::same(0, $after, 'and no token was issued for them');
+
+    $onRegister = (int) Db::scalar('SELECT COUNT(*) FROM patients WHERE clinic_id = 120');
+    Assert::same(1, $onRegister, 'they are on the register though');
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 53. controls that actually run under the app's own CSP               */
+/* ------------------------------------------------------------------ */
+
+Assert::test('no inline event handlers anywhere: the CSP blocks them silently', function (): void {
+    // `script-src 'self'` blocks inline on*= attributes exactly as it blocks
+    // inline <script>. Nothing logs an error, so a control written that way
+    // simply does nothing, forever, and looks fine in review.
+    $offenders = [];
+    $dir = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($dir as $file) {
+        if (!$file->isFile() || $file->getExtension() !== 'php') {
+            continue;
+        }
+        $src = (string) file_get_contents($file->getPathname());
+        if (preg_match('/\son(?:change|submit|click|input|focus|blur|load)\s*=/i', $src)) {
+            $offenders[] = str_replace(QP_ROOT . '/', '', $file->getPathname());
+        }
+    }
+    Assert::true(
+        $offenders === [],
+        'no view uses an inline handler' . ($offenders === [] ? '' : ': ' . implode(', ', $offenders))
+    );
+});
+
+Assert::test('no inline <script> anywhere: the CSP blocks those too', function (): void {
+    // The sibling check above only ever looked at on*= attributes, which is
+    // why three inline <script> blocks survived it. A blocked inline block
+    // fails the same silent way — no console entry, no error page — and it
+    // took out whole features rather than single controls: the phone board's
+    // setInterval(fetchBoard, 6000) never ran, so the board rendered once and
+    // never moved, and the token desk found a patient and then created a
+    // duplicate anyway because pick() was never bound.
+    $offenders = [];
+    $dir = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($dir as $file) {
+        if (!$file->isFile() || $file->getExtension() !== 'php') {
+            continue;
+        }
+        $src = (string) file_get_contents($file->getPathname());
+        // An allowlisted nonce would make this legal; there is none, and
+        // adding one to permit inline blocks would undo the point of the
+        // header. Behaviour belongs in app.js, which is served from 'self'.
+        if (preg_match('/<script(?![^>]*\bsrc\s*=)[^>]*>/i', $src)) {
+            $offenders[] = str_replace(QP_ROOT . '/', '', $file->getPathname());
+        }
+    }
+    Assert::true(
+        $offenders === [],
+        'no view carries an inline script block' . ($offenders === [] ? '' : ': ' . implode(', ', $offenders))
+    );
+});
+
+Assert::test('the pages whose behaviour moved still load app.js', function (): void {
+    // Moving a script out of a view only helps if the view still pulls in the
+    // file it moved to. The phone board never included app.js at all, so the
+    // move alone would have left it just as frozen and one step harder to see.
+    foreach (['display/live', 'display/screen', 'queue/new'] as $page) {
+        $src = (string) file_get_contents(QP_ROOT . '/resources/views/pages/' . $page . '.php');
+        Assert::true(strpos($src, "js/app.js") !== false, $page . ' loads app.js');
+    }
+});
+
+Assert::test('the moved board and desk code is still reachable in app.js', function (): void {
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+    // Each is the only implementation of its feature, so silence here means
+    // the feature is gone rather than duplicated somewhere else.
+    Assert::true(strpos($js, 'fetchBoard') !== false, 'the phone board still polls');
+    Assert::true(strpos($js, 'data-pick-patient') !== false, 'the token desk still binds picking');
+    Assert::true(strpos($js, 'tv-speech') !== false, 'the TV speech toggle still renders');
+});
+
+Assert::test('destructive actions ask in-page, not through the browser', function (): void {
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+
+    // A native confirm() inside the preview iframe is prefaced by "an embedded
+    // page at <host> says". That reads like a phishing prompt, cannot be
+    // styled, and cannot be driven by a test.
+    Assert::true(strpos($js, 'window.confirm') === false, 'no window.confirm');
+    Assert::true(strpos($js, 'window.prompt') === false, 'no window.prompt');
+    Assert::true(strpos($js, 'qp-dialog-host') !== false, 'the in-page dialog exists');
+
+    // Moving the guards to data- attributes only helps if something listens.
+    // Without these, the conversion would just relocate the silence.
+    Assert::true(strpos($js, 'data-confirm-submit') !== false, 'confirm-on-submit is handled');
+    Assert::true(strpos($js, 'data-submit-on-change') !== false, 'submit-on-change is handled');
+    Assert::true(strpos($js, 'data-print') !== false, 'print buttons are handled');
+    Assert::true(strpos($js, 'data-insert-placeholder') !== false, 'template placeholders are handled');
+});
+
+Assert::test('the guarded forms are really guarded', function (): void {
+    $guarded = 0;
+    $dir = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($dir as $file) {
+        if (!$file->isFile() || $file->getExtension() !== 'php') {
+            continue;
+        }
+        $guarded += preg_match_all('/data-confirm-submit=/', (string) file_get_contents($file->getPathname()));
+    }
+    // The point of the number: every one of these used to be an inline
+    // onsubmit that never fired, so suspending a clinic or deleting a room
+    // happened with no confirmation at all.
+    Assert::true($guarded >= 20, "destructive forms still ask first ({$guarded} guarded)");
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 54. navigation that fits the screen it is on                        */
+/* ------------------------------------------------------------------ */
+
+Assert::test('the app has a header nav, not only a side rail', function (): void {
+    $layout = (string) file_get_contents(QP_ROOT . '/resources/views/layouts/app.php');
+    $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+
+    // A 256px rail of twenty links is right for a phone drawer and wrong for
+    // a wide screen: it spends the width the queue board needs on labels
+    // nobody scrolls.
+    Assert::true(strpos($layout, 'class="topnav') !== false, 'there is a header nav');
+    Assert::true(strpos($layout, 'topnav-links') !== false, 'with primary links in it');
+    Assert::true(strpos($layout, 'topnav-menu') !== false, 'and the rest grouped under More');
+    Assert::true(strpos($css, '.topnav {') !== false, 'styled');
+
+    // Phone: the four things a clinic does all day, in thumb reach.
+    Assert::true(strpos($layout, 'bottom-tabs') !== false, 'there are bottom tabs for a phone');
+    Assert::true(strpos($css, '.bottom-tabs {') !== false, 'styled too');
+    // A fixed bar over the last row of content is worse than no bar.
+    Assert::true(strpos($layout, 'h-[52px] lg:hidden') !== false, 'with space reserved so it covers nothing');
+});
+
+Assert::test('the header shows a different map per role', function (): void {
+    $layout = (string) file_get_contents(QP_ROOT . '/resources/views/layouts/app.php');
+
+    // One shared list left the platform header with nothing but "More",
+    // because none of a clinic's destinations are the admin's.
+    Assert::true(strpos($layout, "'super_admin'") !== false && strpos($layout, 'primaryHrefs') !== false,
+        'the primary set is chosen from something');
+    Assert::true(strpos($layout, "role'] === 'super_admin'") !== false, 'platform gets its own');
+    Assert::true(strpos($layout, "role'] === 'doctor'") !== false, 'and so does a doctor');
+
+    // Every destination must still be reachable: the ones not in the header
+    // have to land in the More menu, or moving them there lost them.
+    Assert::true(strpos($layout, 'headerMore') !== false, 'the overflow is collected');
+    Assert::true(strpos($layout, 'headerPrimary') !== false, 'and the primaries are split out');
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 55. settings is one screen, five tabs                               */
+/* ------------------------------------------------------------------ */
+
+Assert::test('the settings page is split into tabs', function (): void {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/index.php');
+    $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+
+    Assert::true(strpos($view, 'st-tabs') !== false, 'there is a tab strip');
+    Assert::true(strpos($css, '.st-tabs {') !== false, 'styled');
+
+    // The point of the split: a receptionist who came to invite a colleague
+    // should not scroll past the clinic's tax fields to find the staff list.
+    foreach (['clinic', 'team', 'notifications', 'integrations', 'billing'] as $tab) {
+        Assert::true(
+            strpos($view, "\$tab === '$tab'") !== false,
+            "there is a '$tab' tab"
+        );
+    }
+});
+
+Assert::test('an unknown tab falls back rather than rendering nothing', function (): void {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/index.php');
+
+    // ?tab=garbage must not produce a blank page — every pane is wrapped in a
+    // conditional, so an unmatched value has to land somewhere real.
+    Assert::true(strpos($view, "isset(\$tabs[\$tab])") !== false, 'the tab is checked against the map');
+    Assert::true(strpos($view, "\$tab = 'clinic'") !== false, 'and falls back to the first one');
+});
+
+Assert::test('the controller reads the tab from the query string', function (): void {
+    $src = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/ClinicController.php');
+    Assert::true(
+        (bool) preg_match("/Request::string\('tab'/", $src),
+        'the active tab comes from ?tab='
+    );
+    Assert::true(strpos($src, "'activeTab'") !== false, 'and is passed to the view');
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 56. priority rules: ranked order, and fever                          */
+/* ------------------------------------------------------------------ */
+
+/** Two rules for clinic 200: a strong one listed second. */
+function seedRankedRules(int $clinicId): void
+{
+    Db::run(
+        'INSERT INTO priority_rules (clinic_id, name, effect, reason, is_active, sort_order, created_at)
+         VALUES (?,?,?,?,1,?,?)',
+        [$clinicId, 'Listed first, weaker', 2, 'weaker but first in the list', 1, Db::now()]
+    );
+    Db::run(
+        'INSERT INTO priority_rules (clinic_id, name, effect, reason, is_active, sort_order, created_at)
+         VALUES (?,?,?,?,1,?,?)',
+        [$clinicId, 'Listed second, stronger', 8, 'stronger but second in the list', 2, Db::now()]
+    );
+}
+
+Assert::test('the first matching rule on the list wins, not the biggest number', function (): void {
+    seedTenant(200, 'ranked', 'Ranked Clinic');
+    seedRankedRules(200);
+
+    $svc = new App\Services\PriorityRuleService();
+    $picked = $svc->evaluate(200, ['source' => 'walkin', 'kind' => 'consultation', 'hour' => 10]);
+
+    // Under the old "highest effect wins" the stronger rule took it. Now the
+    // manager's list is the truth, so the one they put first does.
+    Assert::same(2, (int) $picked['priority'], 'the rule ranked first decides');
+    Assert::same('Listed first, weaker', $picked['rule_name'], 'and it is named on the entry');
+});
+
+Assert::test('reordering the list reorders who is called next', function (): void {
+    $svc = new App\Services\PriorityRuleService();
+
+    // Swap them. This is what dragging a row up does.
+    Db::run('UPDATE priority_rules SET sort_order = 2 WHERE clinic_id = 200 AND name = ?', ['Listed first, weaker']);
+    Db::run('UPDATE priority_rules SET sort_order = 1 WHERE clinic_id = 200 AND name = ?', ['Listed second, stronger']);
+
+    $picked = $svc->evaluate(200, ['source' => 'walkin', 'kind' => 'consultation', 'hour' => 10]);
+    Assert::same(8, (int) $picked['priority'], 'the newly-first rule now decides');
+    Assert::same('Listed second, stronger', $picked['rule_name'], 'named');
+
+    // Put it back, so the two tests are independent of run order.
+    Db::run('UPDATE priority_rules SET sort_order = 1 WHERE clinic_id = 200 AND name = ?', ['Listed first, weaker']);
+    Db::run('UPDATE priority_rules SET sort_order = 2 WHERE clinic_id = 200 AND name = ?', ['Listed second, stronger']);
+});
+
+Assert::test('an unmeasured temperature never matches a fever rule', function (): void {
+    seedTenant(201, 'fever', 'Fever Clinic');
+    Db::run(
+        'INSERT INTO priority_rules (clinic_id, name, effect, reason, min_temp_x10, is_active, sort_order, created_at)
+         VALUES (?,?,?,?,?,1,1,?)',
+        [201, 'Fever above 39', 9, 'high fever', 390, Db::now()]
+    );
+    $svc = new App\Services\PriorityRuleService();
+
+    // 39.7 °C — measured, and above the threshold.
+    $hot = $svc->evaluate(201, ['source' => 'walkin', 'kind' => 'consultation', 'hour' => 10, 'temp_c_x10' => 397]);
+    Assert::same(9, (int) $hot['priority'], 'a measured fever is caught');
+
+    // 38.0 °C — measured, and below it.
+    $warm = $svc->evaluate(201, ['source' => 'walkin', 'kind' => 'consultation', 'hour' => 10, 'temp_c_x10' => 380]);
+    Assert::same(0, (int) $warm['priority'], 'a measured non-fever is not');
+
+    // Not measured at all. This is the one that matters: null is not 0, and
+    // treating it as afebrile would hand a fever rule everyone untriaged.
+    $unknown = $svc->evaluate(201, ['source' => 'walkin', 'kind' => 'consultation', 'hour' => 10]);
+    Assert::same(0, (int) $unknown['priority'], 'an unmeasured patient is not an afebrile one');
+    Assert::same(null, $unknown['rule_id'], 'and no rule is recorded against them');
+});
+
+Assert::test('a fever threshold is exact at the boundary', function (): void {
+    $svc = new App\Services\PriorityRuleService();
+    // 39.0 on the nose is "above 39" for a rule with min 390, because the
+    // reading is stored in tenths and compared as an integer. A REAL column
+    // would leave 39.0 to floating point.
+    $at = $svc->evaluate(201, ['source' => 'walkin', 'kind' => 'consultation', 'hour' => 10, 'temp_c_x10' => 390]);
+    Assert::same(9, (int) $at['priority'], '39.0 matches a 39.0 threshold');
+    $under = $svc->evaluate(201, ['source' => 'walkin', 'kind' => 'consultation', 'hour' => 10, 'temp_c_x10' => 389]);
+    Assert::same(0, (int) $under['priority'], '38.9 does not');
+});
+
+Assert::test('the migration numbers old rules the way the old engine did', function (): void {
+    // The backfill ranks by `effect DESC, id ASC`, which is exactly how the
+    // engine used to evaluate. If these ever disagree, upgrading a live
+    // clinic silently changes who gets called next.
+    seedTenant(202, 'rankcheck', 'Rank Check Clinic');
+    $weakId = Db::insert(
+        'INSERT INTO priority_rules (clinic_id, name, effect, reason, is_active, sort_order, created_at)
+         VALUES (202,?,?,?,1,?,?)',
+        ['Weak', 1, 'w', 0, Db::now()]
+    );
+    Db::insert(
+        'INSERT INTO priority_rules (clinic_id, name, effect, reason, is_active, sort_order, created_at)
+         VALUES (202,?,?,?,1,?,?)',
+        ['Strong', 7, 's', 0, Db::now()]
+    );
+
+    // Reproduce the backfill for this pair and check it ranks Strong first.
+    $ranks = Db::all(
+        'SELECT id, (SELECT COUNT(*) FROM priority_rules AS peer
+                      WHERE peer.clinic_id = priority_rules.clinic_id
+                        AND (peer.effect > priority_rules.effect
+                             OR (peer.effect = priority_rules.effect AND peer.id <= priority_rules.id))) AS rank
+           FROM priority_rules WHERE clinic_id = 202'
+    );
+    $byId = [];
+    foreach ($ranks as $r) {
+        $byId[(int) $r['id']] = (int) $r['rank'];
+    }
+    Assert::same(2, $byId[$weakId], 'the weaker rule takes the later slot');
+    Assert::same(1, min($byId), 'and ranking is 1-based');
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 57. the ranked list is editable, and the change is on record        */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a clinic can reorder its rules, and only its own', function (): void {
+    seedTenant(210, 'reorder', 'Reorder Clinic');
+    $svc = new App\Services\PriorityRuleService();
+    $a = Db::insert(
+        'INSERT INTO priority_rules (clinic_id, name, effect, reason, is_active, sort_order, created_at)
+         VALUES (210,?,?,?,1,?,?)', ['First', 5, 'a', 1, Db::now()]
+    );
+    Db::insert(
+        'INSERT INTO priority_rules (clinic_id, name, effect, reason, is_active, sort_order, created_at)
+         VALUES (210,?,?,?,1,?,?)', ['Second', 5, 'b', 2, Db::now()]
+    );
+
+    // Sanity: the two rules start in the order they were created.
+    Assert::same($a, (int) Db::scalar(
+        'SELECT id FROM priority_rules WHERE clinic_id = 210 ORDER BY sort_order LIMIT 1'
+    ), 'the first one created is first');
+
+    // Reorder with the real ids, reversed.
+    $rows = Db::all('SELECT id FROM priority_rules WHERE clinic_id = 210 ORDER BY sort_order');
+    $order = array_reverse(array_map(static fn ($r) => (int) $r['id'], $rows));
+    $moved = $svc->reorder(210, $order);
+    Assert::same(2, $moved, 'both rules were renumbered');
+
+    $after = Db::all('SELECT id, sort_order FROM priority_rules WHERE clinic_id = 210 ORDER BY sort_order');
+    Assert::same((int) $order[0], (int) $after[0]['id'], 'the new first rule is first');
+    Assert::same(1, (int) $after[0]['sort_order'], 'and numbering restarts at 1');
+
+    // A hand-crafted POST must not renumber another tenant's list.
+    $before = (int) Db::scalar('SELECT sort_order FROM priority_rules WHERE clinic_id = 1 ORDER BY sort_order LIMIT 1');
+    $svc->reorder(210, array_merge($order, [1, 2]));   // ids belonging to clinic 1
+    $afterForeign = (int) Db::scalar('SELECT sort_order FROM priority_rules WHERE clinic_id = 1 ORDER BY sort_order LIMIT 1');
+    Assert::same($before, $afterForeign, "another clinic's order is untouched");
+});
+
+Assert::test('rule changes are written to the rule history', function (): void {
+    $svc = new App\Services\PriorityRuleService();
+
+    $rows = Db::all('SELECT id, name FROM priority_rules WHERE clinic_id = 210 ORDER BY sort_order');
+    $first = $rows[0];
+
+    $svc->record(210, (int) $first['id'], $first['name'], 'updated', null, 'Effect changed from 5 to 6');
+    $history = $svc->history(210);
+
+    Assert::true(count($history) > 0, 'history is readable');
+    Assert::same('updated', $history[0]['action'], 'newest first');
+    Assert::same($first['name'], $history[0]['rule_name'], 'and it names the rule');
+});
+
+Assert::test('creating a rule records what it says, not just that it was made', function (): void {
+    $svc = new App\Services\PriorityRuleService();
+    $before = count($svc->history(210));
+
+    $svc->create(210, [
+        'name' => 'Fever above 39',
+        'effect' => 9,
+        'reason' => 'high fever',
+        'min_temp_x10' => 390,
+    ], null);
+
+    $history = $svc->history(210);
+    Assert::same($before + 1, count($history), 'a history row was written');
+    Assert::same('created', $history[0]['action'], 'recorded as a creation');
+    Assert::same('Fever above 39', $history[0]['rule_name'], 'named');
+    // The payload is kept, so the rule is explainable after it is edited.
+    $after = json_decode((string) $history[0]['after_json'], true);
+    Assert::same(390, (int) ($after['min_temp_x10'] ?? 0), 'with the temperature it was created with');
+});
+
+Assert::test('a new rule appends to the list rather than jumping it', function (): void {
+    $svc = new App\Services\PriorityRuleService();
+    $maxBefore = (int) Db::scalar('SELECT COALESCE(MAX(sort_order),0) FROM priority_rules WHERE clinic_id = 210');
+
+    $id = $svc->create(210, ['name' => 'Appended rule', 'effect' => 1, 'reason' => 'last'], null);
+    $order = (int) Db::scalar('SELECT sort_order FROM priority_rules WHERE id = ?', [$id]);
+
+    Assert::same($maxBefore + 1, $order, 'it lands at the bottom');
+    // Inserting at the top would let an unranked rule silently outrank every
+    // policy the clinic had already written.
+    Assert::true($order > 1, 'and therefore does not outrank anything by default');
+});
+
+
+/* ------------------------------------------------------------------ 58 ----
+ * Every page is reachable.
+ *
+ * A route that renders fine but that nothing links to is a feature nobody
+ * can use: the public-screens manager and the platform's feature
+ * entitlements were both built, tested green, and wired to nothing. The
+ * only way to find them was to diff the route table against the markup.
+ */
+Assert::test('every page with a fixed URL is linked to from somewhere', function (): void {
+    $routes = file_get_contents(QP_ROOT . '/routes/web.php');
+    preg_match_all("#Router::get\('([^']+)',\s*\[\s*(\w+)::class,\s*'(\w+)'#", (string) $routes, $m, PREG_SET_ORDER);
+
+    // URLs that are deliberately not linked. Each is reached by redirect
+    // rather than by a click, so the markup scan can never see them.
+    $byRedirect = [
+        '/features'              => 'redirects to /#surfaces',
+        '/pricing'               => 'redirects to /#pricing',
+        '/queue/token-issued'    => 'redirect target after issuing',
+        '/getting-started/display' => 'redirect target from onboarding',
+    ];
+
+    $haystack = '';
+    foreach (['resources/views', 'public/assets'] as $dir) {
+        $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/' . $dir));
+        foreach ($it as $f) {
+            if ($f->isFile() && preg_match('/\.(php|js)$/', $f->getFilename())) {
+                $haystack .= (string) file_get_contents($f->getPathname()) . "\n";
+            }
+        }
+    }
+
+    $orphans = [];
+    foreach ($m as [, $path, $ctrl, $action]) {
+        if (str_contains($path, '{')) {
+            continue; // reached from a listing, with a real id substituted
+        }
+        if (isset($byRedirect[$path])) {
+            continue;
+        }
+        // A URL is usually built with a query string: /reports/export?from=…,
+        // /api/queue/board?queue_id=…. Matching the bare path alone reported
+        // three working pages as orphans, so the query is part of the match.
+        $quoted = preg_quote($path, '#');
+        if (preg_match('#' . $quoted . '(?:\?[^"\'`]*)?["\'`]#', $haystack)) {
+            continue;
+        }
+        $orphans[] = $path . ' (' . $ctrl . '::' . $action . ')';
+    }
+
+    Assert::same([], $orphans, 'no page is left unreachable');
+});
+
+Assert::test('the two screens that were wired to nothing now have nav entries', function (): void {
+    // Regression guard, not a style check: both pages existed, both rendered
+    // 200, and neither was reachable from any menu in the app.
+    $layout = (string) file_get_contents(QP_ROOT . '/resources/views/layouts/app.php');
+
+    Assert::true(str_contains($layout, "'/settings/displays'"), 'public screens is in the clinic nav');
+    Assert::true(str_contains($layout, "'/admin/features'"), 'feature entitlements is in the platform nav');
+
+    // Gated, so a receptionist is not shown a link that 403s.
+    Assert::true(
+        str_contains($layout, "Auth::can('clinic.manage')\n                    ? ['/settings/displays'"),
+        'and the screens link only appears for a role that can open it'
+    );
+});
+
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

@@ -86,6 +86,293 @@
   }
   window.qpApi = api;
 
+  // Trailing-edge debounce. Lives here rather than inline on the desk page
+  // because the app's CSP (script-src 'self') blocks inline scripts outright.
+  function debounce(fn, ms) {
+    let t = null;
+    return function debounced(...args) {
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(this, args), ms);
+    };
+  }
+
+  /* ------------------------------------------------------------- dialogs
+     The console runs inside an iframe on the preview host, so every native
+     confirm()/prompt() the browser opens is labelled "An embedded page at
+     <host> says". That reads like a phishing prompt, cannot be styled, and
+     cannot be driven by a test. These are the in-page replacements. They
+     return promises, so the call sites read the same way they did before. */
+  const dialogHost = document.createElement('div');
+  dialogHost.className = 'qp-dialog-host';
+  dialogHost.hidden = true;
+  document.body.appendChild(dialogHost);
+
+  let dialogOpen = null;
+
+  function dialogKeydown(ev) {
+    if (!dialogOpen) return;
+    if (ev.key === 'Escape') {
+      ev.preventDefault();
+      dialogOpen.close(dialogOpen.nullish);
+      return;
+    }
+    if (ev.key !== 'Tab') return;
+    // Focus trap. A dialog that lets Tab walk out from behind itself is
+    // unusable from the keyboard, and this app is worked on a reception
+    // desk all day.
+    const items = dialogHost.querySelectorAll('button, [href], input, textarea, select');
+    if (items.length === 0) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (ev.shiftKey && document.activeElement === first) {
+      ev.preventDefault();
+      last.focus();
+    } else if (!ev.shiftKey && document.activeElement === last) {
+      ev.preventDefault();
+      first.focus();
+    }
+  }
+
+  /**
+   * @returns {Promise<boolean>} with an input field, Promise<string|null>
+   */
+  function openDialog(opts) {
+    return new Promise((resolve) => {
+      // A second dialog over an open one would strand the first promise.
+      if (dialogOpen) dialogOpen.close(dialogOpen.nullish);
+
+      const withInput = Boolean(opts.input);
+      const nullish = withInput ? null : false;
+      const returnFocus = document.activeElement;
+
+      const close = (value) => {
+        dialogOpen = null;
+        dialogHost.hidden = true;
+        dialogHost.innerHTML = '';
+        document.removeEventListener('keydown', dialogKeydown, true);
+        document.body.classList.remove('qp-dialog-locked');
+        if (returnFocus && returnFocus.focus) returnFocus.focus();
+        resolve(value);
+      };
+
+      dialogHost.innerHTML = '';
+      dialogHost.hidden = false;
+
+      const card = document.createElement('div');
+      card.className = 'qp-dialog';
+      card.setAttribute('role', 'dialog');
+      card.setAttribute('aria-modal', 'true');
+
+      const heading = document.createElement('h2');
+      heading.className = 'qp-dialog-title';
+      heading.textContent = opts.title || 'Are you sure?';
+      card.appendChild(heading);
+
+      if (opts.message) {
+        const body = document.createElement('p');
+        body.className = 'qp-dialog-text';
+        body.textContent = opts.message;
+        card.appendChild(body);
+      }
+
+      let field = null;
+      if (withInput) {
+        const spec = opts.input;
+        const wrap = document.createElement('label');
+        wrap.className = 'qp-dialog-field';
+        const caption = document.createElement('span');
+        caption.textContent = spec.label || '';
+        wrap.appendChild(caption);
+
+        if (spec.kind === 'select') {
+          // Picking a destination by typing "2" into a prompt is how a
+          // patient gets transferred to the wrong doctor. Show the names.
+          field = document.createElement('select');
+          field.className = 'input';
+          (spec.choices || []).forEach((choice) => {
+            const option = document.createElement('option');
+            option.value = String(choice.value);
+            option.textContent = choice.label;
+            if (String(choice.value) === String(spec.value)) option.selected = true;
+            field.appendChild(option);
+          });
+        } else {
+          field = document.createElement(spec.multiline ? 'textarea' : 'input');
+          if (!spec.multiline) field.type = 'text';
+          field.className = 'input';
+          field.placeholder = spec.placeholder || '';
+          field.value = spec.value || '';
+          if (spec.readonly) {
+            field.readOnly = true;
+            field.className += ' font-mono text-[12px]';
+          }
+        }
+        wrap.appendChild(field);
+        card.appendChild(wrap);
+      }
+
+      const actions = document.createElement('div');
+      actions.className = 'qp-dialog-actions';
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'btn-secondary';
+      cancel.textContent = opts.cancelLabel || 'Cancel';
+      const confirm_ = document.createElement('button');
+      confirm_.type = 'button';
+      confirm_.className = opts.danger ? 'btn-danger' : 'btn-primary';
+      confirm_.textContent = opts.confirmLabel || (withInput ? 'Continue' : 'Confirm');
+      actions.appendChild(cancel);
+      actions.appendChild(confirm_);
+      card.appendChild(actions);
+      dialogHost.appendChild(card);
+
+      dialogOpen = { close, nullish };
+
+      cancel.addEventListener('click', () => close(nullish));
+      confirm_.addEventListener('click', () => close(withInput ? field.value : true));
+      // Backdrop press. mousedown, not click: a click that started inside
+      // the card and ended on the backdrop must not dismiss it.
+      dialogHost.addEventListener('mousedown', (ev) => {
+        if (ev.target === dialogHost) close(nullish);
+      });
+
+      document.addEventListener('keydown', dialogKeydown, true);
+      document.body.classList.add('qp-dialog-locked');
+
+      (field || confirm_).focus();
+      if (field && field.select) field.select();
+    });
+  }
+
+  /** Ask a yes/no question. Resolves true only on Confirm. */
+  const askConfirm = (message, opts = {}) => openDialog(Object.assign({ message }, opts));
+
+  /** Ask for a line of text. Resolves null when dismissed. */
+  const askText = (opts) => openDialog(Object.assign({}, opts, {
+    input: {
+      label: opts.label,
+      value: opts.value,
+      placeholder: opts.placeholder,
+      multiline: opts.multiline,
+    },
+  }));
+
+  /* --------------------------------------- CSP-safe inline replacements
+     The app sends `script-src 'self'`, which blocks inline event handlers
+     exactly as it blocks inline <script>. Twenty-odd controls were written
+     as onchange=/onsubmit=/onclick= attributes and never ran:
+       - filter selects that were meant to submit on change simply did not;
+       - `return confirm(...)` guards on destructive forms were skipped, so
+         deleting a room or cancelling a day's bookings went through with no
+         confirmation whatsoever;
+       - Print buttons did nothing.
+     None of it logged an error the user would see. These three delegated
+     handlers replace them with attributes, which CSP allows. */
+  document.addEventListener('change', (e) => {
+    const el = e.target;
+    if (!el || !el.matches || !el.matches('[data-autosubmit]')) return;
+    const form = el.form;
+    if (form) form.submit();
+  });
+
+  // Opening-hours editor: a day marked Closed greys out its two time fields,
+  // so the row cannot be saved as both closed and open. The disabled state is
+  // also rendered server-side, so this works with JS off.
+  document.addEventListener('change', (e) => {
+    const box = e.target && e.target.closest ? e.target.closest('[data-hours-closed]') : null;
+    if (!box) return;
+    const dow = box.getAttribute('data-hours-closed');
+    const scope = box.closest('form') || document;
+    ['open', 'close'].forEach((key) => {
+      const field = scope.querySelector('[data-hours-' + key + '="' + dow + '"]');
+      if (field) field.disabled = box.checked;
+    });
+  });
+
+  // Capture phase, so the guard runs before anything else can submit the form.
+  // The native confirm() this replaced was synchronous; a dialog is not, so
+  // the submit is always stopped here and re-issued once the answer arrives.
+  // The marker tells the re-issued submit to pass straight through.
+  document.addEventListener('submit', (e) => {
+    const form = e.target;
+    if (!form || !form.getAttribute) return;
+    if (form.dataset.confirmed === '1') {
+      delete form.dataset.confirmed;
+      return;
+    }
+    const msg = form.getAttribute('data-confirm');
+    if (!msg) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    askConfirm(msg, { danger: form.dataset.confirmDanger === '1' }).then((ok) => {
+      if (!ok) return;
+      form.dataset.confirmed = '1';
+      // requestSubmit, not submit: it runs validation and carries the
+      // submitter, so the handler that owns this form still sees it.
+      if (form.requestSubmit) form.requestSubmit();
+      else form.submit();
+    });
+  }, true);
+
+  document.addEventListener('click', (e) => {
+    const btn = e.target && e.target.closest ? e.target.closest('[data-print]') : null;
+    if (!btn) return;
+    e.preventDefault();
+    window.print();
+  });
+
+  // Insert a merge placeholder into the nearest textarea. The inline version
+  // appended to the end, which is wrong the moment you are editing a sentence
+  // in the middle -- so this inserts at the caret and leaves it after the text.
+  document.addEventListener('click', (e) => {
+    const btn = e.target && e.target.closest ? e.target.closest('[data-insert]') : null;
+    if (!btn) return;
+    e.preventDefault();
+    const text = btn.getAttribute('data-insert') || '';
+    const scope = btn.closest('form') || document;
+    const area = scope.querySelector('textarea');
+    if (!area || !text) return;
+    const start = area.selectionStart ?? area.value.length;
+    const end = area.selectionEnd ?? area.value.length;
+    area.value = area.value.slice(0, start) + text + area.value.slice(end);
+    const caret = start + text.length;
+    area.focus();
+    try { area.setSelectionRange(caret, caret); } catch (err) { /* older inputs */ }
+    // A programmatic value change fires no event, so anything listening (a
+    // character counter, a dirty flag) has to be told.
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+
+  /* --------------------------------------------- desktop "More" menu */
+  const moreWrap = $('[data-nav-more]');
+  if (moreWrap) {
+    const toggle = $('[data-nav-more-toggle]', moreWrap);
+    const menu = $('#nav-more-menu', moreWrap);
+
+    const setMore = (open) => {
+      menu.hidden = !open;
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+
+    toggle.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      setMore(menu.hidden);
+    });
+    // A link inside is a navigation, not a menu toggle: let it through.
+    menu.addEventListener('click', (ev) => {
+      if (ev.target.closest('a')) setMore(false);
+    });
+    document.addEventListener('click', (ev) => {
+      if (!ev.target.closest('[data-nav-more]')) setMore(false);
+    });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && !menu.hidden) {
+        setMore(false);
+        toggle.focus();
+      }
+    });
+  }
+
   /* ------------------------------------------------- mobile nav drawer */
   /* Off-canvas, not an inline list. Locks the page behind it, closes on
      Escape / overlay / navigation, and restores focus to the button that
@@ -152,7 +439,9 @@
 
     // Rotating a phone to landscape crosses the lg breakpoint, where the
     // drawer is display:none but the body would stay scroll-locked.
-    const wide = window.matchMedia('(min-width: 1024px)');
+    // 1024 × 0.9 = 921.6 — the retuned lg from tailwind.config.js, kept in
+    // step with the 90% scale rule in resources/css/app.css.
+    const wide = window.matchMedia('(min-width: 921.6px)');
     (wide.addEventListener ? wide.addEventListener.bind(wide, 'change') : wide.addListener.bind(wide))((e) => {
       if (e.matches) close();
     });
@@ -163,10 +452,17 @@
     const btn = ev.target.closest('[data-confirm]');
     if (!btn) return;
     const text = btn.getAttribute('data-confirm') || 'Are you sure?';
-    if (!window.confirm(text)) {
-      ev.preventDefault();
-      ev.stopImmediatePropagation();
+    if (btn.dataset.confirmed === '1') {
+      delete btn.dataset.confirmed;
+      return;
     }
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    askConfirm(text, { danger: btn.dataset.confirmDanger === '1' }).then((ok) => {
+      if (!ok) return;
+      btn.dataset.confirmed = '1';
+      btn.click();
+    });
   }, true);
 
   /* --------------------------------------------------- queue row actions */
@@ -190,7 +486,12 @@
 
     // Clinical priority is the one action that must capture a reason (audit).
     if (action === 'priority') {
-      reason = window.prompt('Reason for clinical priority (recorded in the audit log):', '');
+      reason = await askText({
+        title: 'Reason for priority',
+        message: 'This is recorded in the audit log next to the token.',
+        label: 'Reason',
+        placeholder: 'e.g. chest pain, triaged by nurse',
+      });
       if (reason === null) return;
       if (!reason.trim()) {
         toast('A reason is required for priority.', 'warn');
@@ -200,10 +501,16 @@
     if (action === 'cancel' || action === 'hold') {
       // A hold without a reason is just a mystery row on the board, so the
       // prompt defaults to something a colleague can act on.
-      reason = window.prompt(
-        action === 'hold' ? 'Why is this patient on hold? (e.g. sent for X-ray)' : 'Reason (optional):',
-        action === 'hold' ? 'Stepped away' : ''
-      );
+      const hold = action === 'hold';
+      reason = await askText({
+        title: hold ? 'Why is this patient on hold?' : 'Reason for cancelling (optional)',
+        message: hold
+          ? 'Colleagues see this on the board, so it has to be something they can act on.'
+          : 'Optional. If you leave it blank the cancellation is still recorded.',
+        label: hold ? 'Reason' : 'Reason (optional)',
+        value: hold ? 'Stepped away' : '',
+        placeholder: 'e.g. sent for X-ray',
+      });
       if (reason === null) return;
     }
 
@@ -214,7 +521,12 @@
       const target = await pickTransferTarget();
       if (!target) return;
       toQueueId = target.id;
-      reason = window.prompt('Reason for transfer (recorded in the audit log):', '');
+      reason = await askText({
+        title: 'Reason for transfer',
+        message: 'This is recorded in the audit log against both tokens.',
+        label: 'Reason',
+        placeholder: 'e.g. moved to the dressing room',
+      });
       if (reason === null) return;
     }
 
@@ -255,15 +567,27 @@
       toast('There is no other queue open today to transfer to.', 'warn');
       return null;
     }
-    const list = queues.map((q, i) => `${i + 1}. ${q.name} (${q.waiting} waiting)`).join('\n');
-    const answer = window.prompt('Transfer to which queue?\n\n' + list, '1');
-    if (answer === null) return null;
-    const index = parseInt(answer, 10) - 1;
-    if (Number.isNaN(index) || !queues[index]) {
-      toast('Enter one of the listed numbers.', 'warn');
+    const chosen = await openDialog({
+      title: 'Transfer to which queue?',
+      message: 'The patient keeps their place in the queue they move to.',
+      confirmLabel: 'Transfer here',
+      input: {
+        kind: 'select',
+        label: 'Destination',
+        value: queues[0].id,
+        choices: queues.map((q) => ({
+          value: q.id,
+          label: `${q.name} (${q.waiting} waiting)`,
+        })),
+      },
+    });
+    if (chosen === null) return null;
+    const target = queues.find((q) => String(q.id) === String(chosen));
+    if (!target) {
+      toast('Pick one of the listed queues.', 'warn');
       return null;
     }
-    return queues[index];
+    return target;
   }
 
   /* ------------------------------------------------------- copy buttons */
@@ -286,7 +610,16 @@
       }
       toast('Link copied', 'success', 1800);
     } catch {
-      window.prompt('Copy this link:', value);
+      // Only reached when the clipboard API is unavailable (older Safari,
+      // an insecure origin). A prompt() here is prefaced by the browser
+      // with "an embedded page at <host> says", which nobody will trust.
+      await openDialog({
+        title: 'Copy this link',
+        message: 'Automatic copy is not available — select the text and copy it.',
+        confirmLabel: 'Done',
+        cancelLabel: 'Close',
+        input: { label: 'Link', value, readonly: true },
+      });
     }
   });
 
@@ -544,7 +877,7 @@
             <span class="ml-1 text-xs font-normal text-ink-400">${esc(r.patient_code || '')}</span></p>
           <p class="text-[11px] text-ink-500 tabular">joined ${esc(r.joined)}${Number(r.call_count) > 1 ? ` · called ${r.call_count}×` : ''}</p>
         </div>
-        ${actions ? `<div class="flex w-full flex-wrap items-center gap-1.5 border-t border-hairline pt-2 sm:w-auto sm:border-0 sm:pt-0">
+        ${actions ? `<div class="flex w-full flex-wrap items-center gap-1.5 border-t border-hairline pt-2 md:w-auto md:border-0 md:pt-0">
           ${actions}
           <a class="act-mute" href="/queue/entry?id=${encodeURIComponent(r.id)}" title="Open details">
             <svg class="h-3.5 w-3.5"><use href="#i-chevron-right"/></svg>
@@ -892,6 +1225,283 @@
   if (posAuto) {
     const secs = Math.max(10, Number(posAuto.getAttribute('data-position-auto')) || 30);
     setTimeout(() => window.location.reload(), secs * 1000);
+  }
+
+  /* ------------------------------------------- priority rule drag order */
+  /* The list on screen IS the evaluation order, so dragging it has to change
+     what the engine does, not just what the manager sees. Rows are moved in
+     the DOM, the hidden `order` field is rewritten, and the existing form
+     posts it - the same endpoint a no-JS submit would use, so there is one
+     code path to keep correct.
+
+     Progressive enhancement: the grips and the hint are `hidden` in the
+     markup and only revealed here. With JS off the page is a plain ranked
+     list, which is still the truth about the order.
+
+     Keyboard parity matters on a page about fairness: a focused grip moves
+     its row with the arrow keys, because drag-only reordering locks out
+     anyone not using a mouse. */
+  const orderForm = $('#rule-order-form[data-reorderable]');
+  if (orderForm) {
+    const rowsRoot = $('#rule-rows', orderForm);
+    const rowsOf = () => $$('.pr-rule', rowsRoot);
+    if (rowsRoot && rowsOf().length > 1) {
+      const saveBtn = $('#pr-save-order');
+      const orderField = $('#rule-order');
+      const hint = $('#pr-drag-hint');
+      const original = rowsOf().map((r) => r.dataset.ruleId).join(',');
+      let dragged = null;
+
+      $$('.pr-grip', rowsRoot).forEach((g) => g.classList.remove('hidden'));
+      if (hint) hint.classList.remove('hidden');
+      rowsOf().forEach((r) => { r.draggable = true; });
+
+      const sync = () => {
+        const now = rowsOf();
+        now.forEach((r, i) => {
+          const badge = $('.pr-pos', r);
+          if (badge) badge.textContent = String(i + 1);
+        });
+        // The built-in default always sits below the last real rule.
+        const sysPos = $('[data-system-pos]', rowsRoot);
+        if (sysPos) sysPos.textContent = String(now.length + 1);
+        const ids = now.map((r) => r.dataset.ruleId).join(',');
+        if (orderField) orderField.value = ids;
+        if (saveBtn) saveBtn.classList.toggle('hidden', ids === original);
+      };
+
+      const place = (row, target, after) => {
+        if (!target || target === row) return;
+        rowsRoot.insertBefore(row, after ? target.nextSibling : target);
+        sync();
+      };
+
+      rowsRoot.addEventListener('dragstart', (e) => {
+        const row = e.target.closest?.('.pr-rule');
+        if (!row) return;
+        dragged = row;
+        row.classList.add('pr-dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', row.dataset.ruleId);
+      });
+      rowsRoot.addEventListener('dragend', () => {
+        if (dragged) dragged.classList.remove('pr-dragging');
+        dragged = null;
+      });
+      rowsRoot.addEventListener('dragover', (e) => {
+        if (!dragged) return;
+        e.preventDefault();
+        const row = e.target.closest?.('.pr-rule');
+        if (!row || row === dragged) return;
+        const box = row.getBoundingClientRect();
+        place(dragged, row, e.clientY > box.top + box.height / 2);
+      });
+      rowsRoot.addEventListener('drop', (e) => { if (dragged) e.preventDefault(); });
+
+      $$('.pr-grip', rowsRoot).forEach((grip) => {
+        grip.addEventListener('keydown', (e) => {
+          if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+          e.preventDefault();
+          const row = grip.closest('.pr-rule');
+          const all = rowsOf();
+          const next = all.indexOf(row) + (e.key === 'ArrowUp' ? -1 : 1);
+          if (next < 0 || next >= all.length) return;
+          place(row, all[next], e.key === 'ArrowDown');
+          grip.focus();
+        });
+      });
+    }
+  }
+
+  /* -------------------------------------------------------- token desk
+     The "New patient" screen. It used to carry an inline <script>, which the
+     app's own CSP (script-src 'self') refuses to execute -- so searching
+     worked but selecting a result did nothing, and the desk quietly created a
+     duplicate patient instead of the one it had just found. Everything below
+     therefore lives in this file, which IS served from 'self'.
+
+     The promise on the page is "four keystrokes to a token", so the search
+     runs as you type rather than on a submit. */
+  const searchInput = $('#patient-search');
+  if (searchInput) {
+    const results = $('#search-results');
+    const status = $('#search-status');
+    const spinner = $('#search-spinner');
+    const pickedBox = $('#picked-patient');
+    const pickedName = $('[data-picked-name]');
+    const pickedPhone = $('[data-picked-phone]');
+    const newFields = $('#new-patient-fields');
+    const patientId = $('#patient_id');
+    const issueSub = $('#issue-sub');
+    const MIN = 2;
+
+    let seq = 0; // ignore responses that arrive out of order
+
+    const esc = (s) => String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+    // Two-letter avatar, same idea as the server-side Str::initials.
+    const initials = (name) => String(name || '?').trim().split(/\s+/).slice(0, 2)
+      .map((w) => w.charAt(0).toUpperCase()).join('') || '?';
+
+    const ageOf = (birthYear) => {
+      if (!birthYear) return '';
+      const y = new Date().getFullYear() - Number(birthYear);
+      return y >= 0 && y < 130 ? String(y) + 'y' : '';
+    };
+
+    const rowFor = (p) => {
+      const meta = [p.phone, p.code].filter(Boolean).join(' · ');
+      const age = ageOf(p.birth_year);
+      // Someone already in a queue today will be REFUSED after submit. Saying
+      // so here turns a dead-end into a decision made up front.
+      const busy = p.active
+        ? '<span class="ml-auto shrink-0 rounded-md bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-800">'
+          + 'In ' + esc(p.active.queue.split('—')[0].trim()) + ' now · ' + esc(p.active.token) + '</span>'
+        : '';
+      return '<button type="button" class="np-result flex w-full items-center gap-3 rounded-xl border border-hairline'
+        + ' px-3.5 py-2.5 text-left transition hover:border-teal-400 hover:bg-brand-50/40"'
+        + ' data-pick-patient="' + Number(p.id) + '"'
+        + ' data-pick-name="' + esc(p.name) + '"'
+        + ' data-pick-phone="' + esc(p.phone) + '">'
+        + '<span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-ink-700">'
+        + esc(initials(p.name)) + '</span>'
+        + '<span class="min-w-0 flex-1">'
+        + '<span class="block truncate text-sm font-semibold text-ink-900">' + esc(p.name) + '</span>'
+        + '<span class="block truncate text-[11px] text-ink-400">' + esc(meta) + (age ? ' · ' + esc(age) : '') + '</span>'
+        + '</span>' + busy
+        + '<svg class="h-4 w-4 shrink-0 text-slate-300"><use href="#i-arrow-right"/></svg></button>';
+    };
+
+    // No match is not a dead end: offer to create the person, pre-filling
+    // whichever field the typed term actually looks like.
+    const noMatchRow = (term) => {
+      const digits = term.replace(/\D/g, '');
+      const looksLikePhone = digits.length >= 7;
+      return '<div class="rounded-lg border border-dashed border-hairline px-4 py-4">'
+        + '<p class="text-[13px] text-ink-700">No patient matches &ldquo;' + esc(term) + '&rdquo;.</p>'
+        + '<button type="button" class="np-create mt-2 text-[12px] font-semibold text-brand-700 hover:underline"'
+        + ' data-create-name="' + esc(looksLikePhone ? '' : term.trim()) + '"'
+        + ' data-create-phone="' + esc(looksLikePhone ? term.trim() : '') + '">'
+        + 'Register ' + (looksLikePhone ? 'this number' : '&ldquo;' + esc(term.trim()) + '&rdquo;') + ' as a new walk-in &rarr;</button>'
+        + '</div>';
+    };
+
+    function pick(id, name, phone) {
+      patientId.value = String(id);
+      pickedName.textContent = name;
+      pickedPhone.textContent = phone || 'no phone on file';
+      pickedBox.classList.remove('hidden');
+      newFields.classList.add('hidden');
+      $$('.np-result', results).forEach((b) => b.classList.remove('border-teal-400', 'bg-brand-50/40'));
+      const hit = $('[data-pick-patient="' + id + '"]', results);
+      if (hit) hit.classList.add('border-teal-400', 'bg-brand-50/40');
+      if (issueSub) {
+        issueSub.textContent = 'Issuing to ' + name + '. Choose a queue — the next number is allocated atomically.';
+      }
+      if (status) status.textContent = name + ' selected.';
+    }
+
+    function clearPick() {
+      patientId.value = '';
+      pickedBox.classList.add('hidden');
+      newFields.classList.remove('hidden');
+      if (issueSub) issueSub.textContent = 'Choose a queue. The next number is allocated atomically.';
+      const fn = $('#full_name');
+      if (fn) fn.focus();
+    }
+
+    results.addEventListener('click', (e) => {
+      const btn = e.target.closest('.np-result');
+      if (btn) {
+        // Server-rendered results are links so the page works without JS.
+        // With JS we select in place instead of reloading.
+        if (btn.tagName === 'A') e.preventDefault();
+        pick(btn.dataset.pickPatient, btn.dataset.pickName, btn.dataset.pickPhone);
+        return;
+      }
+      const create = e.target.closest('.np-create');
+      if (create) {
+        const name = create.dataset.createName || '';
+        const phone = create.dataset.createPhone || '';
+        clearPick();
+        if (name) $('#full_name').value = name;
+        if (phone) $('#phone').value = phone;
+        (name ? $('#phone') : $('#full_name')).focus();
+        if (status) status.textContent = 'New walk-in started for ' + (name || phone) + '.';
+      }
+    });
+
+    const clearBtn = $('#clear-picked');
+    if (clearBtn) clearBtn.addEventListener('click', clearPick);
+
+    const runSearch = debounce(async () => {
+      const term = searchInput.value.trim();
+      if (term.length < MIN) {
+        results.innerHTML = '';
+        if (spinner) spinner.classList.add('hidden');
+        if (status) status.textContent = '';
+        return;
+      }
+      const mine = ++seq;
+      if (spinner) spinner.classList.remove('hidden');
+      try {
+        const data = await api('/api/patient/search?q=' + encodeURIComponent(term), { method: 'GET' });
+        if (mine !== seq) return; // a newer keystroke already won
+        const list = (data && data.patients) || [];
+        results.innerHTML = list.length ? list.map(rowFor).join('') : noMatchRow(term);
+        if (status) {
+          status.textContent = list.length
+            ? list.length + (list.length === 1 ? ' patient' : ' patients') + ' found'
+            : 'No patient found for ' + term;
+        }
+      } catch (err) {
+        if (mine !== seq) return;
+        results.innerHTML = '<p class="text-[12px] text-rose-600">Search is unavailable right now. '
+          + 'Fill in the details below to register a walk-in.</p>';
+        if (status) status.textContent = 'Search failed.';
+      } finally {
+        if (mine === seq && spinner) spinner.classList.add('hidden');
+      }
+    }, 180);
+
+    searchInput.addEventListener('input', runSearch);
+    // Enter should select the first result, not submit the desk form.
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const first = $('.np-result', results);
+      if (first) first.click();
+    });
+
+    // Alt+Enter issues from anywhere (receptionist speed).
+    document.addEventListener('keydown', (e) => {
+      if (e.altKey && e.key === 'Enter') {
+        const form = $('#token-form');
+        if (form) form.requestSubmit();
+      }
+    });
+
+    // Phone: say what it will be used for, and flag a short number before
+    // the server has to reject it.
+    const phone = $('[data-phone]');
+    const hint = $('#phone-hint');
+    if (phone) {
+      phone.addEventListener('blur', () => {
+        const digits = phone.value.replace(/\D/g, '');
+        if (digits === '') {
+          hint.textContent = 'Optional, for the SMS tracking link';
+          hint.className = 'help';
+        } else if (digits.length < 9) {
+          hint.textContent = 'That looks short — use 07X XXX XXXX';
+          hint.className = 'help text-rose-600';
+        } else {
+          hint.textContent = 'Tracking link will be sent to this number';
+          hint.className = 'help text-brand-700';
+        }
+      });
+    }
   }
 
   /* ------------------------------------------------------------- PWA */

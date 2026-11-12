@@ -93,7 +93,7 @@
                 </p>
               </div>
               <form method="post" action="/queues/appointment-policies/<?= (int) $policy['id'] ?>/delete"
-                    onsubmit="return confirm('Remove this override? That service falls back to the clinic default.')">
+                    data-confirm-submit="Remove this override? That service falls back to the clinic default." data-confirm-danger>
                 <?= csrf_field() ?>
                 <button class="btn-secondary btn-sm text-red-700" type="submit">Remove</button>
               </form>

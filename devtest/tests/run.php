@@ -2797,14 +2797,201 @@ Assert::test('a standing rule reorders a new token and records its reason', func
         'the later child sorts ahead of the earlier adult');
 });
 
-Assert::test('the strongest boost wins and boosts never stack', function (): void {
+Assert::test('two matching rules never stack', function (): void {
     $rules = new App\Services\PriorityRuleService();
     $rules->create(81, ['name' => 'Morning boost', 'effect' => 3, 'max_age' => 5,
         'from_hour' => 0, 'to_hour' => 24, 'reason' => 'Morning squeeze'], null);
 
     $match = $rules->evaluate(81, ['source' => 'walkin', 'kind' => 'consultation', 'age' => 4, 'hour' => 9]);
-    Assert::same(5, $match['priority'], 'two matching boosts resolve to the stronger one, not their sum');
+    Assert::same(5, $match['priority'], 'two matching rules resolve to one of them, never their sum');
     Assert::contains('Child under five', $match['reason'], 'and the winning rule supplies the reason');
+});
+
+Assert::test('the first rule in the list wins even when a later rule is stronger', function (): void {
+    seedTenant(204, 'rule-order', 'Rule Order Clinic');
+    $rules = new App\Services\PriorityRuleService();
+
+    // Deliberately weak first, strong second. Under the old strongest-wins
+    // engine the 9 would decide; the ranked list must let the 2 decide.
+    $weak = $rules->create(204, ['name' => 'Slight nudge', 'effect' => 2, 'reason' => 'Booked ahead'], null);
+    $strong = $rules->create(204, ['name' => 'Big nudge', 'effect' => 9, 'reason' => 'Very urgent'], null);
+
+    $match = $rules->evaluate(204, ['source' => 'walkin']);
+    Assert::same(2, $match['priority'], 'position decides, not magnitude');
+    Assert::same($weak, $match['rule_id'], 'and the first rule is credited');
+
+    // Dragging the strong rule to the top must flip the outcome. This is the
+    // assertion that would have failed before sort_order existed.
+    Assert::true($rules->reorder(204, [$strong, $weak], null), 'the new order is accepted');
+    $flipped = $rules->evaluate(204, ['source' => 'walkin']);
+    Assert::same(9, $flipped['priority'], 'after reordering, the promoted rule decides');
+    Assert::same($strong, $flipped['rule_id'], 'and it is credited instead');
+
+    Assert::same([$strong, $weak], array_map('intval', array_column($rules->rules(204, false), 'id')),
+        'the list reads back in the dragged order');
+});
+
+Assert::test('a new rule appends at the bottom instead of overruling the list', function (): void {
+    $rules = new App\Services\PriorityRuleService();
+    $before = array_map('intval', array_column($rules->rules(204, false), 'id'));
+    $added = $rules->create(204, ['name' => 'Appended', 'effect' => 8, 'reason' => 'Added last'], null);
+    $after = array_map('intval', array_column($rules->rules(204, false), 'id'));
+    Assert::same(array_merge($before, [$added]), $after, 'saving a rule does not silently promote it');
+    $still = $rules->evaluate(204, ['source' => 'walkin']);
+    Assert::same(9, $still['priority'], 'the rule already at the top still decides');
+    Assert::true($still['rule_id'] !== $added, 'and the appended rule is not credited');
+});
+
+Assert::test('a partial, duplicated or foreign order is refused whole', function (): void {
+    $rules = new App\Services\PriorityRuleService();
+    $ids = array_map('intval', array_column($rules->rules(204, false), 'id'));
+    $before = $ids;
+
+    Assert::false($rules->reorder(204, [$ids[0]], null), 'a partial list is refused');
+    Assert::false($rules->reorder(204, [$ids[0], $ids[0], $ids[1]], null), 'a duplicate is refused');
+    Assert::false($rules->reorder(204, array_merge($ids, [999999]), null), 'an unknown id is refused');
+    Assert::false($rules->reorder(204, [], null), 'an empty list is refused');
+
+    // A rule belonging to another clinic must not be reorderable from here.
+    $foreign = (int) Db::scalar('SELECT id FROM priority_rules WHERE clinic_id = 81 LIMIT 1');
+    Assert::false($rules->reorder(204, array_merge($ids, [$foreign]), null), "another clinic's rule is refused");
+
+    Assert::same($before, array_map('intval', array_column($rules->rules(204, false), 'id')),
+        'and none of the refusals moved anything');
+});
+
+Assert::test('a temperature rule needs a reading and compares its threshold exactly', function (): void {
+    seedTenant(205, 'rule-fever', 'Fever Clinic');
+    $rules = new App\Services\PriorityRuleService();
+    $rules->create(205, ['name' => 'High fever', 'effect' => 6, 'min_temp' => '39.0',
+        'reason' => 'Febrile — assess promptly'], null);
+
+    $ctx = ['source' => 'walkin'];
+    Assert::same(0, $rules->evaluate(205, $ctx)['priority'],
+        'an unmeasured patient is not treated as afebrile, and does not match');
+    Assert::same(0, $rules->evaluate(205, $ctx + ['temp_c_x10' => 389])['priority'], '38.9 is below the threshold');
+    Assert::same(6, $rules->evaluate(205, $ctx + ['temp_c_x10' => 390])['priority'], '39.0 matches exactly');
+    Assert::same(6, $rules->evaluate(205, $ctx + ['temp_c_x10' => 401])['priority'], '40.1 matches');
+
+    // Tenths, not floats: 38.7 must round-trip without drifting past a boundary.
+    Assert::same(387, App\Services\PriorityRuleService::tempToTenths('38.7'), '38.7 stores as 387');
+    Assert::same('38.7', App\Services\PriorityRuleService::tenthsToText(387), 'and reads back as 38.7');
+    Assert::same(null, $rules::tempToTenths(''), 'blank means not measured');
+    Assert::false($rules::tempToTenths('390'), '390 is a typo, not a temperature');
+    Assert::false($rules::tempToTenths('hot'), 'and so is prose');
+});
+
+Assert::test('a temperature outside the readable band cannot be saved or issued', function (): void {
+    $rules = new App\Services\PriorityRuleService();
+    $threw = false;
+    try {
+        $rules->create(205, ['name' => 'Impossible', 'effect' => 3, 'min_temp' => '390', 'reason' => 'Typo'], null);
+    } catch (\InvalidArgumentException $e) {
+        $threw = true;
+        Assert::contains('temperature', $e->getMessage(), 'the error names the field');
+    }
+    Assert::true($threw, 'a rule keyed to an impossible reading is refused');
+
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 205');
+    $patient = Db::insert('INSERT INTO patients (clinic_id, code, full_name, created_at) VALUES (205,?,?,?)',
+        ['TF1', 'Typo One', Db::now()]);
+    $queue = new App\Domain\Queue\QueueService();
+    $threw = false;
+    try {
+        $queue->issueToken(205, $queueId, $patient, ['temperature' => '390']);
+    } catch (\RuntimeException $e) {
+        $threw = true;
+    }
+    Assert::true($threw, 'and the desk cannot record one either');
+    Assert::same(0, (int) Db::scalar('SELECT COUNT(*) FROM queue_entries WHERE clinic_id = 205'),
+        'the refused reading issued no token');
+});
+
+Assert::test('a recorded reading decides a token and travels with the entry', function (): void {
+    $queueId = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 205');
+    $patient = Db::insert('INSERT INTO patients (clinic_id, code, full_name, created_at) VALUES (205,?,?,?)',
+        ['TF2', 'Febrile One', Db::now()]);
+    $queue = new App\Domain\Queue\QueueService();
+    $issued = $queue->issueToken(205, $queueId, $patient, ['temperature' => '39.4']);
+
+    $row = Db::one('SELECT priority, priority_reason, priority_rule_id, temp_c_x10 FROM queue_entries WHERE id = ?',
+        [$issued['entry_id']]);
+    Assert::same(6, (int) $row['priority'], 'the fever rule decided it');
+    Assert::same(394, (int) $row['temp_c_x10'], 'the reading it was judged on is stored');
+    Assert::contains('Febrile', (string) $row['priority_reason'], 'and the reason is copied onto the entry');
+    Assert::true($row['priority_rule_id'] !== null, 'the rule is credited');
+});
+
+Assert::test('every rule change is written to history with its actor', function (): void {
+    $rules = new App\Services\PriorityRuleService();
+    $id = $rules->create(205, ['name' => 'Traced', 'effect' => 1, 'reason' => 'For the trail'], 7);
+    $rules->setActive(205, $id, false);
+    $rules->setActive(205, $id, true);
+    $rules->delete(205, $id);
+
+    $actions = array_column(
+        Db::all("SELECT action FROM priority_rule_history WHERE clinic_id = 205 AND rule_name = 'Traced' ORDER BY id"),
+        'action'
+    );
+    Assert::same(['created', 'disabled', 'enabled', 'deleted'], $actions, 'the whole life of the rule is recorded');
+
+    $created = Db::one("SELECT * FROM priority_rule_history WHERE clinic_id = 205 AND rule_name = 'Traced' AND action = 'created'");
+    Assert::same(7, (int) $created['actor_id'], 'the actor is kept');
+
+    // History has to outlive the rule, and still say what it was.
+    $deleted = Db::one("SELECT * FROM priority_rule_history WHERE clinic_id = 205 AND rule_name = 'Traced' AND action = 'deleted'");
+    Assert::same('Traced', (string) $deleted['rule_name'], 'a deleted rule is still named');
+    Assert::contains('For the trail', (string) $deleted['before_json'], 'and its definition is recoverable');
+    Assert::same(null, Db::scalar('SELECT id FROM priority_rules WHERE id = ?', [$id]), 'the rule itself is gone');
+});
+
+Assert::test('wait impact is measured, floored and allowed to be unflattering', function (): void {
+    seedTenant(206, 'rule-impact', 'Impact Clinic');
+    $impact = new App\Services\PriorityImpactService();
+    $today = Db::today();
+
+    $mk = static function (int $priority, ?int $ruleId, ?int $wait) use ($today): void {
+        $q = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 206');
+        static $pn = 0;
+        $pn++;
+        $p = Db::insert('INSERT INTO patients (clinic_id, code, full_name, created_at) VALUES (206,?,?,?)',
+            ['IP' . $pn, 'Impact Patient', Db::now()]);
+        // token_label is UNIQUE per queue, so each fixture row needs its own.
+        static $n = 0;
+        $n++;
+        Db::insert(
+            'INSERT INTO queue_entries
+               (clinic_id, queue_id, patient_id, token_no, token_label, status, priority, priority_rule_id,
+                sort_weight, source, joined_at, finished_at, wait_minutes, track_token, track_expires_at, version)
+             VALUES (206,?,?,?,?,"completed",?,?,1,"walkin",?,?,?,?,"2099-01-01",0)',
+            [$q, $p, $n, 'I' . str_pad((string) $n, 3, '0', STR_PAD_LEFT), $priority, $ruleId,
+             Db::now(), $today . ' 10:00:00', $wait, 'tok206-' . $n]
+        );
+    };
+
+    // Four baseline visits is below the floor: nothing may be claimed yet.
+    for ($i = 0; $i < 4; $i++) { $mk(0, null, 30); }
+    for ($i = 0; $i < 6; $i++) { $mk(5, 1, 15); }
+    $thin = $impact->measure(206, $today, $today);
+    Assert::same(4, $thin['baseline']['n'], 'the sample size is reported');
+    Assert::same(null, $thin['baseline']['mean'], 'but four visits is below the floor, so no mean');
+    Assert::same(null, $thin['rule']['pct'], 'and therefore no percentage is claimed');
+    Assert::false($thin['enough'], 'the screen is told to print a dash');
+
+    // Cross the floor: 30 -> 15 is a real, computable 50%.
+    $mk(0, null, 30);
+    $ok = $impact->measure(206, $today, $today);
+    Assert::same(30.0, $ok['baseline']['mean'], 'baseline mean');
+    Assert::same(15.0, $ok['rule']['mean'], 'prioritised mean');
+    Assert::same(15.0, $ok['rule']['diff'], 'the difference in minutes');
+    Assert::same(50.0, $ok['rule']['pct'], 'and as a percentage');
+    Assert::true($ok['enough'], 'now the screen may show it');
+
+    // A group that waited LONGER must report a negative, not a clamped zero.
+    for ($i = 0; $i < 6; $i++) { $mk(4, null, 45); }
+    $worse = $impact->measure(206, $today, $today);
+    Assert::same(-15.0, $worse['manual']['diff'], 'a slower group is reported as slower');
+    Assert::true($worse['manual']['pct'] < 0, 'and the percentage is negative too');
 });
 
 Assert::test('a hand-set priority and a penalty both behave', function (): void {
@@ -4712,6 +4899,603 @@ Assert::test('controller flash messages actually reach the screen', function ():
     // script, and grepping the raw file matches that explanation.
     $toastCode = preg_replace('~/\*.*?\*/~s', '', $toast);
     Assert::same(0, preg_match_all('/<script(?![^>]*\bsrc=)[^>]*>/i', (string) $toastCode), 'no inline script (CSP is script-src self)');
+});
+
+/* ---------------------------------------------- priority rules screen -- */
+
+Assert::test('the shipped .env.example does not point sessions at an unwritable path', function (): void {
+    // docs/OPERATIONS.md warns that SESSION_PATH=/var/lib/php/sessions on a host
+    // without that directory makes every POST fail with a 419 that looks like a
+    // CSRF bug. The example file shipped exactly that value, so every fresh
+    // checkout inherited it: the rule form, the toggle and every other native
+    // POST were dead on arrival. It must stay commented out.
+    $env = file_get_contents(QP_ROOT . '/.env.example');
+    Assert::same(0, preg_match('/^\s*SESSION_PATH\s*=/m', (string) $env),
+        'SESSION_PATH is left unset so the app falls back to storage/sessions');
+});
+
+Assert::test('a filtered rule list never offers to reorder, and keeps true ranks', function (): void {
+    $ctrl = file_get_contents(QP_ROOT . '/app/Http/Controllers/PriorityRuleController.php');
+    $view = file_get_contents(QP_ROOT . '/resources/views/pages/queues/priority-rules.php');
+
+    // reorder() refuses a partial order, so offering drag on a filtered list
+    // would hand the manager a control that always fails.
+    Assert::contains("'filtering' =>", $ctrl, 'the controller reports whether a filter is active');
+    Assert::contains('($filtering || !$canManage) ? \'\' : \'data-reorderable\'', $view,
+        'and the view only arms dragging when the whole list is visible');
+
+    // Rank is the engine's evaluation position, not the index in the visible
+    // subset: searching for the third rule must still show it as 3.
+    // Single-quoted needles: PHP would interpolate $rule[...] inside "...".
+    $assign = strpos((string) $ctrl, '= ++$position;');
+    $skip = strpos((string) $ctrl, '&& !$isActive');
+    Assert::true($assign !== false && $skip !== false && $assign < $skip,
+        'position is assigned before any filtering, so a filtered row keeps its real rank');
+});
+
+Assert::test('rule status filters are links, not a second field named status', function (): void {
+    $view = file_get_contents(QP_ROOT . '/resources/views/pages/queues/priority-rules.php');
+    // A submit button named `status` next to the hidden `status` input sends the
+    // key twice; PHP keeps the last, so choosing "Turned off" silently did
+    // nothing. The options must be links carrying one unambiguous value.
+    Assert::same(0, preg_match('/<button[^>]*name="status"/', (string) $view),
+        'no submit button competes with the hidden status field');
+    Assert::contains("'status' => " . '$val', $view, 'each option is a link with a single status value');
+});
+
+Assert::test('the drag grip is a grip icon, not the filter funnel', function (): void {
+    $icons = file_get_contents(QP_ROOT . '/resources/views/partials/icons.php');
+    $view = file_get_contents(QP_ROOT . '/resources/views/pages/queues/priority-rules.php');
+    Assert::contains("'grip'", $icons, 'a dedicated six-dot grip exists');
+    Assert::contains('#i-grip', $view, 'and the rule row uses it');
+    // `filter` is a funnel path; the stale comment above it claimed otherwise.
+    Assert::contains("'filter'      => '<path d=\"M3 5h18", $icons, 'filter is still the funnel, used by the Filters button');
+});
+
+Assert::test('an unmeasured temperature is never treated as normal', function (): void {
+    $view = file_get_contents(QP_ROOT . '/resources/views/pages/queue/new.php');
+    $ctrl = file_get_contents(QP_ROOT . '/app/Http/Controllers/QueueController.php');
+    Assert::contains("name=\"temperature\"", $view, 'the desk can record a reading');
+    Assert::contains("'temperature' => Request::string('temperature')", $ctrl, 'and it reaches the service');
+    // Blank must stay blank. Defaulting it to 36.6 would let a fever rule's
+    // absence of a match look like a measured, afebrile patient.
+    Assert::same(null, \App\Services\PriorityRuleService::tempToTenths(''), 'a blank reading is null, not a number');
+    Assert::same(false, \App\Services\PriorityRuleService::tempToTenths('390'), 'and a mistyped 390 is refused');
+});
+
+Assert::test('a refused temperature never leaves a stray patient record', function (): void {
+    $ctrl = file_get_contents(QP_ROOT . '/app/Http/Controllers/QueueController.php');
+    // findOrCreate runs before issueToken, so validating the reading only inside
+    // issueToken meant every mistyped "390" registered a walk-in and then
+    // refused the token -- a patient record nobody asked for. The controller
+    // must reject the reading before anything is written.
+    $guard = strpos((string) $ctrl, 'tempToTenths($rawTemp) === false');
+    $create = strpos((string) $ctrl, '$patients->findOrCreate(');
+    Assert::true($guard !== false, 'the controller validates the reading itself');
+    Assert::true($create !== false && $guard < $create,
+        'and does it before findOrCreate, so a refused form persists nothing');
+});
+
+Assert::test('read-only roles get the policy without dead controls', function (): void {
+    $view = file_get_contents(QP_ROOT . '/resources/views/pages/queues/priority-rules.php');
+    // The index route is auth-only but every mutation is clinic.manage, so a
+    // receptionist used to see New rule, drag grips and delete menus that all
+    // returned 403. The screen now decides once and hides what it cannot do.
+    Assert::contains("Auth::can('clinic.manage')", (string) $view, 'the view asks for the ability once');
+    Assert::contains('!$canManage', (string) $view, 'and disarms drag when it is absent');
+    Assert::contains('$canManage ? $rules : []', (string) $view,
+        'so the toggle/delete forms are not rendered for a role that cannot post them');
+    Assert::contains('ask a clinic admin', (string) $view,
+        'and says why the list is read-only instead of silently omitting drag');
+});
+
+Assert::test('settings tabs are real, and an unknown tab falls back', function (): void {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/index.php');
+    // The clinic tab is the page's default and lives inline; the other four
+    // are partials. Either way each one has to render something real -- a tab
+    // that silently shows nothing is worse than no tab at all.
+    $index = $view;
+    foreach (['team', 'notifications', 'integrations', 'billing'] as $tab) {
+        Assert::true(is_file(QP_ROOT . '/resources/views/pages/settings/_' . $tab . '.php'),
+            'tab "' . $tab . '" has a real view behind it');
+        Assert::contains('views/pages/settings/_', $index, 'and index.php actually includes it');
+    }
+    Assert::contains("'clinic'", $index, 'the clinic tab is the inline default');
+    Assert::contains("SETTINGS_TABS", (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/ClinicController.php'),
+        'and the controller whitelists them');
+    Assert::contains('if (!in_array($tab, self::SETTINGS_TABS, true))', (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/ClinicController.php'),
+        'so a renamed or bogus ?tab= opens somewhere sensible instead of erroring');
+});
+
+Assert::test('clearing clinic data is owner-only, phrase-confirmed, and keeps the accounts', function (): void {
+    $c = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/ClinicController.php');
+
+    // 1. Owner only. The route's ability is a floor; the real check has to sit
+    //    next to the deletion so it cannot be dropped by editing routes alone.
+    Assert::contains("Auth::role() !== 'clinic_admin'", $c, 're-checks the owner role itself');
+
+    // 2. The phrase is compared against the server's copy of the name. Reading
+    //    it from the request would let a crafted POST confirm itself.
+    Assert::contains('$clinic[\'name\']', $c, 'compares against the clinic name from the database');
+    Assert::false(strpos($c, "hash_equals(Request::string('confirm_phrase')") !== false,
+        'and never compares the phrase against a client-supplied name');
+
+    // 3. Accounts survive: deleting them would lock the owner out of an empty
+    //    clinic, which is a support ticket rather than a feature.
+    Assert::false(strpos($c, "'users',") !== false, 'the users table is not in the purge list');
+
+    // 4. The audit log survives, so the purge is itself on the record.
+    Assert::false(strpos($c, "'audit_logs',") !== false, 'the audit log is not in the purge list');
+});
+
+Assert::test('the purge reaches every table it names without breaking', function (): void {
+    // The original list included `incident_entries`, which has no clinic_id —
+    // the purge 500'd halfway through. Anything in the list must be
+    // deletable by clinic_id, or handled through its parent.
+    $c = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/ClinicController.php');
+    $start = strpos($c, 'private function purgeOperationalData');
+    $body = substr($c, (int) $start, 2600);
+    preg_match('/\$tables = \[([^\]]+)\]/s', (string) $body, $m);
+    Assert::true(isset($m[1]), 'the purge declares its tables explicitly');
+    preg_match_all("/'([a-z_]+)'/", (string) $m[1], $names);
+
+    $db = new PDO('sqlite:' . QP_ROOT . '/storage/db/queuepilot.sqlite');
+    foreach ($names[1] as $table) {
+        $cols = $db->query('PRAGMA table_info(' . $table . ')')->fetchAll(PDO::FETCH_COLUMN, 1);
+        Assert::true(in_array('clinic_id', $cols, true), 'table "' . $table . '" is deletable by clinic_id');
+    }
+    // incident_entries has no clinic_id, so it must be reached via incidents.
+    Assert::contains('incident_id IN (SELECT id FROM incidents', $c,
+        'and the one table that hangs off a parent is reached through it');
+});
+
+Assert::test('integrations never store credentials and only accept known fields', function (): void {
+    $s = (string) file_get_contents(QP_ROOT . '/app/Services/IntegrationService.php');
+    Assert::contains('function configFields(', $s, 'a provider exposes an explicit field list');
+    Assert::contains('$this->configFields($provider)', $s, 'and connect() writes only those fields');
+    // The table is queried by support and exported in archives; a secret
+    // landing in it would leak through a path nobody reviews.
+    Assert::contains('Credentials are never stored here', $s, 'the class states the rule');
+
+    // Unknown providers must be refused, not written.
+    Assert::contains('if (!$this->known($provider))', $s, 'unknown providers are rejected');
+});
+
+Assert::test('an unavailable integration cannot be switched on', function (): void {
+    $v = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/_integrations.php');
+    // "Connected" collapsing "not configured on this server" into one badge
+    // would send an owner hunting through their own settings for a problem
+    // that lives in the deployment.
+    Assert::contains('Not configured on this server', $v, 'the two states are shown separately');
+    Assert::contains('$i[\'available\'] ? \'\' : \'disabled', $v, 'and Connect is disabled when the server cannot use it');
+});
+
+Assert::test('no view ships an inline script, which the app CSP blocks', function (): void {
+    // The app sends `script-src 'self'`. An inline <script> is therefore
+    // refused by the browser, silently: the token desk shipped one, so its
+    // patient picker, Change button, Alt+Enter shortcut and phone hint were
+    // all dead while the page looked finished. The failure mode is the worst
+    // kind -- no error, the page simply does not respond.
+    $dir = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    $offenders = [];
+    foreach ($dir as $file) {
+        if (!$file->isFile() || $file->getExtension() !== 'php') {
+            continue;
+        }
+        $src = (string) file_get_contents($file->getPathname());
+        // Strip comments so a comment merely *about* a script does not count.
+        $code = preg_replace('#/\*.*?\*/#s', '', $src) ?? $src;
+        if (preg_match('/<script(?![^>]*\bsrc=)/i', (string) $code)) {
+            $offenders[] = str_replace(QP_ROOT . '/', '', $file->getPathname());
+        }
+    }
+    Assert::same([], $offenders, 'every inline <script> must move into app.js: ' . implode(', ', $offenders));
+});
+
+Assert::test('the patient picker works without JavaScript', function (): void {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/queue/new.php');
+    // Live search is a progressive enhancement, not a requirement. Without
+    // JS the results must still be reachable, and a <button> cannot carry a
+    // selection across a page load while a link can.
+    Assert::contains('/queue/new?patient=', $view, 'results are links carrying the chosen id');
+    Assert::contains('<noscript>', $view, 'and there is a plain search form for the no-JS path');
+
+    // A preselected patient has to be resolved server-side into a name,
+    // otherwise ?patient=12 shows an empty green box.
+    Assert::contains('(new PatientService())->find(', (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/QueueController.php'),
+        'the controller resolves ?patient= to a real record');
+});
+
+Assert::test('the live patient search is clinic-scoped and refuses short terms', function (): void {
+    $c = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/ApiController.php');
+    // A picker that leaked patients across clinics would be a data breach
+    // reachable from the busiest screen in the building.
+    Assert::contains("Auth::clinicId()", $c, 'reads the clinic from the session');
+    Assert::contains("patient.manage", $c, 'and checks the ability, not just authentication');
+    // One character matches most of the book and tells the desk nothing.
+    Assert::contains('mb_strlen($term) < 2', $c, 'two characters minimum before it queries');
+});
+
+Assert::test('the search tells the desk when a patient is already queued', function (): void {
+    $c = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/ApiController.php');
+    // Issuing a second token is refused AFTER the form is filled in. Saying so
+    // in the result row turns a dead-end into an up-front decision.
+    Assert::contains("'active' => \$this->activeEntry(", $c, 'each result carries its live token');
+    // Must use the same status list as the pre-issue check, or the picker and
+    // the desk will disagree about whether someone is already queued.
+    Assert::contains("'waiting','called','in_consultation','on_hold'", $c, 'matching the status list the issue path uses');
+    // queue_entries has no session_date -- "today" comes from queues.
+    Assert::contains('q.session_date = ?', $c, 'and scopes it to today through the queue');
+});
+
+/* ------------------------------------------------------------------ */
+/* Dead ends: links that 404, buttons that cannot run, data never sent.  */
+/* ------------------------------------------------------------------ */
+
+Assert::test('no view carries an inline event handler the CSP would block', function (): void {
+    // `script-src 'self'` drops inline handlers exactly as it drops inline
+    // <script>. Twenty-three of them shipped: filter selects that never
+    // submitted, `return confirm(...)` guards that silently did not guard
+    // (so deleting a room went through with no prompt), and two Print
+    // buttons that did nothing. None of it logged anything visible.
+    $files = [];
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($it as $f) {
+        if ($f->isFile() && $f->getExtension() === 'php') {
+            $files[] = $f->getPathname();
+        }
+    }
+    Assert::true(count($files) > 30, 'the view directory is actually scanned');
+
+    $offenders = [];
+    foreach ($files as $file) {
+        $src = (string) file_get_contents($file);
+        if (preg_match('/\son(?:click|change|submit|input|keydown|keyup|load|focus|blur|mouseover|mouseenter)\s*=/i', $src, $m)) {
+            $offenders[] = basename($file) . ' -> ' . trim($m[0]);
+        }
+    }
+    Assert::same([], $offenders, 'every view is free of inline handlers: ' . implode('; ', array_slice($offenders, 0, 5)));
+});
+
+Assert::test('the four behaviours those handlers provided still exist, CSP-safe', function (): void {
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+    Assert::contains("[data-autosubmit]", $js, 'selects that submit on change declare data-autosubmit');
+    Assert::contains("form.submit();", $js, 'and app.js submits their form');
+    Assert::contains("[data-confirm]", $js, 'destructive forms declare data-confirm');
+    // askConfirm() renders an in-page dialog. It replaced window.confirm(),
+    // which the browser labels "an embedded page at <host> says" whenever the
+    // console runs inside the preview iframe.
+    Assert::contains('askConfirm(msg', $js, 'and app.js actually asks');
+    Assert::contains("e.preventDefault();", $js, 'declining the prompt cancels the submit');
+    Assert::contains("}, true);", $js, 'the confirm guard runs in the capture phase, before anything else submits');
+    Assert::contains("[data-print]", $js, 'print buttons declare data-print');
+    Assert::contains("[data-insert]", $js, 'placeholder chips declare data-insert');
+    Assert::contains("setSelectionRange(caret, caret)", $js, 'and insert at the caret rather than appending to the end');
+});
+
+Assert::test('the board opens a visit through the route that exists', function (): void {
+    $row = (string) file_get_contents(QP_ROOT . '/resources/views/components/board/patient-row.php');
+    Assert::contains('/queue/entry?id=', $row, '"Open visit" uses /queue/entry?id=');
+    // /queue/{id} was never a route. Every row on the board offered it.
+    Assert::same(0, preg_match('~href="/queue/\d+["\?]~', $row), 'no link to a bare /queue/{id}');
+
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    Assert::contains("Router::get('/queue/entry'", $routes, '/queue/entry is a real route');
+});
+
+Assert::test('links are pointed at routes that exist', function (): void {
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    $views = [];
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($it as $f) {
+        if ($f->isFile() && $f->getExtension() === 'php') {
+            $views[$f->getPathname()] = (string) file_get_contents($f->getPathname());
+        }
+    }
+    Assert::true(count($views) > 30, 'the view directory is actually scanned');
+
+    // /schedules never existed; the real route is /calendar.
+    $bad = [];
+    foreach ($views as $path => $src) {
+        if (strpos($src, 'href="/schedules"') !== false) {
+            $bad[] = basename($path) . ' links /schedules';
+        }
+    }
+    Assert::same([], $bad, 'nothing links /schedules: ' . implode('; ', $bad));
+    Assert::contains("Router::get('/calendar'", $routes, '/calendar is the real schedules route');
+});
+
+Assert::test('the platform health page exists and is reachable by its audience', function (): void {
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    Assert::contains("Router::get('/admin/monitor'", $routes, '/admin/monitor is a route');
+    Assert::true(
+        (bool) preg_match("~Router::get\('/admin/monitor'.*?'roles' => \['super_admin'\]~", $routes),
+        'and is super-admin only -- the checks name tenants and staff'
+    );
+
+    $ctrl = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/AdminController.php');
+    Assert::contains('public function monitor(): void', $ctrl, 'AdminController serves it');
+    Assert::contains("view('admin/monitor'", $ctrl, 'through the admin/monitor view');
+    Assert::true((bool) file_exists(QP_ROOT . '/resources/views/pages/admin/monitor.php'), 'which exists');
+
+    // The link used to sit on the Incidents page, which 403s for a super
+    // admin ("Incidents belong to a clinic"), so it could be reached by
+    // nobody. It now lives in the super admin nav.
+    $nav = (string) file_get_contents(QP_ROOT . '/resources/views/layouts/app.php');
+    Assert::contains("'/admin/monitor', 'activity'", $nav, 'Platform health is in the super admin nav');
+    $incidents = (string) file_get_contents(QP_ROOT . '/resources/views/pages/incidents/index.php');
+    Assert::same(0, preg_match('~href="/admin/monitor"~', $incidents), 'and no longer on the incidents page it could not be seen from');
+});
+
+Assert::test('links to owner-only pages are hidden from roles that cannot open them', function (): void {
+    // Ungated, these 403 for receptionists and doctors. A link that can only
+    // fail is a dead end, so the row is not rendered at all.
+    $settings = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/index.php');
+    Assert::contains("Auth::can('clinic.manage')", $settings, 'the settings rail checks the ability');
+    Assert::same(
+        1,
+        substr_count($settings, "Auth::can('clinic.manage')"),
+        'once, wrapping both the export and audit rows'
+    );
+    // Byte offsets are useless here -- the file's first `endif;` is 200 lines
+    // earlier, so "before the endif" would pass or fail by accident. Compare
+    // line numbers instead, which is what "inside the guard" actually means.
+    $lines = explode("\n", $settings);
+    $lineOf = static function (string $needle) use ($lines): int {
+        foreach ($lines as $i => $line) {
+            if (strpos($line, $needle) !== false) {
+                return $i + 1;
+            }
+        }
+        return 0;
+    };
+    $guard  = $lineOf("Auth::can('clinic.manage')");
+    $export = $lineOf('href="/settings/export"');
+    $audit  = $lineOf('href="/audit"');
+    Assert::true($guard > 0 && $export > 0 && $audit > 0, 'guard, export row and audit row all present');
+    Assert::true($guard < $export, "the guard (line $guard) opens before the export row (line $export)");
+    Assert::true($export < $audit, "the export row (line $export) precedes the audit row (line $audit)");
+    // The first endif at or after the guard closes it; both rows must sit above it.
+    $end = 0;
+    for ($i = $guard; $i < count($lines); $i++) {
+        if (strpos($lines[$i - 1], '<?php endif; ?>') !== false) {
+            $end = $i;
+            break;
+        }
+    }
+    Assert::true($end > $audit, "the guard closes at line $end, after the audit row (line $audit)");
+
+    $rules = (string) file_get_contents(QP_ROOT . '/resources/views/pages/queues/priority-rules.php');
+    Assert::contains("Auth::can('clinic.manage')", $rules, 'the priority rules audit link is guarded too');
+
+    // Issuing a token needs queue.issue, which a doctor does not have.
+    $board = (string) file_get_contents(QP_ROOT . '/resources/views/pages/queue/board.php');
+    Assert::contains("Auth::can('queue.issue')", $board, '"New patient" on the board checks the ability');
+    Assert::true(
+        strpos($board, "Auth::can('queue.issue')") < strpos($board, '/queue/new?queue='),
+        'the guard comes before the link'
+    );
+});
+
+Assert::test('the settings page is sent the opening hours it displays', function (): void {
+    // The view reads $weekHours[$dow] ?? [...], and that fallback is
+    // 'closed' => true. So if this key is ever dropped the page does not
+    // crash and does not warn -- it quietly renders all seven days as
+    // "Closed", which reads as a choice the owner made. Guarding the key is
+    // guarding against silently wrong data, not against an exception.
+    // (Verified: it is passed; this test holds the line, it does not fix
+    // a live defect.)
+    $ctrl = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/ClinicController.php');
+    $viewCall = substr($ctrl, strpos($ctrl, 'public function settings(): void'));
+    $viewCall = substr($viewCall, 0, strpos($viewCall, "\n    }"));
+    Assert::contains("'weekHours' =>", $viewCall, 'settings() passes weekHours');
+    Assert::contains('$this->weekHours($clinicId)', $viewCall, 'built by the existing helper');
+    Assert::contains('private function weekHours(int $clinicId): array', $ctrl, 'which returns the shape the view reads');
+
+    // Sunday-first on both sides, or every row is off by one day.
+    Assert::contains("strtotime('next sunday +'", $ctrl, 'the helper is Sunday-first');
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/index.php');
+    Assert::contains("\$dayNames = ['Sunday', 'Monday'", $view, 'and so is the day list it loops over');
+});
+
+/* ------------------------------------------------------------------ */
+/* Rows that must not crush the patient's name.                        */
+/* ------------------------------------------------------------------ */
+
+Assert::test('the queue row keeps its actions off the name until there is room', function (): void {
+    // `sm` is 576px in this build (the whole console is drawn at 0.9 zoom),
+    // but the action cluster for one row measures ~433px. Switching it inline
+    // at 576px left the patient name 25px wide: "Sunil Rathnayake" rendered
+    // as a couple of characters and P-00003 overlapped the Skip button. It
+    // only fits from md (691px), where the name still gets ~217px.
+    $row = (string) file_get_contents(QP_ROOT . '/resources/views/components/queue-row.php');
+    Assert::contains('md:w-auto md:border-0 md:pt-0', $row, 'the action cluster goes inline at md');
+    Assert::same(0, preg_match('/sm:w-auto sm:border-0 sm:pt-0/', $row), 'and not at sm, where it does not fit');
+
+    // rowHtml() mirrors this file. When the two drift, the 5s poller repaints
+    // the row the old way and the overlap returns five seconds after load --
+    // which is exactly how a layout bug survives a review of the PHP.
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+    Assert::contains('md:w-auto md:border-0 md:pt-0', $js, 'the poller template matches the PHP row');
+    Assert::same(0, preg_match('/sm:w-auto sm:border-0 sm:pt-0/', $js), 'and has no stale sm: copy of it');
+});
+
+Assert::test('the waiting row wraps instead of squeezing the name to nothing', function (): void {
+    // On the dashboard the live-queue panel is sized by the page grid, not the
+    // viewport -- 431px wide at xl. A viewport breakpoint cannot fix that, so
+    // the row wraps instead, which makes it a container problem.
+    $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+    Assert::true(
+        (bool) preg_match('/\.prow\s*\{[^}]*flex-wrap/s', $css),
+        '.prow wraps rather than shrinking its children to zero'
+    );
+
+    // The blanket `main .flex > * { min-width: 0 }` rule that stops wide
+    // children stretching the page also let the fixed-width action cluster
+    // push the name column to 0px. Two classes outrank it.
+    Assert::true(
+        (bool) preg_match('/\.prow\s*>\s*\.prow-main\s*\{\s*min-width:\s*8rem/s', $css),
+        'the name column has a floor that beats the global min-width:0 rule'
+    );
+    $row = (string) file_get_contents(QP_ROOT . '/resources/views/components/board/patient-row.php');
+    Assert::contains('prow-main', $row, 'and the row carries it');
+    Assert::true(
+        strpos($row, 'prow-main') < strpos($row, 'prow-name'),
+        'on the column that holds the name, not a later element'
+    );
+});
+
+/* ------------------------------------------------------------------ */
+/* Dialogs, settings dead ends, and the desktop header nav.             */
+/* ------------------------------------------------------------------ */
+
+Assert::test('no native confirm/prompt/alert is left anywhere', function (): void {
+    // Inside the preview iframe the browser prefixes every native dialog
+    // with "An embedded page at <host> says", which reads like phishing and
+    // takes no styling. Seven call sites were replaced by an in-page dialog.
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+    Assert::same(0, preg_match('/\bwindow\.confirm\s*\(/', $js), 'no window.confirm');
+    Assert::same(0, preg_match('/\bwindow\.prompt\s*\(/', $js), 'no window.prompt');
+    Assert::same(0, preg_match('/(?<![.\w])alert\s*\(/', $js), 'no alert()');
+    // Strip the comment block that narrates why they were removed, or the
+    // explanation of the rule reads like a violation of it.
+    $views = [];
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($it as $f) {
+        if ($f->isFile() && $f->getExtension() === 'php') {
+            $views[$f->getPathname()] = (string) file_get_contents($f->getPathname());
+        }
+    }
+    $bad = [];
+    foreach ($views as $path => $src) {
+        if (preg_match('/\b(?:window\.)?(?:confirm|prompt|alert)\s*\(/', $src)) {
+            $bad[] = basename($path);
+        }
+    }
+    Assert::same([], $bad, 'no native dialog in a view either: ' . implode(', ', $bad));
+});
+
+Assert::test('the replacement dialog is a real dialog', function (): void {
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+    Assert::contains("setAttribute('role', 'dialog')", $js, 'it announces itself as a dialog');
+    Assert::contains("setAttribute('aria-modal', 'true')", $js, 'and as modal');
+    Assert::contains("ev.key === 'Escape'", $js, 'Escape dismisses it');
+    Assert::contains("ev.key !== 'Tab'", $js, 'Tab is trapped inside it');
+    Assert::contains('returnFocus', $js, 'focus goes back where it came from');
+    // A dialog is async. The submit guard has to stop the submit first and
+    // re-issue it once answered, and mark it so the re-issue passes through.
+    Assert::contains("form.dataset.confirmed === '1'", $js, 'the re-issued submit is marked');
+    Assert::contains('form.requestSubmit()', $js, 'and re-issues through requestSubmit, which runs validation');
+    // Transfer used to be "type 1, 2 or 3". It is a select now.
+    Assert::contains("kind: 'select'", $js, 'transfer destination is picked from a list');
+});
+
+Assert::test('settings links point at anchors and routes that exist', function (): void {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/index.php');
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+
+    // "Edit hours" and "View full schedule" both pointed at #hours, which no
+    // element carried, and nothing posted to /settings/hours at all.
+    Assert::contains("id=\"hours\"", $view, 'the hours section is anchored');
+    Assert::contains('id="retention"', $view, 'the retention section is anchored');
+    Assert::contains('id="guide"', $view, 'the guide section is anchored');
+    Assert::contains("action=\"/settings/hours\"", $view, 'and there is now a form that posts the hours');
+    Assert::contains("Router::post('/settings/hours'", $routes, 'to the route that already existed');
+
+    // A booked-in day needs its two times and a closed flag, per saveHours().
+    Assert::contains("name=\"closed_", $view, 'each day has a closed flag');
+    Assert::contains('data-hours-closed=', $view, 'wired so checking it disables the time fields');
+    Assert::contains('name="horizon_days"', $view, 'and the booking window is editable');
+
+    // Every in-page anchor this view links to must resolve to an id it has.
+    preg_match_all('~href="/settings\?tab=[a-z]+#([a-z]+)"~', $view, $m);
+    $missing = [];
+    foreach (array_unique($m[1] ?? []) as $id) {
+        if (strpos($view, 'id="' . $id . '"') === false) {
+            $missing[] = $id;
+        }
+    }
+    Assert::same([], $missing, 'no link to a missing anchor: #' . implode(', #', $missing));
+});
+
+Assert::test('an editing panel is not rendered as a 288px dropdown', function (): void {
+    // .st-details-body is an 18rem popover sized for the "Clear data"
+    // confirmation. "Edit profile" dropped six fields into it and was
+    // clipped, so the editors use a full-width in-flow variant.
+    $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+    Assert::true(
+        (bool) preg_match('/\.st-details-panel\s*>\s*\.st-details-body\s*\{[^}]*static/s', $css),
+        'the panel variant stays in normal flow'
+    );
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/index.php');
+    Assert::same(2, substr_count($view, 'st-details st-details-panel'), 'both editors use it');
+    Assert::contains('<details class="st-details shrink-0">', $view, 'while the purge popover keeps the dropdown');
+});
+
+Assert::test('desktop navigation lives in a header, not a side rail', function (): void {
+    $layout = (string) file_get_contents(QP_ROOT . '/resources/views/layouts/app.php');
+    $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+
+    Assert::contains('<header class="topnav">', $layout, 'there is a header');
+    Assert::contains('$headerPrimary', $layout, 'with the destinations used all day on it');
+    Assert::contains('$headerMore', $layout, 'and the long tail grouped under More');
+
+    // The rail is gone, and with it the padding that reserved its width --
+    // leaving the pl would have stranded a 221px gutter down the page.
+    Assert::same(0, preg_match('/class="sidebar/', $layout), 'the sidebar is no longer rendered');
+    Assert::same(0, preg_match('/\.sidebar\s*\{/', $css), 'nor styled');
+    Assert::same(0, preg_match('/lg:pl-\[var\(--sidebar-w\)\]/', $css), 'the main column no longer reserves its width');
+
+    // A shared primary list left the platform console with nothing but
+    // "More": none of /admin/* matched a clinic's destinations. Assert the
+    // admin branch of the ternary itself -- `=== 'super_admin'` and
+    // '/admin/monitor' both occur elsewhere in this file, so either alone
+    // passes even when the role-aware set has been deleted.
+    Assert::contains("? ['/admin', '/admin/clinics'", $layout, 'the admin primary set exists');
+    Assert::contains(
+        "? ['/admin', '/admin/clinics', '/admin/organisations', '/admin/features',",
+        $layout,
+        'and lists the console destinations'
+    );
+
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+    Assert::contains('[data-nav-more]', $js, 'the More menu is wired');
+    Assert::contains('nav-more-menu', $js, 'and has a handler');
+});
+
+/* ------------------------------------------------------------------ */
+/* Controls that must stay inside the box they are drawn in.           */
+/* ------------------------------------------------------------------ */
+
+Assert::test('no control uses a negative margin to escape its container', function (): void {
+    // The dashboard's "Refresh now" button carried -m-2 to widen its tap
+    // target without moving the text. It also pushed the button 7px past
+    // the right and bottom of the paragraph it sits in, at every width,
+    // with overflow: visible -- so it drew over whatever was beside it.
+    $files = [];
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($it as $f) {
+        if ($f->isFile() && $f->getExtension() === 'php') {
+            $files[$f->getPathname()] = (string) file_get_contents($f->getPathname());
+        }
+    }
+    Assert::true(count($files) > 30, 'the view directory is actually scanned');
+
+    $bad = [];
+    foreach ($files as $path => $src) {
+        // A negative margin in a class attribute. Tailwind writes these as
+        // -m-2, -mt-1, -mx-3 and friends; match the utility, not a `-margin`
+        // inside some other word.
+        if (preg_match('/class="[^"]*(?<![-\w])-m[trblxy]?-\d/', $src, $m)) {
+            $bad[] = basename($path) . ' ' . trim($m[0]);
+        }
+    }
+    Assert::same([], $bad, 'no negative margin utilities: ' . implode('; ', $bad));
+
+    $dash = (string) file_get_contents(QP_ROOT . '/resources/views/pages/dashboard/index.php');
+    Assert::contains('data-refresh-now', $dash, 'the refresh button is still there');
+    Assert::same(0, preg_match('/data-refresh-now[^>]*-m-2/', $dash), 'without the negative margin');
+    Assert::contains('h-8 w-8 shrink-0', $dash, 'it keeps a 32px target and is not squeezed');
 });
 
 /* ------------------------------------------------------------------ */

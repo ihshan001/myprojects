@@ -54,6 +54,72 @@ final class AdminController
         ]);
     }
 
+    /**
+     * Platform health, as a page.
+     *
+     * Every other admin screen answers "is the business OK"; this one answers
+     * "is the software OK" — the same checks /api/health returns, readable by
+     * a person instead of a probe.
+     *
+     * Two reasons to look at it here rather than curl the endpoint. A human
+     * can judge whether 340 ms of database latency is actually a problem
+     * right now, and a probe cannot. And a failing check can be read next to
+     * the incident the team already opened about it, instead of in
+     * isolation — which is why the recent incidents are on the same screen.
+     *
+     * Super admin only: these checks name tenants, queue depth and staff.
+     */
+    public function monitor(): void
+    {
+        $service = new \App\Services\MonitorService();
+
+        // ?clinic=<id> narrows the same checks to one tenant, which is the
+        // view to open when a single branch reports trouble.
+        $clinicId = Request::int('clinic');
+        $scoped   = null;
+        $result   = $service->run();
+        if ($clinicId > 0) {
+            $clinic = Db::one('SELECT id, name FROM clinics WHERE id = ?', [$clinicId]);
+            if ($clinic !== null) {
+                $scoped = $clinic;
+                $result = $service->run($clinicId);
+            }
+        }
+
+        view('admin/monitor', [
+            'title'     => 'Platform health',
+            'status'    => $result['status'],
+            'checks'    => $result['checks'],
+            'generated' => $result['generated_at'] ?? null,
+            'scoped'    => $scoped,
+            'alerts'    => $service->openAlerts(),
+            'incidents' => $this->recentIncidents(),
+            'clinics'   => Db::all('SELECT id, name FROM clinics ORDER BY name'),
+        ]);
+    }
+
+    /**
+     * The eight most recent incidents, whatever state they are in.
+     *
+     * Guarded because a health page that 500s on a database missing the
+     * incidents table is worse than one that simply shows none: health
+     * tooling is exactly what gets opened while the platform is already
+     * unwell.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function recentIncidents(): array
+    {
+        try {
+            return Db::all(
+                'SELECT id, reference, title, severity, status, clinic_id, detected_at
+                   FROM incidents ORDER BY detected_at DESC LIMIT 8'
+            );
+        } catch (\Throwable $e) {
+            return [];
+        }
+    }
+
     public function clinics(): void
     {
         $clinics = Db::all(

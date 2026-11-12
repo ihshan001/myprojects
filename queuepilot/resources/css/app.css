@@ -26,6 +26,40 @@
     scroll-behavior: smooth;
   }
 
+  /* ================================================================
+     SCALE — every page (this stylesheet carries the homepage too)
+     renders at the proportions of a browser zoomed to 90%, so nobody
+     has to press Ctrl/Cmd − to get that view.
+     ----------------------------------------------------------------
+     `zoom` is the property that reproduces browser zoom faithfully:
+     it scales type, px utilities, images, borders and shadows
+     together — a root `font-size: 90%` only reaches rem sizes and
+     cannot produce the same picture.
+
+     THIS IS THE ONLY SCALE MECHANISM. The homepage used to carry its
+     own `.lp-root { font-size: 90% }`; leaving that in place alongside
+     this rule applied 0.9 twice (0.81), shrinking the container from
+     1062px to 955.8px and every 44px tap target to 39.6px. Because all
+     homepage sizes are rem, zoom alone reproduces its geometry exactly:
+     73.75rem at a 16px root is 1180px, x0.9 = 1062px, and 3.0556rem is
+     48.89px, x0.9 = 44px. Do not reintroduce a root font-size.
+
+     Media queries do NOT see the zoom (real browser zoom divides the
+     viewport by 0.9), so `screens` in resources/tailwind/
+     tailwind.config.js carries every breakpoint × 0.9 to keep the
+     layouts flipping at the same physical window widths.
+     Change 0.9, change both.
+     ================================================================ */
+  html {
+    zoom: 0.9;
+  }
+
+  /* Printing is never screen-scaled: a browser at 90% zoom still prints
+     at 100%, so slips and reports come out at their true size. */
+  @media print {
+    html { zoom: 1; }
+  }
+
   body {
     @apply bg-[var(--canvas)] text-slate-800 antialiased;
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
@@ -271,6 +305,18 @@
     font-variant-numeric: tabular-nums;
     @apply font-mono font-black tracking-tight;
   }
+  /* One card per consulting room. A clinic with five doctors used to show a
+     single token on the whole wall, so four rooms of patients watched a
+     number that was never theirs. */
+  .room-card {
+    @apply flex flex-col items-center justify-center rounded-2xl px-4 py-5 text-center;
+    @apply bg-white/[0.05] ring-1 ring-inset ring-white/10;
+  }
+  .room-card-called {
+    /* Someone has to stand up and walk. Make it the brightest thing on the
+       screen, not just a slightly different shade. */
+    @apply bg-teal-500/15 ring-teal-400/60;
+  }
 }
 
 @layer utilities {
@@ -322,10 +368,12 @@
    Type: Fraunces (display, with its SOFT/WONK axes on) over Inter (UI), with
    JetBrains Mono for anything that is a number. All self-hosted.
 
-   SCALE KNOB: .lp-root sets the root to 90%, and every size below is in rem,
-   so the whole page renders at the proportions of a browser at 90% zoom while
-   the browser itself stays at 100%. Change one number to retune the page.
-   Breakpoints stay in px, so responsive behaviour is unaffected.
+   SCALE: the single knob is `html { zoom: 0.9 }` at the top of this file,
+   shared with the console. Every size below is in rem, so the page renders at
+   the proportions of a browser at 90% zoom while the browser stays at 100%.
+   Breakpoints are NOT unaffected: resources/tailwind/tailwind.config.js carries
+   every screen x0.9 to match, because CSS zoom does not resize the viewport
+   media queries see. Change the zoom, change those with it.
    =================================================================== */
 @font-face { font-family: 'Inter'; font-style: normal; font-weight: 400; font-display: swap; src: url('/assets/fonts/inter-400.woff2') format('woff2'); }
 @font-face { font-family: 'Inter'; font-style: normal; font-weight: 500; font-display: swap; src: url('/assets/fonts/inter-500.woff2') format('woff2'); }
@@ -341,7 +389,9 @@
   src: url('/assets/fonts/jetbrains-mono-var.woff2') format('woff2-variations');
 }
 
-.lp-root { font-size: 90%; }
+/* .lp-root stays on <html> as the landing document's marker, but deliberately
+   carries no font-size: `html { zoom: 0.9 }` above is the one scale mechanism.
+   Adding a root font-size here would compound with it — see the note there. */
 
 @layer components {
   .lp {
@@ -564,33 +614,80 @@
 
   /* --- one visit, two sides of the counter ---------------------------
      A swimlane. The point is simultaneity: the same token, kept in step on
-     the desk and in the patient's hand. The rail between them is the token. */
+     the desk and in the patient's hand. The rail between them is the token.
+     The desk side reads like a counter — solid, paper-white, plain. The hand
+     side is shaped like a phone: softer radius, a notch bar, a dashed edge,
+     so the two sides are told apart before a single word is read. */
   .lp-duet { @apply relative; }
-  .lp-duet-row { @apply relative grid gap-4 pb-9; }
+  .lp-duet-row { @apply relative grid gap-4 pb-10; }
   .lp-duet-row:last-child { @apply pb-0; }
-  .lp-duet-node { @apply flex items-center gap-2.5; }
+  .lp-duet-node { @apply flex items-center gap-3; }
   .lp-duet-dot {
-    @apply lp-mono flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[0.625rem] font-bold text-white;
+    @apply lp-mono flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[0.6875rem] font-bold text-white;
     background-image: linear-gradient(140deg, #0F766E, #06322E);
+    box-shadow: 0 .5rem 1rem -.5rem rgba(6,50,46,.6);
   }
-  .lp-duet-moment { @apply text-[0.8125rem] font-bold; color: var(--lp-ink); }
-  .lp-duet-side { @apply rounded-xl px-4 py-3.5; }
-  .lp-duet-side--desk { @apply bg-white; border: 1px solid var(--lp-line); }
-  .lp-duet-side--hand { background-color: rgba(255,255,255,.7); border: 1px dashed #C9D8D3; }
+  .lp-duet-moment {
+    @apply font-semibold;
+    font-size: 0.9375rem; color: var(--lp-ink); letter-spacing: -0.01em;
+  }
+  .lp-duet-side { @apply relative rounded-2xl px-5 py-4; }
+  .lp-duet-side--desk {
+    @apply bg-white;
+    border: 1px solid var(--lp-line);
+    box-shadow: 0 .875rem 1.75rem -1.25rem rgba(8,33,30,.35);
+  }
+  .lp-duet-side--hand {
+    background-color: rgba(255,255,255,.78);
+    border: 1px dashed #B9CEC8;
+    border-radius: 1.5rem;
+    padding-top: 1.5rem;
+  }
+  /* The notch: a phone tell, purely decorative. */
+  .lp-duet-side--phone::after {
+    content: "";
+    position: absolute; top: .625rem; left: 50%; transform: translateX(-50%);
+    width: 2.5rem; height: .3125rem; border-radius: 999px;
+    background-color: rgba(15,118,110,.3);
+  }
   .lp-duet-label {
     @apply lp-mono mb-1.5 block text-[0.5625rem] uppercase; letter-spacing: .16em; color: var(--lp-muted);
   }
-  .lp-duet-text { @apply text-[0.8125rem] leading-relaxed; }
+  .lp-duet-text { @apply text-[0.9375rem] leading-relaxed; color: var(--lp-ink); }
+  /* The closer: the rail lands on a gold dot — the brand's terminal point. */
+  .lp-duet-end {
+    @apply relative mx-auto mt-8 flex items-center gap-2.5 rounded-full border px-4 py-2;
+    background-color: var(--lp-paper);
+    border-color: var(--lp-line);
+    box-shadow: 0 .5rem 1.25rem -.75rem rgba(8,33,30,.28);
+  }
+  .lp-duet-end-dot { @apply h-2.5 w-2.5 shrink-0 rounded-full; background-color: #E0A63C; }
+  .lp-duet-end-text { @apply lp-mono text-[0.625rem] font-bold uppercase; letter-spacing: .16em; color: var(--lp-muted); }
+  @media (min-width: 768px) {
+    .lp-duet-end::before {
+      content: ""; position: absolute; left: 50%; transform: translateX(-50%);
+      bottom: 100%; width: 1px; height: 2rem;
+      background-image: repeating-linear-gradient(180deg, var(--lp-line) 0 .25rem, transparent .25rem .5rem);
+    }
+  }
   @screen md {
-    .lp-duet-row { grid-template-columns: minmax(0,1fr) 8.5rem minmax(0,1fr); @apply items-start gap-5; }
-    .lp-duet-node { @apply flex-col justify-start gap-2 pt-3.5 text-center; }
+    .lp-duet-row { grid-template-columns: minmax(0,1fr) 9.5rem minmax(0,1fr); @apply items-start gap-6; }
+    .lp-duet-node { @apply flex-col justify-start gap-2.5 pt-4 text-center; }
     /* The dotted token rail runs down the centre column, behind the nodes. */
     .lp-duet-row::before {
-      content: ""; @apply absolute w-px; left: 50%; top: 2.75rem; bottom: -.25rem;
+      content: ""; @apply absolute w-px; left: 50%; top: 3.4rem; bottom: -.25rem;
       background-image: repeating-linear-gradient(180deg, var(--lp-line) 0 .25rem, transparent .25rem .5rem);
     }
     .lp-duet-row:last-child::before { display: none; }
-    .lp-duet-head { @apply grid gap-5 pb-4; grid-template-columns: minmax(0,1fr) 8.5rem minmax(0,1fr); }
+    .lp-duet-head { @apply grid gap-6 pb-5; grid-template-columns: minmax(0,1fr) 9.5rem minmax(0,1fr); }
+    /* The heads repeat the split: a solid rule over the desk, a dashed one
+       over the hand — the two sides, announced before the first row. */
+    .lp-duet-head p { @apply flex items-center gap-2.5; }
+    .lp-duet-head p::before { content: ""; @apply h-px w-7 shrink-0; background-color: var(--lp-teal); }
+    .lp-duet-head p:last-child::before {
+      height: 2px; background-color: transparent;
+      background-image: repeating-linear-gradient(90deg, var(--lp-muted) 0 .25rem, transparent .25rem .5rem);
+    }
   }
 
   /* --- annotated evidence --------------------------------------------
@@ -606,14 +703,108 @@
   }
 
   /* Tap targets: 44px is the floor on a touch screen, not a suggestion. */
-  /* 44 physical px at the 90% root: 44 / 0.9 / 16 = 3.0556rem. A plain
-     2.75rem would render 39.6px and quietly miss the touch-target floor. */
+  /* 44 physical px under zoom: 44 / 0.9 / 16 = 3.0556rem, i.e. 48.89
+     computed px x 0.9 = 44 on screen. A plain 2.75rem renders 39.6px and
+     quietly misses the floor. Assert this with getBoundingClientRect, not
+     getComputedStyle — computed values are pre-zoom and will read 48.89. */
   .lp-tap { @apply inline-flex items-center; min-height: 3.0556rem; }
   .lp-tap-btn { @apply flex items-center justify-center; height: 3.0556rem; width: 3.0556rem; }
 
   .lp-footer { background-color: var(--lp-deeper); color: #CFE0DB; }
   .lp-footer-link { @apply text-[0.75rem] font-medium; color: #9FBDB6; transition: color .18s ease; }
-  .lp-footer-link:hover { color: #fff; }
+  .lp-footer-link:hover { color: var(--lp-sand-lit); }
+  .lp-foot-cta { @apply flex flex-col gap-6; }
+  .lp-foot-cta .lp-eyebrow { color: var(--lp-sand-lit); }
+  .lp-foot-cta-line { @apply lp-display mt-3 text-white; font-size: 1.75rem; line-height: 1.12; }
+  .lp-foot-grid { @apply grid gap-10; }
+  .lp-foot-col { @apply flex flex-col; }
+  .lp-foot-head { @apply lp-mono mb-3 text-[0.625rem] font-bold uppercase; letter-spacing: .18em; color: rgba(246,231,200,.6); }
+  .lp-foot-lang { @apply mt-5 flex max-w-[23rem] items-start gap-2.5 text-[0.8125rem] leading-relaxed; color: #9FBDB6; }
+  .lp-foot-lang svg { @apply mt-0.5 h-4 w-4 shrink-0; color: var(--lp-sand-lit); }
+  .lp-foot-bottom { @apply flex flex-col gap-3 border-t pt-6 sm:flex-row sm:items-center sm:justify-between; border-color: rgba(255,255,255,.12); }
+  .lp-foot-legal { @apply text-[0.75rem]; color: rgba(207,224,219,.55); }
+  .lp-btn-gold {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-[0.84375rem] font-bold;
+    background-image: linear-gradient(100deg, #F6E7C8, #E0A63C);
+    color: #06322E;
+    box-shadow: 0 .5rem 1.25rem -.625rem rgba(224,166,60,.5);
+    transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
+  }
+  .lp-btn-gold:hover { transform: translateY(-1px); filter: saturate(1.15); }
+  .lp-btn-ghost--dark { border-color: rgba(255,255,255,.3); background-color: transparent; color: #fff; }
+  .lp-btn-ghost--dark:hover { background-color: rgba(255,255,255,.1); }
+  @screen md {
+    .lp-foot-cta { @apply flex-row items-end justify-between; }
+    .lp-foot-grid { grid-template-columns: minmax(0,1.5fr) repeat(2, minmax(0,.75fr)); gap: 2.5rem; }
+    .lp-foot-cta-line { font-size: 2.25rem; }
+  }
+
+  /* ---- auth: the landing's language, at the door ----------------------
+     Split: brand on the left (deep teal, the visit in five beats), the form
+     on the right (paper, ink). The console's slate is left at the door —
+     signing in should feel like the brochure, not the back office. */
+  .auth-split { @apply grid min-h-screen; grid-template-columns: 1fr; }
+  @screen lg {
+    .auth-split { grid-template-columns: minmax(0,1.05fr) minmax(0,1fr); }
+  }
+  .auth-brand {
+    @apply relative flex flex-col justify-between gap-10 overflow-hidden px-7 py-11 text-white sm:px-12 lg:py-16;
+    background-image: radial-gradient(130% 100% at 12% 0%, #0F766E 0%, #0B4F49 45%, #06322E 100%);
+  }
+  .auth-brand::before {
+    content: ""; @apply absolute inset-y-0 hidden w-px lg:block; right: 3.5rem;
+    background-image: repeating-linear-gradient(180deg, rgba(246,231,200,.35) 0 .375rem, transparent .375rem .75rem);
+  }
+  .auth-brand-mark { @apply flex items-center gap-2.5; }
+  .auth-brand-line { @apply lp-display; font-size: 2rem; line-height: 1.1; color: #FBFAF7; }
+  .auth-brand-sub { @apply mt-4 max-w-[26rem] text-[0.9375rem] leading-relaxed; color: rgba(251,250,247,.72); }
+  .auth-panel-head { @apply lp-mono mt-9 text-[0.625rem] font-bold uppercase; letter-spacing: .18em; color: rgba(246,231,200,.6); }
+  .auth-steps { @apply mt-4 flex flex-col gap-3; }
+  .auth-step { @apply flex items-center gap-3 text-[0.875rem] font-medium; color: rgba(251,250,247,.82); }
+  .auth-step-n {
+    @apply lp-mono flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[0.5625rem] font-bold;
+    background-color: rgba(246,231,200,.14); border: 1px solid rgba(246,231,200,.4); color: var(--lp-sand-lit);
+  }
+  .auth-brand-foot { @apply mt-8 max-w-[26rem] border-t pt-5 text-[0.75rem]; border-color: rgba(255,255,255,.14); color: rgba(251,250,247,.55); }
+  .auth-form-col { @apply flex items-center justify-center px-5 py-12 sm:px-8; background-color: var(--lp-paper); }
+  .auth-card { @apply w-full; max-width: 27.5rem; }
+  .auth-kicker { @apply text-[0.8125rem]; color: var(--lp-muted); }
+  .auth-kicker a { font-weight: 700; color: var(--lp-teal); }
+  .auth-kicker a:hover { text-decoration: underline; }
+  .auth-title { @apply mt-2.5; font-size: 1.75rem; line-height: 1.15; color: var(--lp-ink); }
+  .auth-sub { @apply mt-2.5 text-[0.9375rem]; color: var(--lp-body); }
+  .auth-form { @apply mt-7 flex flex-col gap-5; }
+  .auth-link { @apply text-[0.75rem] font-semibold; color: var(--lp-teal); }
+  .auth-link:hover { text-decoration: underline; }
+  .auth-errors { @apply mt-5 rounded-xl border px-4 py-3 text-[0.8125rem]; border-color: #FECDD3; background-color: #FFF1F2; color: #9F1239; }
+  .auth-demo { @apply mt-7 rounded-2xl border p-4; border-color: var(--lp-line); background-color: #fff; }
+  .auth-demo-head { @apply lp-mono flex items-center gap-2 text-[0.625rem] font-bold uppercase; letter-spacing: .14em; color: var(--lp-muted); }
+  .auth-demo-note { @apply mt-1.5 text-[0.75rem] leading-relaxed; color: var(--lp-muted); }
+  .auth-demo-btn { @apply flex w-full cursor-pointer items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 text-left transition; border-color: var(--lp-line); background-color: #fff; }
+  .auth-demo-btn:hover { border-color: var(--lp-teal); background-color: var(--lp-mist); }
+  .auth-demo-name { @apply block text-[0.8125rem] font-bold; color: var(--lp-ink); }
+  .auth-demo-mail { @apply lp-mono block truncate text-[0.6875rem]; color: var(--lp-muted); }
+  /* The form controls, restyled from the console's slate to the landing's paper. */
+  .auth-page .label { @apply mb-2 text-[0.625rem] font-bold tracking-[0.14em]; color: var(--lp-muted); }
+  .auth-page .input,
+  .auth-page .select {
+    @apply rounded-xl border bg-white px-4 py-3 text-[0.9375rem];
+    border-color: var(--lp-line); color: var(--lp-ink);
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  .auth-page .input::placeholder { color: #A9BDB7; }
+  .auth-page .input:focus,
+  .auth-page .select:focus {
+    outline: none; border-color: var(--lp-teal);
+    box-shadow: 0 0 0 3px rgba(15,118,110,.15);
+  }
+  .auth-page .input-error { border-color: #FDA4AF; }
+  .auth-page .help { @apply mt-1.5 text-[0.75rem]; color: var(--lp-muted); }
+  .auth-note { @apply mt-4 text-center text-[0.75rem] leading-relaxed; color: var(--lp-muted); }
+  .auth-works { @apply mt-5 border-t pt-5 text-[0.75rem] leading-relaxed; border-color: var(--lp-line); color: var(--lp-muted); }
+  .auth-facts { @apply mt-4 flex flex-col gap-2.5; }
+  .auth-fact { @apply flex items-start gap-2.5 text-[0.8125rem] leading-relaxed; color: rgba(251,250,247,.78); }
+  .auth-fact svg { @apply mt-0.5 h-4 w-4 shrink-0; color: var(--lp-sand-lit); }
 }
 
 /* ---- scroll reveal -------------------------------------------------
@@ -653,3 +844,159 @@
   .lp-reveal-ready [data-reveal-group] > *,
   .lp-reveal-ready [data-reveal-group].is-in > * { opacity: 1 !important; transform: none !important; transition: none !important; }
 }
+
+  /* ------------------------------------------------------------ dialogs
+     In-page replacements for confirm() and prompt(). The native ones are
+     prefaced by the browser with "an embedded page at <host> says" whenever
+     the console runs inside the preview iframe, which reads like a phishing
+     attempt, cannot be styled, and cannot be driven by a test. */
+  .qp-dialog-locked { overflow: hidden; }
+
+  .qp-dialog-host {
+    @apply fixed inset-0 z-[120] flex items-center justify-center p-4;
+    background: rgb(15 23 42 / 0.45);
+    /* The console is drawn at 0.9 zoom, so a fixed overlay has to undo it or
+       it lands slightly off-centre against the rest of the chrome. */
+    zoom: 1;
+  }
+  .qp-dialog-host[hidden] { display: none; }
+
+  .qp-dialog {
+    @apply w-full max-w-[26rem] rounded-xl border border-slate-200 bg-white p-5 shadow-xl;
+  }
+  .qp-dialog-title {
+    @apply text-[15px] font-bold tracking-tight text-slate-900;
+  }
+  .qp-dialog-text {
+    @apply mt-1.5 text-[13px] leading-relaxed text-slate-600;
+  }
+  .qp-dialog-field {
+    @apply mt-3 block;
+  }
+  .qp-dialog-field > span {
+    @apply mb-1 block text-[11.5px] font-semibold text-slate-700;
+  }
+  .qp-dialog-field > .input {
+    @apply mt-0 w-full;
+  }
+  .qp-dialog-actions {
+    @apply mt-4 flex flex-wrap items-center justify-end gap-2;
+  }
+  .qp-dialog-actions > .btn-primary,
+  .qp-dialog-actions > .btn-danger,
+  .qp-dialog-actions > .btn-secondary {
+    @apply !w-auto;
+  }
+
+  /* ------------------------------------------------------- desktop header
+     The rail is right for a phone drawer and wrong for a wide screen. This
+     carries the destinations a clinic uses all day, hides on lg-down where
+     the bottom tabs take over, and prints as nothing. */
+  .topnav {
+    @apply sticky top-0 z-30 hidden border-b border-slate-200 bg-white/95 backdrop-blur lg:block no-print;
+  }
+  .topnav-inner {
+    @apply flex h-14 items-center gap-4 px-4 xl:px-6;
+  }
+  .topnav-brand {
+    @apply flex shrink-0 items-center gap-2;
+  }
+  .topnav-links {
+    @apply flex min-w-0 flex-1 items-center gap-0.5;
+  }
+  .topnav-link {
+    @apply flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[13px] font-semibold text-slate-600
+           transition hover:bg-slate-100 hover:text-slate-900;
+  }
+  .topnav-link.is-active {
+    @apply bg-teal-50 text-teal-800;
+  }
+  .topnav-more {
+    @apply relative;
+  }
+  .topnav-menu {
+    @apply absolute left-0 top-full z-40 mt-1 w-60 overflow-hidden rounded-xl border border-slate-200
+           bg-white py-1.5 shadow-xl;
+  }
+  .topnav-menu[hidden] { display: none; }
+  .topnav-menu-label {
+    @apply px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-slate-400;
+  }
+  .topnav-menu-item {
+    @apply flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-slate-700 hover:bg-slate-50;
+  }
+  .topnav-menu-item.is-active {
+    @apply bg-teal-50 font-semibold text-teal-800;
+  }
+  .topnav-right {
+    @apply flex shrink-0 items-center gap-1.5;
+  }
+  .topnav-search {
+    @apply hidden min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5
+           focus-within:border-teal-500 focus-within:bg-white xl:flex;
+  }
+  .topnav-search > input {
+    @apply w-44 border-0 bg-transparent p-0 text-[13px] text-slate-800 placeholder:text-slate-400
+           focus:outline-none focus:ring-0;
+  }
+  .topnav-branch {
+    @apply max-w-[10rem] rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[12px] text-slate-700
+           focus:border-teal-500 focus:outline-none;
+  }
+  .topnav-icon {
+    @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500
+           transition hover:bg-slate-100 hover:text-slate-900;
+  }
+  .topnav-user {
+    @apply ml-0.5 flex shrink-0 items-center gap-2 rounded-lg px-1.5 py-1;
+  }
+
+  /* ---------------------------------------------------------- bottom tabs
+     The four things a clinic does all day, always within thumb reach. The
+     rail is a drawer you have to open first; this is not. */
+  .bottom-tabs {
+    @apply fixed inset-x-0 bottom-0 z-40 flex border-t border-slate-200 bg-white lg:hidden no-print;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .btab {
+    @apply flex min-w-0 flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-semibold text-slate-500;
+  }
+  .btab > span {
+    @apply max-w-full truncate;
+  }
+  .btab-active {
+    @apply text-teal-700;
+  }
+
+  /* ------------------------------------------------------- settings tabs
+     One screen, five tabs. The settings page had the clinic profile, the
+     staff list, notification counters, integration switches and account
+     closure all stacked into one scroll. */
+  .st-tabs {
+    @apply flex gap-1 overflow-x-auto border-b border-slate-200 no-print;
+  }
+  .st-tabs::-webkit-scrollbar { display: none; }
+  .st-tab {
+    @apply shrink-0 border-b-2 border-transparent px-3 py-2 text-[13px] font-semibold text-slate-500
+           transition hover:border-slate-300 hover:text-slate-800;
+  }
+  .st-tab.is-active {
+    @apply border-teal-700 text-teal-800;
+  }
+
+  /* ------------------------------------------------- priority rule list
+     Order is the policy, so it is editable in place. The nudge buttons are
+     the keyboard path; the grip is the drag path. Both write the same POST. */
+  .rule-nudge {
+    @apply flex h-5 w-5 items-center justify-center rounded text-slate-400 transition
+           hover:bg-slate-100 hover:text-slate-700 disabled:pointer-events-none disabled:opacity-30;
+  }
+  [data-rule-list] [data-rule-row] {
+    @apply transition-colors;
+  }
+  [data-rule-list] [data-rule-row].is-dragging {
+    @apply bg-teal-50 opacity-60;
+  }
+  [data-rule-list] [data-rule-row].is-drop-target {
+    @apply border-t-2 border-teal-600;
+  }

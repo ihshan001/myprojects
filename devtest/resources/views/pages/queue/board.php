@@ -1,4 +1,5 @@
-<?php use App\Domain\Queue\QueueStateMachine; ?>
+<?php use App\Core\Auth;
+use App\Domain\Queue\QueueStateMachine; ?>
 <div class="page-head">
   <div class="flex min-w-0 items-start gap-3">
     <span class="page-icon"><svg class="h-5 w-5"><use href="#i-queue"/></svg></span>
@@ -19,7 +20,7 @@
   <div class="flex flex-wrap gap-2">
     <?php if (count($queues) > 1): ?>
       <form method="get" action="/queue">
-        <select class="select !py-2 text-xs" name="queue_id" onchange="this.form.submit()">
+        <select class="select !py-2 text-xs" name="queue_id" data-autosubmit>
           <?php foreach ($queues as $q): ?>
             <option value="<?= (int) $q['id'] ?>" <?= (int) $q['id'] === (int) $queue['id'] ? 'selected' : '' ?>>
               <?= e($q['name']) ?> (<?= (int) $q['waiting_count'] ?>)
@@ -44,10 +45,12 @@
       </div>
       <button class="btn-secondary !py-2 text-xs">Find</button>
     </form>
-    <a href="/queue/new?queue=<?= (int) $queue['id'] ?>" class="btn-primary">
-      <svg class="h-4 w-4"><use href="#i-plus"/></svg>
-      New patient
-    </a>
+    <?php if (Auth::can('queue.issue')): ?>
+      <a href="/queue/new?queue=<?= (int) $queue['id'] ?>" class="btn-primary">
+        <svg class="h-4 w-4"><use href="#i-plus"/></svg>
+        New patient
+      </a>
+    <?php endif; ?>
   </div>
 </div>
 

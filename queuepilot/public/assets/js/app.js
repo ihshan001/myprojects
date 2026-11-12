@@ -70,19 +70,290 @@
   }
   window.qpApi = api;
 
+  /* -------------------------------------------- CSP-safe inline actions
+     The app sends `script-src 'self'`, which blocks inline event handlers
+     exactly as it blocks inline <script>. Controls written as
+     onchange=/onsubmit=/onclick= attributes never ran, and none of it logged
+     anything the user would see:
+       - filter selects meant to submit on change simply did not;
+       - `return confirm(...)` guards on destructive forms were skipped, so
+         suspending a clinic, deleting a room or revoking a screen went
+         through with no confirmation whatsoever;
+       - the print buttons and the template placeholder buttons did nothing.
+     These delegated handlers replace them with data- attributes, which the
+     CSP allows. */
+
+  /* A <select> that submits its own form. */
+  document.addEventListener('change', (ev) => {
+    const sel = ev.target.closest('[data-submit-on-change]');
+    if (sel && sel.form) sel.form.submit();
+  });
+
+  /* Print buttons. */
+  document.addEventListener('click', (ev) => {
+    if (ev.target.closest('[data-print]')) {
+      ev.preventDefault();
+      window.print();
+    }
+  });
+
+  /* Message-template placeholder buttons. */
+  document.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('[data-insert-placeholder]');
+    if (!btn) return;
+    const area = btn.closest('form')?.querySelector('textarea');
+    if (!area) return;
+    area.value += btn.getAttribute('data-insert-placeholder');
+    area.focus();
+  });
+
+  /* Forms that must ask before they fire. The message lives on the form, not
+     on the button, because several of these are single-button forms where the
+     button carries no room for it. */
+  document.addEventListener('submit', async (ev) => {
+    const form = ev.target;
+    if (!form || !form.getAttribute) return;
+    const message = form.getAttribute('data-confirm-submit');
+    if (!message) return;
+    if (form.dataset.confirmed === '1') {   // already asked: let this one pass
+      delete form.dataset.confirmed;
+      return;
+    }
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    const ok = await askConfirm(message, { danger: form.hasAttribute('data-confirm-danger') });
+    if (!ok) return;
+    form.dataset.confirmed = '1';
+    form.submit();
+  }, true);
+
+  /* ------------------------------------------------------------ dialogs
+     The console runs inside an iframe on the preview host, so every native
+     confirm()/prompt() the browser opens is labelled "An embedded page at
+     <host> says". That reads like a phishing prompt, cannot be styled, and
+     cannot be driven by a test. These are the in-page replacements. They
+     return promises, so the call sites read the way they did before. */
+  const dialogHost = document.createElement('div');
+  dialogHost.className = 'qp-dialog-host';
+  dialogHost.hidden = true;
+  document.body.appendChild(dialogHost);
+
+  let dialogOpen = null;
+
+  function dialogKeydown(ev) {
+    if (!dialogOpen) return;
+    if (ev.key === 'Escape') {
+      ev.preventDefault();
+      dialogOpen.close(dialogOpen.nullish);
+      return;
+    }
+    if (ev.key !== 'Tab') return;
+    // Focus trap. A dialog that lets Tab walk out from behind itself is
+    // unusable from the keyboard, and this app is worked at a reception
+    // desk all day, often one-handed.
+    const items = dialogHost.querySelectorAll('button, [href], input, textarea, select');
+    if (items.length === 0) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (ev.shiftKey && document.activeElement === first) {
+      ev.preventDefault();
+      last.focus();
+    } else if (!ev.shiftKey && document.activeElement === last) {
+      ev.preventDefault();
+      first.focus();
+    }
+  }
+
+  /** @returns Promise<boolean> without an input, Promise<string|null> with one. */
+  function openDialog(opts) {
+    return new Promise((resolve) => {
+      // A second dialog over an open one would strand the first promise.
+      if (dialogOpen) dialogOpen.close(dialogOpen.nullish);
+
+      const withInput = Boolean(opts.input);
+      const nullish = withInput ? null : false;
+      const returnFocus = document.activeElement;
+
+      const close = (value) => {
+        dialogOpen = null;
+        dialogHost.hidden = true;
+        dialogHost.innerHTML = '';
+        document.removeEventListener('keydown', dialogKeydown, true);
+        document.body.classList.remove('qp-dialog-locked');
+        if (returnFocus && returnFocus.focus) returnFocus.focus();
+        resolve(value);
+      };
+
+      dialogHost.innerHTML = '';
+      dialogHost.hidden = false;
+
+      const card = document.createElement('div');
+      card.className = 'qp-dialog';
+      card.setAttribute('role', 'dialog');
+      card.setAttribute('aria-modal', 'true');
+
+      const heading = document.createElement('h2');
+      heading.className = 'qp-dialog-title';
+      heading.textContent = opts.title || 'Are you sure?';
+      card.appendChild(heading);
+
+      if (opts.message) {
+        const body = document.createElement('p');
+        body.className = 'qp-dialog-text';
+        body.textContent = opts.message;
+        card.appendChild(body);
+      }
+
+      let field = null;
+      if (withInput) {
+        const spec = opts.input;
+        const wrap = document.createElement('label');
+        wrap.className = 'qp-dialog-field';
+        const caption = document.createElement('span');
+        caption.textContent = spec.label || '';
+        wrap.appendChild(caption);
+
+        if (spec.kind === 'select') {
+          // Picking a destination by typing "2" into a prompt is how a
+          // patient gets transferred to the wrong doctor. Show the names.
+          field = document.createElement('select');
+          field.className = 'input';
+          (spec.choices || []).forEach((choice) => {
+            const option = document.createElement('option');
+            option.value = String(choice.value);
+            option.textContent = choice.label;
+            if (String(choice.value) === String(spec.value)) option.selected = true;
+            field.appendChild(option);
+          });
+        } else {
+          field = document.createElement(spec.multiline ? 'textarea' : 'input');
+          if (!spec.multiline) field.type = 'text';
+          field.className = 'input';
+          field.placeholder = spec.placeholder || '';
+          field.value = spec.value || '';
+          if (spec.readonly) {
+            field.readOnly = true;
+            field.className += ' font-mono text-[12px]';
+          }
+        }
+        wrap.appendChild(field);
+        card.appendChild(wrap);
+      }
+
+      const actions = document.createElement('div');
+      actions.className = 'qp-dialog-actions';
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'btn-secondary';
+      cancel.textContent = opts.cancelLabel || 'Cancel';
+      const okBtn = document.createElement('button');
+      okBtn.type = 'button';
+      okBtn.className = opts.danger ? 'btn-danger' : 'btn-primary';
+      okBtn.textContent = opts.confirmLabel || (withInput ? 'Continue' : 'Confirm');
+      actions.appendChild(cancel);
+      actions.appendChild(okBtn);
+      card.appendChild(actions);
+      dialogHost.appendChild(card);
+
+      dialogOpen = { close, nullish };
+
+      cancel.addEventListener('click', () => close(nullish));
+      okBtn.addEventListener('click', () => close(withInput ? field.value : true));
+      // Backdrop press on mousedown, not click: a click that started inside
+      // the card and ended on the backdrop must not dismiss it.
+      dialogHost.addEventListener('mousedown', (ev) => {
+        if (ev.target === dialogHost) close(nullish);
+      });
+
+      document.addEventListener('keydown', dialogKeydown, true);
+      document.body.classList.add('qp-dialog-locked');
+
+      (field || okBtn).focus();
+      if (field && field.select) field.select();
+    });
+  }
+
+  /** Ask a yes/no question. Resolves true only on Confirm. */
+  const askConfirm = (message, opts = {}) => openDialog(Object.assign({ message }, opts));
+
+  /** Ask for a line of text, or a choice. Resolves null when dismissed. */
+  const askText = (opts) => openDialog(Object.assign({}, opts, {
+    input: {
+      label: opts.label,
+      value: opts.value,
+      placeholder: opts.placeholder,
+      multiline: opts.multiline,
+      kind: opts.kind,
+      choices: opts.choices,
+      readonly: opts.readonly,
+    },
+  }));
+
+  window.qpDialog = { openDialog, askConfirm, askText };
+
   /* -------------------------------------------------- mobile navigation */
   const menuBtn = $('#mobile-menu-btn');
   if (menuBtn) menuBtn.addEventListener('click', () => $('#mobile-menu')?.classList.toggle('hidden'));
 
-  /* ------------------------------------------------ confirmable actions */
+  /* The bottom tab bar's More opens the same drawer, so there is one nav map
+     and not two to keep in step. */
+  document.addEventListener('click', (ev) => {
+    if (ev.target.closest('[data-open-nav]')) $('#mobile-menu')?.classList.toggle('hidden');
+  });
+
+  /* ------------------------------------------- header "More" dropdown */
+  document.addEventListener('click', (ev) => {
+    const toggle = ev.target.closest('[data-nav-more-toggle]');
+    const menu = toggle && toggle.parentElement?.querySelector('[data-nav-more] .topnav-menu, .topnav-menu');
+    if (!toggle) return;
+    const panel = document.getElementById(toggle.getAttribute('aria-controls') || '');
+    if (!panel) return;
+    const open = panel.hidden;
+    panel.hidden = !open;
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+
+  // Dismiss on any click or Escape that is not inside the menu.
+  document.addEventListener('click', (ev) => {
+    $$('.topnav-menu').forEach((panel) => {
+      if (panel.hidden) return;
+      if (ev.target.closest('.topnav-more')) return;
+      panel.hidden = true;
+      const t = panel.closest('.topnav-more')?.querySelector('[data-nav-more-toggle]');
+      if (t) t.setAttribute('aria-expanded', 'false');
+    });
+  });
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Escape') return;
+    $$('.topnav-menu').forEach((panel) => { panel.hidden = true; });
+    $$('[data-nav-more-toggle]').forEach((t) => t.setAttribute('aria-expanded', 'false'));
+  });
+
+  /* ------------------------------------------------ confirmable actions
+     Capture phase, and stopImmediatePropagation, so a destructive submit
+     cannot fire on the same click that is still asking permission. */
   document.addEventListener('click', async (ev) => {
     const btn = ev.target.closest('[data-confirm]');
     if (!btn) return;
-    const text = btn.getAttribute('data-confirm') || 'Are you sure?';
-    if (!window.confirm(text)) {
-      ev.preventDefault();
-      ev.stopImmediatePropagation();
+    if (btn.dataset.confirmed === '1') {   // already asked: let this one pass
+      delete btn.dataset.confirmed;
+      return;
     }
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+
+    const ok = await askConfirm(btn.getAttribute('data-confirm') || 'Are you sure?', {
+      title: btn.getAttribute('data-confirm-title') || undefined,
+      danger: btn.hasAttribute('data-confirm-danger'),
+      confirmLabel: btn.getAttribute('data-confirm-ok') || undefined,
+    });
+    if (!ok) return;
+
+    // Replay the click that preventDefault above swallowed.
+    if (btn.type === 'submit' && btn.form) { btn.form.submit(); return; }
+    if (btn.tagName === 'A' && btn.href) { window.location.href = btn.href; return; }
+    btn.dataset.confirmed = '1';
+    btn.click();
   }, true);
 
   /* --------------------------------------------------- queue row actions */
@@ -106,7 +377,11 @@
 
     // Clinical priority is the one action that must capture a reason (audit).
     if (action === 'priority') {
-      reason = window.prompt('Reason for clinical priority (recorded in the audit log):', '');
+      reason = await askText({
+        title: 'Clinical priority',
+        label: 'Reason (recorded in the audit log)',
+        placeholder: 'e.g. chest pain, triaged by nurse',
+      });
       if (reason === null) return;
       if (!reason.trim()) {
         toast('A reason is required for priority.', 'warn');
@@ -116,10 +391,12 @@
     if (action === 'cancel' || action === 'hold') {
       // A hold without a reason is just a mystery row on the board, so the
       // prompt defaults to something a colleague can act on.
-      reason = window.prompt(
-        action === 'hold' ? 'Why is this patient on hold? (e.g. sent for X-ray)' : 'Reason (optional):',
-        action === 'hold' ? 'Stepped away' : ''
-      );
+      reason = await askText({
+        title: action === 'hold' ? 'Put on hold' : 'Cancel this token',
+        label: action === 'hold' ? 'Why? (e.g. sent for X-ray)' : 'Reason (optional)',
+        value: action === 'hold' ? 'Stepped away' : '',
+        placeholder: action === 'hold' ? 'Sent for X-ray' : 'Optional',
+      });
       if (reason === null) return;
     }
 
@@ -130,7 +407,11 @@
       const target = await pickTransferTarget();
       if (!target) return;
       toQueueId = target.id;
-      reason = window.prompt('Reason for transfer (recorded in the audit log):', '');
+      reason = await askText({
+        title: 'Transfer patient',
+        label: 'Reason (recorded in the audit log)',
+        placeholder: 'e.g. wrong department, Dr. Perera is free',
+      });
       if (reason === null) return;
     }
 
@@ -171,15 +452,24 @@
       toast('There is no other queue open today to transfer to.', 'warn');
       return null;
     }
-    const list = queues.map((q, i) => `${i + 1}. ${q.name} (${q.waiting} waiting)`).join('\n');
-    const answer = window.prompt('Transfer to which queue?\n\n' + list, '1');
+    // Names in a select, not numbers in a prompt: typing "2" wrong sends a
+    // patient to the wrong doctor, and a prompt cannot show what "2" is
+    // without the list scrolling off the top of it.
+    const answer = await askText({
+      title: 'Transfer to which queue?',
+      label: 'Destination queue',
+      kind: 'select',
+      choices: queues.map((q) => ({ value: q.id, label: `${q.name} (${q.waiting} waiting)` })),
+      value: queues[0].id,
+      confirmLabel: 'Transfer here',
+    });
     if (answer === null) return null;
-    const index = parseInt(answer, 10) - 1;
-    if (Number.isNaN(index) || !queues[index]) {
-      toast('Enter one of the listed numbers.', 'warn');
+    const target = queues.find((q) => String(q.id) === String(answer));
+    if (!target) {
+      toast('Pick one of the listed queues.', 'warn');
       return null;
     }
-    return queues[index];
+    return target;
   }
 
   /* ------------------------------------------------------- copy buttons */
@@ -202,7 +492,13 @@
       }
       toast('Link copied', 'success', 1800);
     } catch {
-      window.prompt('Copy this link:', value);
+      await askText({
+        title: 'Copy this link',
+        label: 'Clipboard was blocked — select and copy',
+        value,
+        readonly: true,
+        confirmLabel: 'Done',
+      });
     }
   });
 
@@ -316,11 +612,13 @@
       const actions = (r.actions || []).map((a) => {
         const label = {
           call: 'Call', recall: 'Call again', start: 'Start', complete: 'Complete',
+          complete_next: 'Complete &amp; call next',
           skip: 'Skip', no_show: 'No show', cancel: 'Cancel', transfer: 'Transfer',
           requeue: 'Re-queue', priority: 'Priority', hold: 'Hold', release_hold: 'Back to queue',
         }[a] || a;
         const tone = {
           call: 'act-call', recall: 'act-call', start: 'act-start', complete: 'act-done',
+          complete_next: 'act-done',
           skip: 'act-skip', cancel: 'act-stop', no_show: 'act-mute', transfer: 'act-mute',
           requeue: 'act-start', priority: 'act-stop', hold: 'act-mute', release_hold: 'act-start',
         }[a] || 'act-mute';
@@ -415,24 +713,79 @@
   const tvBoard = $('[data-display-board]');
   if (tvBoard) {
     const key = tvBoard.getAttribute('data-display-board');
+    const tvEsc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+
+    // Which token each room was showing last time, so a change can flash and
+    // be spoken. Keyed by queue id: two doctors can legitimately be on the
+    // same label, and comparing one flat string would miss half the calls.
+    const lastTokenByRoom = new Map();
+
     const apply = (data) => {
+      const solo = data.solo === true;
+      const soloEl = $('[data-tv-solo]');
+      const roomsEl = $('[data-tv-rooms]');
+
+      if (soloEl) soloEl.classList.toggle('hidden', !solo);
+      if (roomsEl) {
+        roomsEl.classList.toggle('hidden', solo);
+        roomsEl.classList.toggle('grid', !solo);
+      }
+
       const servingEl = $('[data-tv-serving]');
       if (servingEl && data.now_serving) {
         const prev = servingEl.getAttribute('data-token');
         servingEl.textContent = data.now_serving.token;
         servingEl.setAttribute('data-token', data.now_serving.token);
+        const roomEl = $('[data-tv-serving-room]');
+        if (roomEl) roomEl.textContent = [data.now_serving.room, data.now_serving.doctor].filter(Boolean).join(' · ');
         if (prev && prev !== data.now_serving.token) {
           servingEl.classList.add('call-flash');
           setTimeout(() => servingEl.classList.remove('call-flash'), 6000);
           speak(data.now_serving);
         }
       }
+
+      if (roomsEl && !solo) {
+        const rooms = data.serving || [];
+        // Work out what changed BEFORE rebuilding the list: the flash and the
+        // spoken announcement both need to know, and after the innerHTML swap
+        // the old tokens are gone.
+        const changed = new Map();
+        rooms.forEach((r) => {
+          const key = r.queue || r.room || '';
+          if (lastTokenByRoom.has(key) && lastTokenByRoom.get(key) !== r.token) changed.set(key, r);
+          lastTokenByRoom.set(key, r.token);
+        });
+
+        roomsEl.innerHTML = rooms.map((r) => {
+          const key = r.queue || r.room || '';
+          const cls = ['room-card'];
+          if (changed.has(key)) cls.push('call-flash');
+          if (r.status === 'called') cls.push('room-card-called');
+          return `
+            <div class="${cls.join(' ')}">
+              <p class="text-[10px] font-bold uppercase tracking-[0.18em] text-teal-400">${tvEsc(r.room || 'Room')}</p>
+              <p class="tv-token mt-1 text-5xl leading-none text-white">${tvEsc(r.token || '\u2014')}</p>
+              <p class="mt-1 truncate text-[11px] text-slate-400">${tvEsc(r.doctor || r.queue || '')}</p>
+            </div>`;
+        }).join('') || '<p class="text-slate-500">No session open yet.</p>';
+
+        // Announce the rooms whose token just changed, so nobody misses a call
+        // because they were looking at the wrong card.
+        changed.forEach((r) => speak(r));
+      }
+
       const next = $('[data-tv-next]');
       if (next) {
         next.innerHTML = (data.upcoming || []).map((u) => `
           <div class="flex items-center gap-4 rounded-xl bg-white/5 px-5 py-3">
-            <span class="tv-token text-3xl text-white">${u.token}</span>
-            <span class="text-sm text-slate-400">${u.room || ''}</span>
+            <span class="tv-token text-3xl text-white">${tvEsc(u.token)}</span>
+            <span class="min-w-0 text-sm text-slate-400">
+              <span class="block truncate text-slate-300">${tvEsc(u.doctor || '')}</span>
+              ${tvEsc(u.room || '')}
+            </span>
           </div>`).join('') || '<p class="text-slate-500">No one waiting</p>';
       }
       // Announced delays and paused queues are the clinic talking to the room.
@@ -739,4 +1092,394 @@
   window.addEventListener('offline', paintNet);
   paintNet();
   render();
+})();
+
+/* ---- sign-in demo chips ------------------------------------------------
+   Inline handlers are impossible on this page: the response ships
+   `Content-Security-Policy: script-src 'self'`, so the fill lives here, in
+   an external file — same reason every other script is external. */
+(function () {
+  document.addEventListener('click', function (e) {
+    var btn = e.target && e.target.closest ? e.target.closest('[data-demo-email]') : null;
+    if (!btn) return;
+    var form = btn.closest('form');
+    var email = (form && form.querySelector('[name="email"]')) || document.getElementById('email');
+    if (email) {
+      email.value = btn.getAttribute('data-demo-email') || '';
+      email.focus();
+    }
+    // Only fill a password if one was actually supplied. No page ships one any
+    // more, and defaulting to '' would silently wipe what the user just typed.
+    var pass = btn.getAttribute('data-demo-pass');
+    if (pass !== null) {
+      var password = (form && form.querySelector('[name="password"]')) || document.getElementById('password');
+      if (password) password.value = pass;
+    }
+  });
+})();
+
+
+  /* ------------------------------------------- priority rules: reordering
+     The ranked list is the clinic's policy, so it is editable in place.
+     Drag is the fast path and the up/down buttons are the keyboard path;
+     both end at POST /queues/priority-rules/reorder with the full order, so
+     the two can never disagree about what the list is.
+
+     Drag is an enhancement only — with no pointer, or no JS, the buttons
+     still work and the page is fully usable. */
+  (function () {
+    const list = document.querySelector('[data-rule-list]');
+    if (!list) return;
+
+    const form = document.querySelector('[data-rule-form]');
+    const rows = () => Array.from(list.querySelectorAll('[data-rule-row]'));
+    let dragging = null;
+
+    function clearMarks() {
+      rows().forEach((r) => r.classList.remove('is-dragging', 'is-drop-target'));
+    }
+
+    function currentOrder() {
+      return rows().map((r) => r.getAttribute('data-rule-row'));
+    }
+
+    async function sendOrder(order) {
+      const body = new URLSearchParams();
+      body.set('_token', csrf);
+      body.set('order', order.join(','));
+      const res = await fetch('/queues/priority-rules/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+        body: body.toString(),
+        credentials: 'same-origin',
+      });
+      return res.ok;
+    }
+
+    rows().forEach((row) => {
+      row.addEventListener('dragstart', (ev) => {
+        dragging = row;
+        row.classList.add('is-dragging');
+        if (ev.dataTransfer) {
+          ev.dataTransfer.effectAllowed = 'move';
+          // Firefox refuses to start a drag with an empty payload.
+          ev.dataTransfer.setData('text/plain', row.getAttribute('data-rule-row') || '');
+        }
+      });
+
+      row.addEventListener('dragend', () => {
+        dragging = null;
+        clearMarks();
+      });
+
+      row.addEventListener('dragover', (ev) => {
+        if (!dragging || dragging === row) return;
+        ev.preventDefault();
+        if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+        clearMarks();
+        dragging.classList.add('is-dragging');
+        row.classList.add('is-drop-target');
+      });
+
+      row.addEventListener('drop', async (ev) => {
+        if (!dragging || dragging === row) return;
+        ev.preventDefault();
+
+        // Move the dragged row to where it was dropped, then send the whole
+        // list rather than a delta: two staff reordering at once is far safer
+        // as two whole lists than as two patches of each other.
+        const box = row.getBoundingClientRect();
+        const after = ev.clientY > box.top + box.height / 2;
+        list.insertBefore(dragging, after ? row.nextSibling : row);
+
+        clearMarks();
+        // Renumber immediately so the position shown matches what was saved,
+        // even before a reload.
+        rows().forEach((r, i) => {
+          const badge = r.querySelector('.tabular');
+          if (badge) badge.textContent = String(i + 1);
+        });
+
+        const ok = await sendOrder(currentOrder());
+        if (!ok) {
+          toast('Could not save the new order. Reloading.', 'error');
+          window.location.reload();
+          return;
+        }
+        toast('Order saved. It applies from the next token.', 'success', 2400);
+      });
+    });
+
+    list.addEventListener('dragover', (ev) => ev.preventDefault());
+
+    // Degrees in, tenths out. The column is an INTEGER so a 39.0 threshold
+    // is exact; the form is for people, who think in degrees.
+    if (form) {
+      form.addEventListener('submit', function () {
+        ['min', 'max'].forEach(function (prefix) {
+          const visible = form.querySelector('[name="' + prefix + '_temp"]');
+          if (!visible) return;
+          const hidden = document.createElement('input');
+          hidden.type = 'hidden';
+          hidden.name = prefix + '_temp_x10';
+          const value = (visible.value || '').trim();
+          hidden.value = value === '' ? '' : String(Math.round(parseFloat(value) * 10));
+          form.appendChild(hidden);
+          // Rename so a degree string never reaches the service unscaled.
+          visible.name = prefix + '_temp_degrees';
+        });
+      });
+    }
+  })();
+
+/* --------------------------------------------- patients: add-to-register */
+/* A plain toggle, kept here rather than inline so the CSP does not need
+   'unsafe-inline'. No JS means no panel — so the panel starts hidden only
+   when JS is present, and the page stays usable without it. */
+(function () {
+  var panel = document.getElementById('add-patient-panel');
+  if (!panel) return;
+
+  function open() {
+    panel.classList.remove('hidden');
+    var name = panel.querySelector('#ap-name');
+    if (name) name.focus();
+  }
+  function close() {
+    panel.classList.add('hidden');
+    var form = panel.querySelector('form');
+    if (form) form.reset();
+  }
+
+  document.addEventListener('click', function (e) {
+    if (!e.target || !e.target.closest) return;
+    if (e.target.closest('[data-open-add-patient]')) { open(); return; }
+    if (e.target.closest('[data-close-add-patient]')) { close(); return; }
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !panel.classList.contains('hidden')) close();
+  });
+})();
+
+
+/* ------- token desk: pick a found patient -------
+ * Moved here from an inline <script> in new.php.
+ *
+ * The app sends `script-src 'self'` with no 'unsafe-inline' and no nonce, so
+ * an inline block is refused silently: no console entry the nurse would see,
+ * no error page, and a page that looks finished and simply does not respond.
+ * That is how the phone board came to render once and never update, and how
+ * the token desk came to find a patient and then create a duplicate anyway.
+ *
+ * Each block runs only on its own page, so adding them costs one existence
+ * check per page load everywhere else. */
+(function () {
+  if (!document.getElementById('patient_id')) return;
+  (function () {
+    const patientId = document.getElementById('patient_id');
+    const fields = document.getElementById('new-patient-fields');
+    const picked = document.getElementById('picked-patient');
+    const nameEl = document.querySelector('[data-picked-name]');
+    const phoneEl = document.querySelector('[data-picked-phone]');
+
+    function pick(btn) {
+      patientId.value = btn.dataset.pickPatient;
+      nameEl.textContent = btn.dataset.pickName;
+      phoneEl.textContent = btn.dataset.pickPhone || 'no phone on file';
+      picked.classList.remove('hidden');
+      fields.classList.add('hidden');
+      document.querySelectorAll('[data-pick-patient]').forEach((b) => b.classList.remove('border-teal-400', 'bg-teal-50/40'));
+      btn.classList.add('border-teal-400', 'bg-teal-50/40');
+      picked.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
+    document.querySelectorAll('[data-pick-patient]').forEach((btn) => {
+      btn.addEventListener('click', () => pick(btn));
+    });
+
+    document.getElementById('clear-picked').addEventListener('click', () => {
+      patientId.value = '';
+      picked.classList.add('hidden');
+      fields.classList.remove('hidden');
+      document.getElementById('full_name').focus();
+    });
+
+    // Alt+Enter submits from anywhere in the form (receptionist speed)
+    document.addEventListener('keydown', (e) => {
+      if (e.altKey && e.key === 'Enter') {
+        document.getElementById('token-form').requestSubmit();
+      }
+    });
+
+    // Phone: show what will be used for the link, and validate length inline.
+    const phone = document.querySelector('[data-phone]');
+    const hint = document.getElementById('phone-hint');
+    if (phone) {
+      phone.addEventListener('blur', () => {
+        const digits = phone.value.replace(/\D/g, '');
+        if (digits === '') {
+          hint.textContent = 'Optional, for SMS tracking link';
+          hint.className = 'help';
+        } else if (digits.length < 9) {
+          hint.textContent = 'That looks short — use 07X XXX XXXX';
+          hint.className = 'help text-rose-600';
+        } else {
+          hint.textContent = 'Tracking link will be sent to this number';
+          hint.className = 'help text-teal-700';
+        }
+      });
+    }
+  })();
+})();
+
+/* ------- phone waiting-room board polling -------
+ * Moved here from an inline <script> in live.php.
+ *
+ * The app sends `script-src 'self'` with no 'unsafe-inline' and no nonce, so
+ * an inline block is refused silently: no console entry the nurse would see,
+ * no error page, and a page that looks finished and simply does not respond.
+ * That is how the phone board came to render once and never update, and how
+ * the token desk came to find a patient and then create a duplicate anyway.
+ *
+ * Each block runs only on its own page, so adding them costs one existence
+ * check per page load everywhere else. */
+(function () {
+  if (!document.body || !document.body.dataset.boardKey) return;
+  (function () {
+    var key = document.body.dataset.boardKey;
+    var api = '/api/display/' + encodeURIComponent(key);
+    var servingTok = document.getElementById('phone-serving-token');
+    var servingRoom = document.getElementById('phone-serving-room');
+    var servingDoc = document.getElementById('phone-serving-doctor');
+    var soloBlock = document.getElementById('phone-serving-solo');
+    var roomsBlock = document.getElementById('phone-serving-rooms');
+    var upcoming = document.getElementById('phone-upcoming-list');
+    var empty = document.getElementById('phone-empty');
+    var waitingCount = document.getElementById('phone-waiting-count');
+    var status = document.getElementById('phone-status');
+    var notices = document.getElementById('phone-notices');
+    var noticesText = document.getElementById('phone-notices-text');
+
+    function render(data) {
+      if (!data || !data.ok) {
+        status.textContent = 'Offline — try again shortly.';
+        return;
+      }
+
+      var now = new Date();
+      document.getElementById('phone-clock').textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      // Now serving — identical payload to the TV board.
+      if (data.now_serving) {
+        servingTok.textContent = data.now_serving.token || '—';
+        servingRoom.textContent = data.now_serving.room || '—';
+        servingDoc.textContent = data.now_serving.doctor ? ('With ' + data.now_serving.doctor) : '';
+        status.textContent = 'Live';
+      } else {
+        servingTok.textContent = '—';
+        servingRoom.textContent = '—';
+        servingDoc.textContent = '';
+        status.textContent = 'No one serving yet';
+      }
+
+      // Several rooms: one row per doctor. The hero stays for a solo practice,
+      // where a list of one would just be the same thing twice.
+      var rooms = data.serving || [];
+      if (data.solo === true || rooms.length <= 1) {
+        soloBlock.classList.remove('hidden');
+        roomsBlock.classList.add('hidden');
+      } else {
+        soloBlock.classList.add('hidden');
+        roomsBlock.classList.remove('hidden');
+        roomsBlock.innerHTML = rooms.map(function (r) {
+          return '<li class="flex items-center justify-between gap-3 py-2.5">' +
+              '<span class="min-w-0">' +
+                '<span class="block text-[13px] font-semibold text-slate-800">' + ehtml(r.doctor || r.queue || '') + '</span>' +
+                '<span class="block text-[11px] text-slate-500">' + ehtml(r.room || '') + (r.status === 'called' ? ' · called now' : '') + '</span>' +
+              '</span>' +
+              '<span class="font-mono text-2xl font-bold text-slate-900 phone-upcoming">' + ehtml(r.token || '—') + '</span>' +
+            '</li>';
+        }).join('');
+      }
+
+      // Coming up — same tokens as the TV.
+      upcoming.innerHTML = '';
+      var list = data.upcoming || [];
+      if (list.length === 0) {
+        empty.classList.remove('hidden');
+      } else {
+        empty.classList.add('hidden');
+        list.forEach(function (item) {
+          var li = document.createElement('li');
+          li.className = 'flex items-center justify-between p-3 rounded-lg border border-slate-100 bg-slate-50';
+          li.innerHTML =
+            '<span class="font-mono font-bold text-slate-900 phone-upcoming">' + ehtml(item.token || '—') + '</span>' +
+            '<span class="min-w-0 text-right">' +
+              '<span class="block phone-chip text-slate-700">' + ehtml(item.doctor || '') + '</span>' +
+              '<span class="block text-[11px] text-slate-500">' + ehtml(item.room || '') + '</span>' +
+            '</span>';
+          upcoming.appendChild(li);
+        });
+        waitingCount.textContent = list.length + ' ' + (list.length === 1 ? 'waiting' : 'waiting');
+      }
+
+      // Notices — delays and pauses, same as the TV.
+      var bits = [];
+      (data.delays || []).forEach(function (d) {
+        bits.push(d.queue + ' is running ' + d.minutes + ' min late' + (d.note ? ' — ' + d.note : ''));
+      });
+      (data.paused || []).forEach(function (q) {
+        bits.push(q + ' is paused');
+      });
+      if (bits.length) {
+        notices.classList.remove('hidden');
+        noticesText.textContent = bits.join(' · ');
+      } else {
+        notices.classList.add('hidden');
+      }
+    }
+
+    function ehtml(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function fetchBoard() {
+      fetch(api, { credentials: 'same-origin', cache: 'no-store' }).then(function (r) {
+        return r.ok ? r.json() : null;
+      }).then(render).catch(function () {
+        status.textContent = 'Offline — try again shortly.';
+      });
+    }
+
+    fetchBoard();
+    setInterval(fetchBoard, 6000);
+  })();
+})();
+
+/* ------- TV voice announcements toggle -------
+ * Moved here from an inline <script> in screen.php.
+ *
+ * The app sends `script-src 'self'` with no 'unsafe-inline' and no nonce, so
+ * an inline block is refused silently: no console entry the nurse would see,
+ * no error page, and a page that looks finished and simply does not respond.
+ * That is how the phone board came to render once and never update, and how
+ * the token desk came to find a patient and then create a duplicate anyway.
+ *
+ * Each block runs only on its own page, so adding them costs one existence
+ * check per page load everywhere else. */
+(function () {
+  var btn0 = document.getElementById('tv-speech');
+      if (!btn0) return;
+    // Voice announcements toggle (persisted; some clinics prefer silence).
+    (function () {
+      var btn = document.getElementById('tv-speech');
+      var on = localStorage.getItem('qp_speech') !== 'off';
+      function render() { btn.textContent = 'Voice announcements: ' + (on ? 'on' : 'off'); }
+      btn.addEventListener('click', function () {
+        on = !on;
+        localStorage.setItem('qp_speech', on ? 'on' : 'off');
+        render();
+      });
+      render();
+    })();
 })();

@@ -124,12 +124,23 @@ final class ClinicService
             Db::insert(
                 "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
                  VALUES (?,?,?,?, 'open', ?, ?, 0, 3, ?)",
-                [$clinicId, $doctorId, 'OPD — Consultation', 'consultation', Db::today(), strtoupper(substr($slug, 0, 1)), Db::now()]
+                [$clinicId, $doctorId, 'OPD — Consultation', 'consultation', Db::today(),
+                 (new DoctorService())->prefixFor($clinicId, $doctorId), Db::now()]
             );
 
             Db::insert(
                 "INSERT INTO settings (scope, owner_id, key_name, value) VALUES ('clinic', ?, 'onboarding', 'done')",
                 [$clinicId]
+            );
+
+            // The signup page promises a waiting-room display key, and until
+            // this row exists there is nothing for a patient to open: the
+            // board, the position screen and the phone board are all keyed off
+            // it. Creating it on demand the first time somebody asked left a
+            // new clinic with a promise and no board.
+            Db::insert(
+                "INSERT INTO settings (scope, owner_id, key_name, value) VALUES ('clinic', ?, 'display_token', ?)",
+                [$clinicId, Str::urlToken(20)]
             );
 
             return ['clinic_id' => $clinicId, 'slug' => $slug, 'owner_email' => mb_strtolower($data['email'])];

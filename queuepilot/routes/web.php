@@ -16,6 +16,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BillingController;
 use App\Http\Controllers\ClinicController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DoctorController;
 use App\Http\Controllers\DisplayController;
 use App\Http\Controllers\EmailVerificationController;
 use App\Http\Controllers\MonitorController;
@@ -86,6 +87,14 @@ Router::post('/locale', [AuthController::class, 'locale']);
 
 /* ------------------------------------------------------------ reception */
 Router::get('/app', [DashboardController::class, 'index'], ['auth' => true, 'ability' => 'queue.operate']);
+
+/* The doctor workspace. Kept separate from the reception dashboard on
+   purpose: the PDF asks for a dedicated, minimal doctor experience with its
+   own navigation, not the clinic board with a few links hidden. */
+Router::get('/doctor', [DoctorController::class, 'today'], ['auth' => true, 'ability' => 'queue.consult']);
+Router::get('/doctor/schedule', [DoctorController::class, 'schedule'], ['auth' => true, 'ability' => 'queue.consult']);
+Router::get('/doctor/patients', [DoctorController::class, 'patients'], ['auth' => true, 'ability' => 'queue.consult']);
+Router::get('/doctor/profile', [DoctorController::class, 'profile'], ['auth' => true, 'ability' => 'queue.consult']);
 Router::get('/queue/new', [QueueController::class, 'newPatient'], ['auth' => true, 'ability' => 'queue.issue']);
 Router::post('/queue/new', [QueueController::class, 'createEntry'], ['auth' => true, 'ability' => 'queue.issue']);
 Router::get('/queue', [QueueController::class, 'show'], ['auth' => true, 'ability' => 'queue.operate']);
@@ -104,12 +113,16 @@ Router::post('/queue/session/start', [QueueController::class, 'startSession'], [
 Router::post('/queue/session', [QueueController::class, 'sessionControl'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/delay', [QueueController::class, 'announceDelay'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::get('/display', [DisplayController::class, 'screen'], ['auth' => true]);
+Router::get('/settings/displays', [DisplayController::class, 'displays'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/display/rotate', [DisplayController::class, 'rotate'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/display/keys', [DisplayController::class, 'issueKey'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/display/keys/{id}/revoke', [DisplayController::class, 'revokeKey'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/display/kiosk', [DisplayController::class, 'kioskIssuing'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/display/kiosk/off', [DisplayController::class, 'kioskRevoke'], ['auth' => true, 'ability' => 'clinic.manage']);
 
 /* ------------------------------------------------------- patients, appts */
 Router::get('/patients', [PatientController::class, 'index'], ['auth' => true, 'ability' => 'patient.manage']);
+Router::post('/patients', [PatientController::class, 'store'], ['auth' => true, 'ability' => 'patient.manage']);
 Router::get('/patients/{id}', [PatientController::class, 'show'], ['auth' => true, 'ability' => 'patient.manage']);
 Router::post('/patients/{id}', [PatientController::class, 'update'], ['auth' => true, 'ability' => 'patient.manage']);
 
@@ -138,6 +151,10 @@ Router::post('/queues/{id}/rename', [QueueConfigController::class, 'rename'], ['
 Router::get('/queues/priority-rules', [PriorityRuleController::class, 'index'], ['auth' => true]);
 Router::post('/queues/priority-rules', [PriorityRuleController::class, 'save'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/queues/priority-rules/{id}/toggle', [PriorityRuleController::class, 'toggle'], ['auth' => true, 'ability' => 'clinic.manage']);
+// The list is the clinic's ranked policy, so its order is editable data.
+// POST /reorder takes the whole list; POST /{id}/move is the keyboard path.
+Router::post('/queues/priority-rules/reorder', [PriorityRuleController::class, 'reorder'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/queues/priority-rules/{id}/move', [PriorityRuleController::class, 'move'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/queues/priority-rules/{id}/delete', [PriorityRuleController::class, 'delete'], ['auth' => true, 'ability' => 'clinic.manage']);
 
 // Service workflows — the steps a visit must pass before it is complete.
@@ -211,6 +228,9 @@ Router::post('/settings/staff', [ClinicController::class, 'storeStaff'], ['auth'
 Router::post('/settings/invites', [ClinicController::class, 'inviteStaff'], ['auth' => true, 'ability' => 'staff.manage']);
 Router::post('/settings/invites/{id}/revoke', [ClinicController::class, 'revokeInvite'], ['auth' => true, 'ability' => 'staff.manage']);
 Router::get('/settings/templates', [ClinicController::class, 'templates'], ['auth' => true]);
+Router::get('/settings/integrations', [ClinicController::class, 'integrations'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/settings/integrations/connect', [ClinicController::class, 'connectIntegration'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/settings/integrations/disconnect', [ClinicController::class, 'disconnectIntegration'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/settings/templates', [ClinicController::class, 'saveTemplate'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/settings/templates/reset', [ClinicController::class, 'resetTemplate'], ['auth' => true, 'ability' => 'clinic.manage']);
 
@@ -267,6 +287,9 @@ Router::post('/admin/support/{id}/status', [SupportController::class, 'setStatus
 Router::post('/admin/billing/{id}/verify', [AdminBillingController::class, 'verify'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/admin/billing/{id}/reject', [AdminBillingController::class, 'reject'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::get('/admin/features', [AdminController::class, 'features'], ['auth' => true, 'roles' => ['super_admin']]);
+// The same checks /api/health returns, laid out for a person. Super admin
+// only: the checks name tenants, queue depth and staff.
+Router::get('/admin/monitor', [AdminController::class, 'monitor'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/admin/features/{clinicId}', [AdminController::class, 'saveFeature'], ['auth' => true, 'roles' => ['super_admin'], 'csrf' => false]);
 Router::post('/admin/features/{clinicId}/unset', [AdminController::class, 'unsetFeature'], ['auth' => true, 'roles' => ['super_admin'], 'csrf' => false]);
 
@@ -283,6 +306,10 @@ Router::get('/settings/offline', [ClinicController::class, 'offline'], ['auth' =
 Router::get('/api/track/{token}', [ApiController::class, 'track']);
 Router::get('/api/display/{key}', [ApiController::class, 'display']);
 Router::get('/board/{key}', [DisplayController::class, 'publicScreen']);
+// Read-only "where do I stand?" for one patient. Keyed like the board so it
+// needs no sign-in and inherits the same revocation, and declared next to it
+// so nothing broader can shadow the {key} segment.
+Router::get('/board/{key}/position', [DisplayController::class, 'position']);
 Router::get('/live/{key}', [DisplayController::class, 'live']);
 
 // Online booking: 404 for clinics that have not opted in (see PublicController).

@@ -158,13 +158,13 @@ $glance = [
       <section class="card p-3 min-[380px]:col-span-2 sm:p-4">
         <h2 class="text-[14px] font-bold tracking-tight text-ink-900 sm:text-[15px]">System status</h2>
         <div class="mt-2 flex flex-wrap items-center gap-x-6 gap-y-1.5">
-          <p class="flex min-w-0 items-center gap-1.5 text-[11.5px] font-semibold text-brand-700 sm:gap-2 sm:text-[12px]" data-live-text>
-            <svg class="h-[18px] w-[18px]"><use href="#i-shield-check"/></svg>
+          <p class="flex min-w-0 items-center gap-1.5 text-[11.5px] leading-[18px] font-semibold text-brand-700 sm:gap-2 sm:text-[12px]" data-live-text>
+            <svg class="h-[18px] w-[18px] shrink-0"><use href="#i-shield-check"/></svg>
             All systems operational
           </p>
           <p class="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-ink-500 sm:gap-2">
             Last updated: <span class="tabular" data-last-updated><?= e(date('g:i:s A')) ?></span>
-            <button type="button" data-refresh-now class="-m-2 inline-flex h-8 w-8 items-center justify-center rounded-lg text-ink-500 hover:bg-slate-100 hover:text-brand-700" aria-label="Refresh now">
+            <button type="button" data-refresh-now class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-500 transition hover:bg-slate-100 hover:text-brand-700" aria-label="Refresh now">
               <svg class="h-3.5 w-3.5"><use href="#i-refresh"/></svg>
             </button>
           </p>

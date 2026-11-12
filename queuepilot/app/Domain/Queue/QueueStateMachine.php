@@ -123,7 +123,10 @@ final class QueueStateMachine
         return match ($status) {
             self::WAITING => ['call', 'skip', 'no_show', 'cancel', 'priority', 'transfer', 'hold'],
             self::CALLED => ['start', 'recall', 'skip', 'no_show', 'cancel', 'transfer', 'hold'],
-            self::IN_CONSULTATION => ['complete', 'transfer', 'cancel'],
+            // `complete_next` finishes this visit and calls the next patient as
+            // one deliberate action. It is the *only* way the engine calls
+            // somebody without a separate press — completing alone never does.
+            self::IN_CONSULTATION => ['complete', 'complete_next', 'transfer', 'cancel'],
             self::SKIPPED => ['requeue', 'cancel'],
             self::NO_SHOW => ['requeue', 'cancel'],
             self::TRANSFERRED => ['requeue'],

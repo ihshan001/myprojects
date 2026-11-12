@@ -19,7 +19,7 @@ final class AuthController
             redirect(Auth::isSuper() ? '/admin' : '/app');
             return;
         }
-        view('auth/login', ['title' => 'Sign in', 'email' => '']);
+        view('auth/login', ['title' => 'Sign in', 'email' => ''], false);
     }
 
     public function login(): void
@@ -56,11 +56,28 @@ final class AuthController
         $intended = Session::takeFlash('intended');
         $target = is_string($intended) && str_starts_with($intended, '/') && !str_starts_with($intended, '//')
             ? $intended
-            : (Auth::isSuper() ? '/admin' : '/app');
+            : self::homeFor((string) Auth::role());
 
         $u = Auth::user();
         flash('success', 'Welcome back, ' . explode(' ', (string) $u['name'])[0] . '.');
         redirect($target);
+    }
+
+    /**
+     * Where a role should land after signing in.
+     *
+     * A doctor belongs in their own workspace, not on the reception board —
+     * the board is built around issuing tokens, which is the one thing a
+     * doctor cannot do. Sending them there first thing means their first
+     * screen is full of controls they are not allowed to use.
+     */
+    private static function homeFor(string $role): string
+    {
+        return match ($role) {
+            Auth::ROLE_DOCTOR => '/doctor',
+            Auth::ROLE_ADMIN, 'super_admin' => Auth::isSuper() ? '/admin' : '/app',
+            default => '/app',
+        };
     }
 
     public function logout(): void
@@ -133,7 +150,7 @@ final class AuthController
         $intended = Session::takeFlash('intended');
         $target = is_string($intended) && str_starts_with($intended, '/') && !str_starts_with($intended, '//')
             ? $intended
-            : (Auth::isSuper() ? '/admin' : '/app');
+            : self::homeFor((string) $user['role']);
         flash('success', 'Welcome back, ' . explode(' ', (string) $user['name'])[0] . '.');
         redirect($target);
     }

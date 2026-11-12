@@ -2,7 +2,7 @@
   "name": "queuepilot",
   "version": "1.0.0",
   "private": true,
-  "description": "QueuePilot — multi-tenant clinic queue management SaaS (PHP 8.3 + MySQL + Tailwind)",
+  "description": "QueuePilot \u2014 multi-tenant clinic queue management SaaS (PHP 8.3 + MySQL + Tailwind)",
   "type": "module",
   "scripts": {
     "dev": "node tools/serve.mjs",
@@ -13,18 +13,22 @@
     "fresh": "rm -f storage/db/queuepilot.sqlite* && npm run migrate && npm run seed",
     "worker": "node tools/php.mjs tools/queue-worker.php",
     "test": "node tools/php.mjs tests/run.php",
+    "test:tools": "node tests/form-parser.test.mjs",
+    "test:acceptance": "node tests/acceptance.mjs",
     "build": "npm run css && node tools/php.mjs tools/healthcheck.php",
     "health": "node tools/php.mjs tools/healthcheck.php",
     "lint": "node tools/lint.mjs",
     "icons": "node tools/gen-icons.mjs",
     "worker:loop": "node tools/php.mjs tools/queue-worker.php --loop 30",
     "security": "node tools/security-check.mjs",
-    "security:strict": "node tools/security-check.mjs --strict"
+    "security:strict": "node tools/security-check.mjs --strict",
+    "test:browser": "node tools/jsdom-check.mjs"
   },
   "devDependencies": {
     "qrcode-generator": "^1.4.4",
     "sharp": "^0.35.5",
-    "tailwindcss": "3.4.17"
+    "tailwindcss": "3.4.17",
+    "jsdom": "^31.0.0"
   },
   "dependencies": {
     "@php-wasm/node": "3.1.62",
