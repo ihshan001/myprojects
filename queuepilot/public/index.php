@@ -54,13 +54,42 @@ View::share('activeBranchId', Auth::clinicId());
 View::share('requestId', $requestId);
 View::share('debug', $config['app']['debug']);
 
-// SaaS gate: a suspended clinic can sign in to billing, nothing else.
+// SaaS gate. Three states, three different doors, and one rule: a clinic that
+// has not been approved can be signed in but cannot work.
+//
+//   pending / declined — reach ONLY the status page. A clinic waiting for a
+//                        decision should be able to refresh and see where it
+//                        stands; it must not reach /app, and it must not sit
+//                        on a blank 403 wondering whether signup worked.
+//   suspended          — reach billing so it can pay, plus its own status page.
+//   closed             — reach the status page only; the data is on a clock.
+//
+// Everything else is redirected by string comparison on Request::path(), which
+// is the same mechanism the suspended rule already used. It is a coarse gate,
+// not the authorisation model: roles still decide what an approved user may
+// do once they are through.
 if (Auth::check() && !Auth::isSuper()) {
     $clinic = Auth::clinic();
-    if ($clinic && in_array($clinic['billing_status'], ['suspended', 'cancelled'], true)) {
-        $allowed = ['/billing', '/logout', '/locale'];
+    $status = $clinic['billing_status'] ?? 'active';
+
+    $alwaysAllowed = ['/logout', '/locale', '/onboarding-status'];
+
+    if (in_array($status, ['pending', 'declined'], true)) {
+        $allowed = array_merge($alwaysAllowed, ['/onboarding-status']);
+        if (!in_array(Request::path(), $allowed, true)) {
+            Response::redirect('/onboarding-status');
+            exit;
+        }
+    } elseif (in_array($status, ['suspended', 'cancelled'], true)) {
+        $allowed = array_merge($alwaysAllowed, ['/billing', '/onboarding-status']);
         if (!in_array(Request::path(), $allowed, true)) {
             Response::redirect('/billing?suspended=1');
+            exit;
+        }
+    } elseif ($status === 'closed') {
+        $allowed = array_merge($alwaysAllowed, ['/onboarding-status']);
+        if (!in_array(Request::path(), $allowed, true)) {
+            Response::redirect('/onboarding-status');
             exit;
         }
     }

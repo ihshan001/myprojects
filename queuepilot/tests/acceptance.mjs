@@ -211,8 +211,43 @@ async function main() {
     });
     const bounced = landed(res);
     check('signup is accepted', bounced === null, bounced || '');
-    check('and the new owner is signed in, not left on the form',
-      await owner.isSignedIn(), 'GET /app did not answer 200');
+
+    // Signing up no longer buys access. This is the whole approval model, so
+    // it is asserted rather than assumed: if this ever passes, a stranger can
+    // put real patients in a queue without a decision being made.
+    check('and the owner is signed in, so they can track their application',
+      (await owner.get('/onboarding-status')).status === 200,
+      'the status page did not answer 200');
+    check('but cannot reach the clinic system before approval',
+      !(await owner.isSignedIn()), 'GET /app answered 200 for an unapproved clinic');
+
+    const pending = await owner.get('/onboarding-status');
+    check('the status page says what they are waiting for',
+      /awaiting approval|under review/i.test(pending.html));
+
+    async function approveThisClinic() {
+      await platform.get('/login');
+      const t = await platform.csrf('/login');
+      await platform.post('/login', {
+        _token: t, email: PLATFORM_EMAIL, password: PLATFORM_PASSWORD,
+      });
+      const queuePage = await platform.get('/admin/clinics');
+      check('the application appears in the platform decision queue',
+        queuePage.html.includes(clinicName), 'the clinic was not listed as awaiting a decision');
+      const id = /action="\/admin\/clinics\/(\d+)"[^>]*>\s*<input[^>]*name="action" value="approve"/s
+        .exec(queuePage.html)?.[1]
+        || /admin\/clinics\/(\d+)"[^\n]*\n[^\n]*name="action" value="approve"/.exec(queuePage.html)?.[1];
+      const pt = await platform.csrf('/admin/clinics');
+      if (id) {
+        await platform.post(`/admin/clinics/${id}`, { _token: pt, action: 'approve' });
+      }
+      return id;
+    }
+
+    const approvedId = await approveThisClinic();
+    check('the platform can approve it', Boolean(approvedId), 'no approve form was found on the queue page');
+    check('and the clinic is live immediately after approval',
+      await owner.isSignedIn(), 'GET /app did not answer 200 after approval');
   }
 
   /* -------------------------------------------------- 2. configure clinic */

@@ -78,17 +78,19 @@ final class ClinicService
             }
 
             $plan = Db::one('SELECT * FROM plans WHERE code = ?', [$planCode]);
-            $trialEnds = date('Y-m-d', strtotime('+14 days'));
 
             $clinicId = Db::insert(
                 'INSERT INTO clinics (slug, name, phone, email, city, district, timezone, locale, plan_id,
-                    billing_status, trial_ends_on, token_prefix, created_at, updated_at)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    billing_status, token_prefix, created_at, updated_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
                 [
                     $slug, $data['name'], $data['phone'] ?? null, $data['email'] ?? null,
                     $data['city'] ?? null, $data['district'] ?? null,
                     'Asia/Colombo', 'en', $plan['id'] ?? null,
-                    'trial', $trialEnds, strtoupper(substr($slug, 0, 1)),
+                    // Not 'trial'. A trial is a platform decision, granted
+                    // deliberately for a named clinic, not something anybody
+                    // gets by filling in the signup form.
+                    'pending', strtoupper(substr($slug, 0, 1)),
                     Db::now(), Db::now(),
                 ]
             );

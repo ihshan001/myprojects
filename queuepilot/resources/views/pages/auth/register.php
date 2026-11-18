@@ -73,7 +73,7 @@ $val = static fn (string $k, string $d = ''): string => (string) ($old[$k] ?? $d
         Already have an account? <a href="/login">Sign in</a>
       </p>
       <h1 class="lp-display auth-title">Create your clinic</h1>
-      <p class="auth-sub">14 days free. No card. Your first queue opens automatically.</p>
+      <p class="auth-sub">No card required. A person reviews every clinic by hand, usually within one working day.</p>
 
       <?php if ($errors !== []): ?>
         <div class="auth-errors" role="alert">
@@ -154,7 +154,7 @@ $val = static fn (string $k, string $d = ''): string => (string) ($old[$k] ?? $d
         </fieldset>
 
         <button class="lp-btn w-full" type="submit">
-          Create clinic &amp; start trial
+          Submit clinic application
           <svg class="h-4 w-4"><use href="#i-arrow-right"/></svg>
         </button>
         <p class="auth-note">

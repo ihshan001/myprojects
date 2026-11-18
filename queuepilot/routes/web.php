@@ -34,6 +34,7 @@ use App\Http\Controllers\AppointmentPolicyController;
 use App\Http\Controllers\BreakController;
 use App\Http\Controllers\IncidentController;
 use App\Http\Controllers\OnboardingController;
+use App\Http\Controllers\OnboardingStatusController;
 use App\Http\Controllers\PriorityRuleController;
 use App\Http\Controllers\WorkflowController;
 use App\Http\Controllers\QueueConfigController;
@@ -163,6 +164,9 @@ Router::post('/queues/workflows', [WorkflowController::class, 'save'], ['auth' =
 Router::post('/queues/workflows/{id}/delete', [WorkflowController::class, 'delete'], ['auth' => true, 'ability' => 'clinic.manage']);
 
 // Getting started — a checklist measured from clinic data, not ticks.
+// Reachable in every clinic state, including pending and declined: it is the
+// one page the front-controller gate lets an unapproved clinic open.
+Router::get('/onboarding-status', [OnboardingStatusController::class, 'index'], ['auth' => true]);
 Router::get('/getting-started', [OnboardingController::class, 'index'], ['auth' => true]);
 Router::get('/getting-started/display', [OnboardingController::class, 'seenDisplay'], ['auth' => true]);
 

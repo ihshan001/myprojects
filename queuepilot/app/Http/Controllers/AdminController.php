@@ -141,6 +141,10 @@ final class AdminController
             'title' => 'Clinics',
             'clinics' => $clinics,
             'plans' => Db::all('SELECT * FROM plans ORDER BY sort_order'),
+            // The decision queue, oldest first. A separate list rather than a
+            // filter on the table above: work to be done should not be mixed
+            // in with the record of work already done.
+            'awaiting' => (new LifecycleService())->awaitingDecision(),
         ]);
     }
 
@@ -154,6 +158,28 @@ final class AdminController
         }
 
         $action = Request::string('action');
+
+        // Approval and refusal. These are the only way a clinic leaves
+        // 'pending', so they are handled before the edit actions below — an
+        // unapproved clinic has nothing worth editing yet.
+        if (in_array($action, ['approve', 'trial', 'decline'], true)) {
+            $lifecycle = new LifecycleService();
+            $result = match ($action) {
+                'approve' => $lifecycle->approve($clinicId, Auth::id()),
+                'trial'   => $lifecycle->grantTrial($clinicId, (int) Request::input('trial_days', 14), Auth::id()),
+                'decline' => $lifecycle->decline($clinicId, (string) Request::input('reason', ''), Auth::id()),
+            };
+            flash($result['ok'] ? 'success' : 'error', $result['ok']
+                ? match ($action) {
+                    'approve' => $clinic['name'] . ' is approved and live.',
+                    'trial'   => $clinic['name'] . ' is on a trial until ' . ($result['trial_ends_on'] ?? '') . '.',
+                    'decline' => $clinic['name'] . ' was declined. They can see the reason you gave.',
+                }
+                : $result['error']);
+            redirect('/admin/clinics');
+            return;
+        }
+
         if ($action === 'suspend' || $action === 'activate') {
             $status = $action === 'suspend' ? 'suspended' : 'active';
             // Data is preserved in both directions — suspension is a billing

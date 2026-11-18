@@ -4997,14 +4997,21 @@ Assert::test('revenue is billed at each doctor\'s fee, and says so', function ()
     // ninety for no reason anybody can reproduce. A label is an identity
     // here, not something that needs to be unpredictable.
     $revSeq = 0;
-    $mk = static function (string $status, int $minutesAgo) use ($clinicId, $queueId, $today, &$revSeq): int {
+    // Anchored to midday of the range being asked about, not to "now".
+    // Subtracting minutes from the wall clock put two of these visits on
+    // yesterday whenever the suite ran between midnight and 02:00, so the
+    // test failed for a reason that had nothing to do with revenue. The
+    // ordering between the visits is what matters, and midday keeps every
+    // one of them inside the day being reported.
+    $revBase = strtotime($today . ' 12:00:00');
+    $mk = static function (string $status, int $minutesAgo) use ($clinicId, $queueId, $revBase, &$revSeq): int {
         $revSeq++;
         $pid = (int) Db::insert(
             'INSERT INTO patients (clinic_id, code, full_name, phone, created_at, updated_at) VALUES (?,?,?,?,?,?)',
             [$clinicId, 'R' . $revSeq . substr(md5((string) $revSeq), 0, 4), 'Rev Patient ' . $revSeq,
              '+94 77 ' . (1000000 + $revSeq), Db::now(), Db::now()]
         );
-        $finished = date('Y-m-d H:i:s', time() - $minutesAgo * 60);
+        $finished = date('Y-m-d H:i:s', $revBase - $minutesAgo * 60);
         return Db::insert(
             'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status, priority,
                 sort_weight, source, joined_at, finished_at, track_token, version)
@@ -5127,14 +5134,120 @@ Assert::test('homepage prices and limits are read from the plan row', function (
     }
 });
 
-Assert::test('the homepage advertises the trial signup actually grants', function () use ($landingCopy): void {
-    $svc = (string) file_get_contents(QP_ROOT . '/app/Services/ClinicService.php');
-    Assert::true(preg_match("~strtotime\('\+(\d+) days'\)~", $svc, $m) === 1, 'the trial length is readable from the signup code');
-    $days = (int) ($m[1] ?? 0);
-    Assert::true($days > 0, 'a real trial length was found');
+Assert::test('the homepage promises review, because signup no longer grants access', function () use ($landingCopy): void {
+    // Registration used to hand out a working session and a 14-day trial, so
+    // the homepage could advertise "14-day free trial" and be telling the
+    // truth. Neither is true any more: a clinic lands in an approval queue,
+    // and a trial is a platform decision. A landing page that still offered
+    // instant access would be the first lie a customer met.
     $code = $landingCopy();
-    Assert::true(strpos($code, $days . '-day free trial') !== false, 'the CTA matches the granted trial');
-    Assert::true(strpos($code, $days . ' days, full access') !== false, 'so does the reassurance line');
+    Assert::true(stripos($code, 'free trial') === false, 'the page no longer sells a trial it cannot grant');
+    Assert::true(
+        preg_match('~14[ -]?day[^<]{0,20}(trial|free)|(trial|free)[^<]{0,20}14[ -]?day~i', $code) === 0,
+        'nor a trial duration nobody is promised'
+    );
+
+    $svc = (string) file_get_contents(QP_ROOT . '/app/Services/ClinicService.php');
+    Assert::true(strpos($svc, "'pending'") !== false, 'signup writes a pending clinic');
+    Assert::true(
+        preg_match('~billing_status, token_prefix~', $svc) === 1,
+        'and no longer writes a trial date at signup'
+    );
+});
+
+Assert::test('a pending clinic cannot reach the clinic system', function (): void {
+    // The whole point of the approval queue. Asserted against the front
+    // controller rather than a controller, because the gate is what makes it
+    // true for every route at once — including ones written later by somebody
+    // who has never heard of this test.
+    $index = (string) file_get_contents(QP_ROOT . '/public/index.php');
+    Assert::true(strpos($index, "'pending'") !== false, 'the front controller knows about pending');
+    Assert::true(strpos($index, "'declined'") !== false, 'and about declined');
+    Assert::true(strpos($index, '/onboarding-status') !== false, 'and sends them to a page that explains why');
+});
+
+Assert::test('approval, trial and decline are the only ways out of pending', function (): void {
+    $lifecycle = (string) file_get_contents(QP_ROOT . '/app/Services/LifecycleService.php');
+    Assert::true(strpos($lifecycle, 'public function approve(') !== false, 'there is an approve decision');
+    Assert::true(strpos($lifecycle, 'public function decline(') !== false, 'a refusal that records why');
+    Assert::true(strpos($lifecycle, 'public function grantTrial(') !== false, 'an admin-granted trial');
+    Assert::true(strpos($lifecycle, 'public function expireTrials(') !== false, 'and something that closes the loop');
+    Assert::true(
+        preg_match('~decline.*?mb_strlen\(trim\(\$reason\)\) < 5~s', $lifecycle) === 1,
+        'a decline must record a reason the clinic will read'
+    );
+});
+
+Assert::test('an approved clinic is a live clinic', function (): void {
+    $clinicId = 116;
+    seedTenant($clinicId, 'approval', 'Approval Clinic');
+    Db::run("UPDATE clinics SET billing_status = 'pending' WHERE id = ?", [$clinicId]);
+
+    $svc = new App\Services\LifecycleService();
+
+    $awaiting = array_map('intval', array_column($svc->awaitingDecision(), 'id'));
+    Assert::true(in_array($clinicId, $awaiting, true), 'a pending clinic appears in the decision queue');
+
+    $bad = $svc->decline($clinicId, 'no', null);
+    Assert::false($bad['ok'], 'a one-word decline reason is refused');
+    $ok = $svc->decline($clinicId, 'Could not verify the clinic is operating.', null);
+    Assert::true($ok['ok'], 'a decline with a real reason is accepted');
+    $row = Db::one('SELECT billing_status, decision_reason FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::same('declined', $row['billing_status'], 'and the clinic is declined');
+    Assert::true(strpos((string) $row['decision_reason'], 'verify') !== false, 'with the reason kept for the clinic to read');
+
+    $again = $svc->approve($clinicId, null);
+    Assert::false($again['ok'], 'declined is not silently approvable, so the record stays honest');
+
+    Db::run("UPDATE clinics SET billing_status = 'pending', declined_at = NULL, decision_reason = NULL WHERE id = ?", [$clinicId]);
+    $approved = $svc->approve($clinicId, null);
+    Assert::true($approved['ok'], 'approving a pending clinic works');
+    $row = Db::one('SELECT billing_status, approved_at, renews_on FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::same('active', $row['billing_status'], 'and it becomes active');
+    Assert::true($row['approved_at'] !== null, 'with the decision time recorded');
+    Assert::true($row['renews_on'] !== null, 'and a renewal date, so invoicing can start');
+
+    $twice = $svc->approve($clinicId, null);
+    Assert::false($twice['ok'], 'approving twice is a no-op, not a second decision');
+});
+
+Assert::test('a trial is granted by the platform and ends when it says it will', function (): void {
+    $clinicId = 117;
+    seedTenant($clinicId, 'trialgrant', 'Trial Clinic');
+    Db::run("UPDATE clinics SET billing_status = 'pending' WHERE id = ?", [$clinicId]);
+
+    $svc = new App\Services\LifecycleService();
+    $granted = $svc->grantTrial($clinicId, 14, null);
+    Assert::true($granted['ok'], 'the platform can grant a trial');
+    $row = Db::one('SELECT billing_status, trial_ends_on, renews_on FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::same('trial', $row['billing_status'], 'the clinic is on a trial');
+    Assert::same(date('Y-m-d', strtotime('+14 days')), substr((string) $row['trial_ends_on'], 0, 10), 'for the length granted');
+    Assert::same(null, $row['renews_on'], 'and is not billed while the trial runs');
+
+    $svc->grantTrial($clinicId, 4000, null);
+    $row = Db::one('SELECT trial_ends_on FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::true(
+        strtotime((string) $row['trial_ends_on']) <= strtotime('+91 days'),
+        'an absurd trial length is clamped'
+    );
+
+    Db::run("UPDATE clinics SET trial_ends_on = ? WHERE id = ?", [date('Y-m-d', strtotime('-1 day')), $clinicId]);
+    $expired = $svc->expireTrials();
+    Assert::true(
+        in_array($clinicId, array_map('intval', array_column($expired, 'id')), true),
+        'an expired trial is found by the sweep'
+    );
+    $row = Db::one('SELECT billing_status, suspended_at FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::same('suspended', $row['billing_status'], 'and is suspended, reusing the gate that already works');
+    Assert::true($row['suspended_at'] !== null, 'with the moment recorded');
+
+    $clinicId2 = 118;
+    seedTenant($clinicId2, 'trialok', 'Running Trial');
+    Db::run("UPDATE clinics SET billing_status = 'trial', trial_ends_on = ? WHERE id = ?",
+        [date('Y-m-d', strtotime('+5 days')), $clinicId2]);
+    $svc->expireTrials();
+    $row = Db::one('SELECT billing_status FROM clinics WHERE id = ?', [$clinicId2]);
+    Assert::same('trial', $row['billing_status'], 'a trial with time left is untouched');
 });
 
 Assert::test('the homepage quotes one currency and no exchange rate', function () use ($landingCopy): void {

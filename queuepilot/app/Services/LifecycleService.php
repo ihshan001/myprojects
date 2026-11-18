@@ -32,6 +32,183 @@ final class LifecycleService
     public const DEFAULT_RETENTION_DAYS = 90;
 
     // ------------------------------------------------------------------
+    // Approval — the step before a clinic exists at all
+    // ------------------------------------------------------------------
+    //
+    // Registration used to grant access outright, which meant anybody who
+    // could reach /register could put real patients into a queue. These three
+    // decisions are what stands between a stranger and a working clinic:
+    //
+    //   * **approve** — a signed-off clinic. Billing starts on the next
+    //     invoice run, so the clinic is usable immediately.
+    //   * **grantTrial** — the platform's decision to let a clinic run free
+    //     until a date. This is the *only* way a clinic becomes a trial;
+    //     signup no longer presumes one.
+    //   * **decline** — a recorded refusal. The row stays, so the same email
+    //     cannot register again in a loop, and the reason is answerable later.
+    //
+    // Approval is deliberately not idempotent-blind: approving an approved
+    // clinic is a no-op with an explanation rather than a second audit entry,
+    // because a double-click should not look like two decisions.
+
+    /** Statuses that may still be decided on. */
+    private const DECIDABLE = ['pending'];
+
+    /** @return array{ok: bool, error?: string} */
+    public function approve(int $clinicId, ?int $actorId = null, ?int $trialDays = null): array
+    {
+        $clinic = Db::one('SELECT * FROM clinics WHERE id = ?', [$clinicId]);
+        if (!$clinic) {
+            return ['ok' => false, 'error' => 'That clinic does not exist.'];
+        }
+        if ($clinic['billing_status'] === 'active') {
+            return ['ok' => false, 'error' => 'That clinic is already approved.'];
+        }
+        if ($clinic['declined_at'] !== null) {
+            return ['ok' => false, 'error' => 'That clinic was declined. Reinstate it instead of approving.'];
+        }
+        if ($trialDays !== null && $trialDays > 0) {
+            return $this->grantTrial($clinicId, $trialDays, $actorId);
+        }
+
+        Db::run(
+            "UPDATE clinics SET billing_status = 'active', suspended_at = NULL, suspension_reason = NULL,
+                    approved_at = ?, approved_by = ?, declined_at = NULL, decision_reason = NULL,
+                    renews_on = ?, updated_at = ?
+              WHERE id = ?",
+            [Db::now(), $actorId, date('Y-m-d', strtotime('+1 month')), Db::now(), $clinicId]
+        );
+
+        (new AuditService())->log($clinicId, 'platform.clinic_approved', 'clinic', $clinicId, [
+            'actor' => $actorId,
+        ]);
+        Log::info('clinic.approved', ['clinic' => $clinicId, 'actor' => $actorId]);
+
+        return ['ok' => true];
+    }
+
+    /**
+     * Let a clinic run free until a date. Admin-granted, never self-serve.
+     *
+     * @return array{ok: bool, error?: string}
+     */
+    public function grantTrial(int $clinicId, int $days, ?int $actorId = null): array
+    {
+        $clinic = Db::one('SELECT * FROM clinics WHERE id = ?', [$clinicId]);
+        if (!$clinic) {
+            return ['ok' => false, 'error' => 'That clinic does not exist.'];
+        }
+        if ($clinic['declined_at'] !== null) {
+            return ['ok' => false, 'error' => 'That clinic was declined. Reinstate it instead.'];
+        }
+        $days = max(1, min(90, $days));
+        $endsOn = date('Y-m-d', strtotime("+{$days} days"));
+
+        Db::run(
+            "UPDATE clinics SET billing_status = 'trial', trial_ends_on = ?, approved_at = ?,
+                    approved_by = ?, suspended_at = NULL, suspension_reason = NULL,
+                    renews_on = NULL, updated_at = ?
+              WHERE id = ?",
+            [$endsOn, Db::now(), $actorId, Db::now(), $clinicId]
+        );
+
+        (new AuditService())->log($clinicId, 'platform.clinic_trial_granted', 'clinic', $clinicId, [
+            'days' => $days, 'ends_on' => $endsOn, 'actor' => $actorId,
+        ]);
+        Log::info('clinic.trial_granted', ['clinic' => $clinicId, 'days' => $days, 'actor' => $actorId]);
+
+        return ['ok' => true, 'trial_ends_on' => $endsOn];
+    }
+
+    /** @return array{ok: bool, error?: string} */
+    public function decline(int $clinicId, string $reason, ?int $actorId = null): array
+    {
+        $clinic = Db::one('SELECT * FROM clinics WHERE id = ?', [$clinicId]);
+        if (!$clinic) {
+            return ['ok' => false, 'error' => 'That clinic does not exist.'];
+        }
+        if (!in_array($clinic['billing_status'], self::DECIDABLE, true)) {
+            return ['ok' => false, 'error' => 'Only a clinic awaiting approval can be declined.'];
+        }
+        if (mb_strlen(trim($reason)) < 5) {
+            return ['ok' => false, 'error' => 'Record why — the clinic sees this, and support will be asked.'];
+        }
+
+        Db::run(
+            "UPDATE clinics SET billing_status = 'declined', declined_at = ?, decision_reason = ?,
+                    is_active = 1, updated_at = ?
+              WHERE id = ?",
+            [Db::now(), trim($reason), Db::now(), $clinicId]
+        );
+
+        (new AuditService())->log($clinicId, 'platform.clinic_declined', 'clinic', $clinicId, [
+            'reason' => trim($reason), 'actor' => $actorId,
+        ]);
+        Log::warn('clinic.declined', ['clinic' => $clinicId, 'actor' => $actorId]);
+
+        return ['ok' => true];
+    }
+
+    /**
+     * Clinics awaiting a decision, oldest first.
+     *
+     * Oldest first on purpose: the queue is worked from the top and a clinic
+     * that signed up eleven days ago should not sit behind today's arrivals.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function awaitingDecision(): array
+    {
+        return Db::all(
+            "SELECT c.*, u.name AS owner_name, u.email AS owner_email,
+                    CAST(julianday('now') - julianday(c.created_at) AS INTEGER) AS days_waiting
+               FROM clinics c
+               LEFT JOIN users u ON u.clinic_id = c.id AND u.role = 'clinic_admin'
+              WHERE c.billing_status = 'pending'
+              ORDER BY c.created_at ASC"
+        );
+    }
+
+    /**
+     * Close the trial loop: a clinic whose trial date has passed loses access.
+     *
+     * Until this existed, `trial_ends_on` was written at signup and never
+     * compared to anything, so a clinic that never paid kept the queue engine
+     * indefinitely. Moving to 'suspended' rather than a new status is
+     * deliberate — it reuses the gate that is already tested, keeps the data
+     * untouched, and puts the clinic on the billing page where they can pay.
+     *
+     * @return list<array{id:int,name:string,trial_ends_on:string}>
+     */
+    public function expireTrials(?string $today = null): array
+    {
+        $today = $today ?? date('Y-m-d');
+        $due = Db::all(
+            "SELECT id, name, trial_ends_on FROM clinics
+              WHERE billing_status = 'trial'
+                AND trial_ends_on IS NOT NULL AND trial_ends_on <> ''
+                AND substr(trial_ends_on, 1, 10) < ?
+                AND closed_at IS NULL",
+            [$today]
+        );
+
+        foreach ($due as $clinic) {
+            $id = (int) $clinic['id'];
+            Db::run(
+                "UPDATE clinics SET billing_status = 'suspended', suspended_at = ?, updated_at = ?
+                  WHERE id = ?",
+                [Db::now(), Db::now(), $id]
+            );
+            (new AuditService())->log($id, 'platform.trial_expired', 'clinic', $id, [
+                'trial_ends_on' => $clinic['trial_ends_on'],
+            ]);
+            Log::info('clinic.trial_expired', ['clinic' => $id, 'trial_ends_on' => $clinic['trial_ends_on']]);
+        }
+
+        return $due;
+    }
+
+    // ------------------------------------------------------------------
     // Suspension
     // ------------------------------------------------------------------
 

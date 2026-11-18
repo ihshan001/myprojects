@@ -205,7 +205,7 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
     </nav>
     <div class="flex shrink-0 items-center gap-3">
       <a href="/login" class="hidden text-[0.8125rem] font-semibold text-slate-700 hover:text-slate-900 sm:block">Sign in</a>
-      <a href="/register" class="lp-btn !px-4 !py-2.5 !text-[0.78125rem]">Start free trial</a>
+      <a href="/register" class="lp-btn !px-4 !py-2.5 !text-[0.78125rem]">Apply for your clinic</a>
     </div>
   </div>
 </header>
@@ -230,7 +230,7 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
         </p>
         <div class="mt-7 flex flex-wrap gap-3" data-reveal style="--reveal-delay:160ms">
           <a href="/register" class="lp-btn">
-            Start 14-day free trial
+            Apply for your clinic
             <svg class="h-4 w-4" aria-hidden="true"><use href="#i-arrow-right"/></svg>
           </a>
           <a href="/demo/board" class="lp-btn-ghost">
@@ -239,7 +239,7 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
           </a>
         </div>
         <ul class="mt-7 flex flex-wrap gap-x-6 gap-y-2.5" data-reveal style="--reveal-delay:230ms">
-          <?php foreach (['No card required', '14 days, full access', 'Sinhala · Tamil · English'] as $t): ?>
+          <?php foreach (['No card required', 'Reviewed within a working day', 'Sinhala · Tamil · English'] as $t): ?>
             <li class="flex items-center gap-2 text-[0.78125rem] font-medium text-slate-600">
               <svg class="h-4 w-4 shrink-0 text-brand-600" aria-hidden="true"><use href="#i-check-circle"/></svg>
               <?= e($t) ?>
@@ -509,7 +509,7 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
             <?php endif; ?>
           </ul>
           <a href="/register" class="<?= $featured ? 'lp-btn' : 'lp-btn-ghost' ?> mt-6 w-full">
-            <?= $price > 0 ? 'Start free trial' : 'Start a conversation' ?>
+            <?= $price > 0 ? 'Apply for your clinic' : 'Start a conversation' ?>
           </a>
         </div>
       <?php endforeach; ?>
@@ -679,7 +679,7 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
         <p class="lp-foot-cta-line">Open your first queue today.</p>
       </div>
       <div class="flex flex-wrap gap-3">
-        <a href="/register" class="lp-btn-gold lp-tap">Start 14-day free trial &rarr;</a>
+        <a href="/register" class="lp-btn-gold lp-tap">Apply for your clinic &rarr;</a>
         <a href="/login" class="lp-btn-ghost lp-btn-ghost--dark lp-tap">Sign in</a>
       </div>
     </div>

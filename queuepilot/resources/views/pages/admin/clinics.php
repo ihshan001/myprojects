@@ -6,6 +6,89 @@
   <a href="/admin" class="btn-ghost"><svg class="h-4 w-4"><use href="#i-arrow-left"/></svg>Overview</a>
 </div>
 
+<?php /* ---------------------------------------------------------------
+       The approval queue.
+
+       A clinic that registers cannot log in until a person decides. That
+       makes this list the most important screen in the platform: it is the
+       only thing standing between a stranger and a live queue system, and
+       it is the first thing a new owner is waiting on.
+
+       Oldest first, because the queue is worked from the top — a clinic
+       that applied eleven days ago must not sit behind today's arrival.
+     --------------------------------------------------------------- */ ?>
+<?php if (!empty($awaiting)): ?>
+  <div class="mt-5 overflow-hidden rounded-xl border border-amber-200 bg-amber-50/50">
+    <div class="flex items-center justify-between gap-3 border-b border-amber-200 px-4 py-3">
+      <div>
+        <h2 class="text-sm font-bold text-amber-900">
+          <?= count($awaiting) ?> clinic<?= count($awaiting) === 1 ? '' : 's' ?> awaiting a decision
+        </h2>
+        <p class="text-[11px] text-amber-700">These accounts cannot use the system until you approve them.</p>
+      </div>
+      <span class="badge-amber"><?= count($awaiting) ?> pending</span>
+    </div>
+
+    <div class="divide-y divide-amber-200/70 bg-white">
+      <?php foreach ($awaiting as $a): ?>
+        <?php $days = (int) ($a['days_waiting'] ?? 0); ?>
+        <div class="px-4 py-4">
+          <div class="flex flex-wrap items-start justify-between gap-4">
+            <div class="min-w-0">
+              <p class="text-sm font-bold text-slate-900"><?= e($a['name']) ?></p>
+              <p class="mt-0.5 text-[11px] text-slate-500">
+                <?= e((string) ($a['owner_name'] ?? '')) ?>
+                <?php if (!empty($a['owner_email'])): ?>
+                  · <a href="mailto:<?= e($a['owner_email']) ?>" class="text-teal-700 hover:underline"><?= e($a['owner_email']) ?></a>
+                <?php endif; ?>
+              </p>
+              <p class="mt-0.5 text-[11px] text-slate-400">
+                <?= e((string) ($a['city'] ?? '') ?: 'No city given') ?>
+                <?php if (!empty($a['phone'])): ?> · <?= e((string) $a['phone']) ?><?php endif; ?>
+                · applied <?= e(date('j M Y', strtotime((string) $a['created_at']))) ?>
+              </p>
+              <p class="mt-1.5">
+                <span class="<?= $days >= 3 ? 'badge-rose' : 'badge-slate' ?>">
+                  waiting <?= $days ?> day<?= $days === 1 ? '' : 's' ?>
+                </span>
+                <span class="badge-slate">slug: <?= e((string) $a['slug']) ?></span>
+              </p>
+            </div>
+
+            <div class="flex flex-wrap items-start gap-2">
+              <form method="post" action="/admin/clinics/<?= (int) $a['id'] ?>">
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="approve">
+                <button class="act-start" data-confirm-submit="Approve <?= e($a['name']) ?>? They will be able to put patients in a queue immediately.">
+                  <svg class="h-4 w-4"><use href="#i-check-circle"/></svg>Approve
+                </button>
+              </form>
+
+              <form method="post" action="/admin/clinics/<?= (int) $a['id'] ?>" class="flex items-center gap-1.5">
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="trial">
+                <input type="number" name="trial_days" value="14" min="1" max="90"
+                       class="input w-16 py-1 text-xs" aria-label="Trial length in days">
+                <button class="btn py-1 text-xs">Grant trial</button>
+              </form>
+
+              <form method="post" action="/admin/clinics/<?= (int) $a['id'] ?>" class="flex items-center gap-1.5">
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="decline">
+                <input type="text" name="reason" placeholder="Reason the clinic will see" required minlength="5"
+                       class="input w-48 py-1 text-xs">
+                <button class="act-stop" data-confirm-danger="Decline <?= e($a['name']) ?>? They will see the reason you type.">
+                  Decline
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      <?php endforeach; ?>
+    </div>
+  </div>
+<?php endif; ?>
+
 <div class="mt-5 space-y-3">
   <?php foreach ($clinics as $c): ?>
     <div class="card card-pad">
