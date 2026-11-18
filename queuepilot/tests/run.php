@@ -5178,6 +5178,47 @@ Assert::test('approval, trial and decline are the only ways out of pending', fun
     );
 });
 
+Assert::test('the session directory is outside the document root', function (): void {
+    // Found by trying it: /storage/sessions/sess_<id> answered 200 and served
+    // the session contents, because SESSION_PATH is relative and PHP resolved
+    // it against the process CWD, which is public/ under the dev server. A
+    // session file in the web root is a session-hijack primitive. The path is
+    // now resolved against QP_ROOT, and this asserts both halves of that:
+    // where it points, and that nothing lands under public/.
+    $session = (string) file_get_contents(QP_ROOT . '/app/Core/Session.php');
+    Assert::true(
+        strpos($session, 'QP_ROOT') !== false,
+        'the session path is resolved against the app root, not the CWD'
+    );
+
+    $leaked = glob(QP_ROOT . '/public/storage/sessions/sess_*') ?: [];
+    Assert::same([], $leaked, 'no session file is written inside the document root');
+
+    // And if a session file ever did land there, it must not be committed.
+    $ignore = (string) file_get_contents(QP_ROOT . '/.gitignore');
+    Assert::true(
+        strpos($ignore, 'public/storage') !== false,
+        'public/storage is ignored, so a stray session is never pushed'
+    );
+    Assert::true(
+        strpos($ignore, 'public/storage') !== false && strpos($ignore, 'public/') !== false,
+        'the whole public/storage tree is ignored, not one file extension'
+    );
+});
+
+Assert::test('the security headers stop a stray public file being executed', function (): void {
+    // Belt and braces for the case above: even a file that ends up in the web
+    // root should not be servable as a session. The deployment note in
+    // docs/OPERATIONS.md covers the web-server half; this covers ours.
+    $response = (string) file_get_contents(QP_ROOT . '/app/Core/Response.php');
+    Assert::true(strpos($response, 'Content-Security-Policy') !== false, 'a CSP is sent');
+    $ops = (string) file_get_contents(QP_ROOT . '/docs/OPERATIONS.md');
+    Assert::true(
+        stripos($ops, 'document root') !== false || stripos($ops, 'public/') !== false,
+        'and the deployment doc says the document root is public/'
+    );
+});
+
 Assert::test('no tool reads $argv directly, because the runtime never fills it', function (): void {
     // A recurring, silent failure in this project: the php-wasm harness only
     // sets $_SERVER['argv'], so `$argv` is null and any flag read from it is

@@ -13,10 +13,23 @@ final class Session
         $lifetime = (int) Env::get('security.session_lifetime', 28800);
         $secure = (($_SERVER['HTTPS'] ?? '') === 'on') || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
 
+        // Resolved against QP_ROOT, never the process working directory.
+        //
+        // SESSION_PATH is a relative path in .env. PHP resolves a relative
+        // session.save_path against the CWD, which is `public/` under the dev
+        // server and the front-controller's directory under some FastCGI
+        // setups — so sessions landed in public/storage/sessions, inside the
+        // document root, where /storage/sessions/sess_<id> answered 200 and
+        // served the session contents. Anything inside the web root is public
+        // by definition; a session directory there is a session-hijack
+        // primitive, not a configuration detail.
         $savePath = (string) Env::get('security.session_path', '');
         if ($savePath !== '') {
+            if (!str_starts_with($savePath, '/')) {
+                $savePath = QP_ROOT . '/' . ltrim($savePath, '/');
+            }
             if (!is_dir($savePath)) {
-                @mkdir($savePath, 0775, true);
+                @mkdir($savePath, 0770, true);
             }
             if (is_dir($savePath) && is_writable($savePath)) {
                 session_save_path($savePath);
