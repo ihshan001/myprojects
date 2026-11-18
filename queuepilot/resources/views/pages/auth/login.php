@@ -20,7 +20,7 @@ $val = static fn (string $k, string $d = ''): string => (string) ($old[$k] ?? $d
   <meta name="theme-color" content="#06322E">
   <meta name="csrf-token" content="<?= e(csrf_token()) ?>">
   <meta name="robots" content="noindex, nofollow">
-  <title>Sign in · QueuePilot</title>
+  <title>Sign in · <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?></title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/assets/img/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/assets/img/icon-192.png">
@@ -39,7 +39,7 @@ $val = static fn (string $k, string $d = ''): string => (string) ($old[$k] ?? $d
 <div class="auth-split">
   <!-- The brand side: the landing's deep teal, the visit in five beats. -->
   <aside class="auth-brand">
-    <a class="auth-brand-mark" href="/" aria-label="QueuePilot — home">
+    <a class="auth-brand-mark" href="/" aria-label="<?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?> — home">
       <span class="h-9 w-9 shrink-0 rounded-[0.625rem] p-0.5" style="background-image:linear-gradient(140deg,#0F766E,#06322E)">
         <svg viewBox="0 0 32 32" class="h-full w-full" aria-hidden="true">
           <circle cx="14" cy="14" r="6.4" fill="none" stroke="#fff" stroke-width="2.6"/>
@@ -47,7 +47,7 @@ $val = static fn (string $k, string $d = ''): string => (string) ($old[$k] ?? $d
           <circle cx="23.4" cy="23.4" r="2.6" fill="#E0A63C"/>
         </svg>
       </span>
-      <span class="lp-display text-[1.1875rem] font-semibold text-white">QueuePilot</span>
+      <span class="lp-display text-[1.1875rem] font-semibold text-white"><?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?></span>
     </a>
 
     <div class="auth-brand-body">

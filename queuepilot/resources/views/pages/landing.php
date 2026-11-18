@@ -179,8 +179,8 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>QueuePilot — live patient queues for Sri Lankan clinics</title>
-  <meta name="description" content="Replace the paper token book. QueuePilot gives clinics a live waiting board, patient tracking links, doctor screens and wait-time ranges measured from your own consultations.">
+  <title><?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?> — live patient queues for Sri Lankan clinics</title>
+  <meta name="description" content="Replace the paper token book. <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?> gives clinics a live waiting board, patient tracking links, doctor screens and wait-time ranges measured from your own consultations.">
   <meta name="theme-color" content="#0F766E">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/assets/img/icon.svg" type="image/svg+xml">
@@ -196,7 +196,7 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
   <div class="lp-wrap flex h-[3.875rem] items-center justify-between gap-4">
     <a href="/" class="flex shrink-0 items-center gap-2.5">
       <span class="h-8 w-8 shrink-0 rounded-[0.625rem] p-0.5" style="<?= e($markBg) ?>"><?= $mark ?></span>
-      <span class="lp-wordmark text-[1.1875rem]">QueuePilot</span>
+      <span class="lp-wordmark text-[1.1875rem]"><?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?></span>
     </a>
     <nav class="hidden items-center gap-7 md:flex">
       <?php foreach ($navLinks as [$href, $label]): ?>
@@ -224,7 +224,7 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
           Your clinic deserves<br><span class="lp-teal lp-underline">more than a queue.</span>
         </h1>
         <p class="lp-lead mt-5 max-w-lg" data-reveal style="--reveal-delay:90ms">
-          QueuePilot is the queue operating system for outpatient clinics. Issue a token in
+          <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?> is the queue operating system for outpatient clinics. Issue a token in
           seconds, put every room on one board, and let patients follow their place from
           any phone.
         </p>
@@ -384,7 +384,7 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
 
       <div>
         <span class="lp-eyebrow">02 &mdash; The answer</span>
-        <h2 class="lp-h2 lp-teal mt-3 !text-[1.45rem] sm:!text-[1.6rem]">What QueuePilot changes</h2>
+        <h2 class="lp-h2 lp-teal mt-3 !text-[1.45rem] sm:!text-[1.6rem]">What <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?> changes</h2>
         <?php /* Mechanisms, not statistics. We have no measured study to quote a
              "2.5 hours saved" or "30% fewer no-shows" from, so none is claimed. */ ?>
         <div class="mt-6 space-y-3">
@@ -690,7 +690,7 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
       <div class="max-w-xs">
         <div class="flex items-center gap-2.5">
           <span class="h-8 w-8 shrink-0 rounded-[0.625rem] p-0.5" style="<?= e($markBg) ?>"><?= $mark ?></span>
-          <span class="lp-display text-[1.1875rem] font-semibold text-white">QueuePilot</span>
+          <span class="lp-display text-[1.1875rem] font-semibold text-white"><?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?></span>
         </div>
         <p class="mt-4 text-[0.75rem] leading-relaxed" style="color:#9FBDB6">
           The queue operating system for Sri Lankan outpatient clinics. Tokens and rooms
@@ -721,12 +721,12 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
 
     <!-- The wordmark as the closing image: the last thing on the page is the brand. -->
     <p class="lp-display select-none text-[3.25rem] leading-none text-white sm:text-[5rem] lg:text-[6.5rem]">
-      QueuePilot<span style="color:#E0A63C">.</span>
+      <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?><span style="color:#E0A63C">.</span>
     </p>
 
     <div class="lp-foot-bottom mt-7">
-      <p class="lp-foot-legal">QueuePilot is queue-management software &mdash; never a medical record.</p>
-      <p class="lp-mono text-[0.6875rem]" style="color:#7FA098">&copy; <?= e(date('Y')) ?> QueuePilot</p>
+      <p class="lp-foot-legal"><?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?> is queue-management software &mdash; never a medical record.</p>
+      <p class="lp-mono text-[0.6875rem]" style="color:#7FA098">&copy; <?= e(date('Y')) ?> <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?></p>
     </div>
   </div>
 </footer>

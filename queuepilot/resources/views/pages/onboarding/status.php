@@ -44,7 +44,7 @@ $tone = match (true) {
         <p class="mt-2 text-sm leading-relaxed text-slate-600">
           <?php if ($isPending): ?>
             We have your application for <strong><?= e($clinic['name']) ?></strong>.
-            A member of the QueuePilot team reviews every clinic by hand — we do not
+            A member of the <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?> team reviews every clinic by hand — we do not
             switch a clinic on automatically, because a queue system handles real
             patients from the first minute it is live.
           <?php elseif ($isDeclined): ?>

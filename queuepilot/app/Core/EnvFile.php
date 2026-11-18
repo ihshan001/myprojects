@@ -54,6 +54,16 @@ final class EnvFile
             }
 
             if (getenv($key) !== false) {
+                // A second definition of the same key is a trap: the first one
+                // silently wins, so somebody appending APP_NAME= to the bottom
+                // of their .env changes nothing and cannot see why. Say it out
+                // loud rather than leaving them to guess.
+                if (isset($loaded[$key])) {
+                    error_log(
+                        "[env] {$key} is defined more than once in {$path}; "
+                        . "the first value ({$loaded[$key]}) wins and this one ({$value}) is ignored."
+                    );
+                }
                 continue; // real environment wins
             }
 

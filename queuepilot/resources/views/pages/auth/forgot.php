@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Reset your password · QueuePilot</title>
+  <title>Reset your password · <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?></title>
   <link rel="icon" href="/assets/img/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="<?= e(asset('build/app.css')) ?>">
 </head>
@@ -21,7 +21,7 @@
 <div class="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 py-12">
   <a href="/" class="flex items-center gap-2.5">
     <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-teal-700 text-sm font-black text-white">Q</span>
-    <span class="text-base font-bold tracking-tight text-slate-900">QueuePilot</span>
+    <span class="text-base font-bold tracking-tight text-slate-900"><?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?></span>
   </a>
 
   <h1 class="mt-8 text-2xl font-bold tracking-tight text-slate-900">Forgot your password?</h1>

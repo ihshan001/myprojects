@@ -69,6 +69,27 @@ return [
         'booking_per_min'     => 8,
         'api_action_per_min'  => 120,
     ],
+    // The seller. Invoices and the payment instructions are legal documents:
+    // a clinic's accountant cannot reconcile "Rs 7,900 to some bank account"
+    // without knowing who is asking and where the money went. The company is
+    // not registered yet, so these are placeholders on purpose — set them in
+    // .env before the first real invoice leaves.
+    'company' => [
+        'legal_name'  => getenv('COMPANY_LEGAL_NAME') ?: 'QueuePilot (Pvt) Ltd — pending registration',
+        'address'     => getenv('COMPANY_ADDRESS') ?: 'Colombo, Sri Lanka',
+        'reg_number'  => getenv('COMPANY_REG_NUMBER') ?: '',
+        'vat_number'  => getenv('COMPANY_VAT_NUMBER') ?: '',
+        'email'       => getenv('COMPANY_EMAIL') ?: '',
+        'phone'       => getenv('COMPANY_PHONE') ?: '',
+        // Bank transfer only — no gateway. These are shown to the clinic
+        // alongside every unpaid invoice, because an invoice that does not say
+        // where to pay is not an invoice.
+        'bank'        => getenv('COMPANY_BANK') ?: '',
+        'bank_branch' => getenv('COMPANY_BANK_BRANCH') ?: '',
+        'bank_account_name' => getenv('COMPANY_BANK_ACCOUNT_NAME') ?: '',
+        'bank_account_no'   => getenv('COMPANY_BANK_ACCOUNT_NO') ?: '',
+        'bank_swift'  => getenv('COMPANY_BANK_SWIFT') ?: '',
+    ],
     'monitor' => [
         // Bearer token for GET /api/health. Empty => endpoint is closed to
         // anonymous callers entirely.

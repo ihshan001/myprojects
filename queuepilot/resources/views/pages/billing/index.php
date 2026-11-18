@@ -123,6 +123,65 @@
           </tbody>
         </table>
       <?php endif; ?>
+
+      <?php
+      // Bank transfer is the only way to pay, so this panel is the actual
+      // payment flow — an invoice that lists an amount without saying who to
+      // pay and where is not something a clinic's accountant can act on.
+      $company = (array) \App\Core\Env::get('company', []);
+      $hasBank = ($company['bank_account_no'] ?? '') !== '';
+      $owed = array_filter(
+          $invoices ?? [],
+          static fn (array $i): bool => in_array((string) $i['status'], ['unpaid', 'rejected'], true)
+      );
+      ?>
+      <?php if ($owed !== []): ?>
+        <div class="border-t border-slate-200 px-4 py-4">
+          <h3 class="text-xs font-bold text-slate-900">How to pay</h3>
+          <p class="mt-1 text-[11px] leading-relaxed text-slate-600">
+            Bank transfer only. Pay the exact amount, then come back and record the
+            transfer reference below — we check it by hand, usually within one working day.
+          </p>
+
+          <?php if ($hasBank): ?>
+            <dl class="mt-3 grid gap-x-4 gap-y-1.5 text-[11px] sm:grid-cols-[8rem_1fr]">
+              <dt class="font-semibold text-slate-500">Account name</dt>
+              <dd class="font-mono text-slate-900"><?= e((string) ($company['bank_account_name'] ?: '—')) ?></dd>
+              <dt class="font-semibold text-slate-500">Bank</dt>
+              <dd class="text-slate-900"><?= e((string) $company['bank']) ?></dd>
+              <?php if (($company['bank_branch'] ?? '') !== ''): ?>
+                <dt class="font-semibold text-slate-500">Branch</dt>
+                <dd class="text-slate-900"><?= e((string) $company['bank_branch']) ?></dd>
+              <?php endif; ?>
+              <dt class="font-semibold text-slate-500">Account no.</dt>
+              <dd class="font-mono font-bold text-slate-900"><?= e((string) $company['bank_account_no']) ?></dd>
+              <?php if (($company['bank_swift'] ?? '') !== ''): ?>
+                <dt class="font-semibold text-slate-500">SWIFT</dt>
+                <dd class="font-mono text-slate-900"><?= e((string) $company['bank_swift']) ?></dd>
+              <?php endif; ?>
+            </dl>
+            <p class="mt-3 text-[11px] leading-relaxed text-slate-600">
+              <strong class="text-slate-800">Put the invoice number in the reference.</strong>
+              Without it the transfer cannot be matched to your clinic and will sit unreconciled.
+            </p>
+          <?php else: ?>
+            <div class="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5">
+              <p class="text-[11px] font-semibold text-amber-900">
+                Our bank details are not set up on this installation yet.
+              </p>
+              <p class="mt-1 text-[11px] leading-relaxed text-amber-800">
+                <?php if (($company['email'] ?? '') !== ''): ?>
+                  Email <a class="underline" href="mailto:<?= e((string) $company['email']) ?>"><?= e((string) $company['email']) ?></a>
+                  and we will send them to you.
+                <?php else: ?>
+                  Contact us and we will send them to you. Do not send money to an
+                  account you were given in a message — confirm it with us first.
+                <?php endif; ?>
+              </p>
+            </div>
+          <?php endif; ?>
+        </div>
+      <?php endif; ?>
     </div>
 
     <div class="card card-pad">

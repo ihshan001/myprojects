@@ -141,7 +141,7 @@ $searchAction = !$u ? '/patients' : ($u['role'] === 'super_admin' ? '/admin/clin
   <meta name="theme-color" content="<?= e($cl['brand_color'] ?? '#0F766E') ?>">
   <meta name="csrf-token" content="<?= e(csrf_token()) ?>">
   <meta name="robots" content="noindex, nofollow">
-  <title><?= e($title ?? 'QueuePilot') ?> · <?= e($appName) ?></title>
+  <title><?= e($title ?? $appName) ?> · <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?></title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/assets/img/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/assets/img/icon-192.png">
@@ -157,7 +157,7 @@ $searchAction = !$u ? '/patients' : ($u['role'] === 'super_admin' ? '/admin/clin
     <div class="flex h-16 items-center gap-2.5 border-b border-white/10 px-5">
       <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-500 text-sm font-black text-slate-900">Q</span>
       <div class="leading-tight">
-        <p class="text-sm font-bold text-white"><?= e($appName) ?></p>
+        <p class="text-sm font-bold text-white"><?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?></p>
         <p class="text-[10px] uppercase tracking-widest text-slate-400">Clinic Edition</p>
       </div>
     </div>
@@ -250,7 +250,7 @@ $searchAction = !$u ? '/patients' : ($u['role'] === 'super_admin' ? '/admin/clin
       <div class="topnav-inner">
         <a href="<?= e($u && $u['role'] === 'super_admin' ? '/admin' : '/app') ?>" class="topnav-brand">
           <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-teal-700 text-sm font-black text-white">Q</span>
-          <span class="truncate text-[14px] font-bold tracking-tight text-slate-900"><?= e($appName) ?></span>
+          <span class="truncate text-[14px] font-bold tracking-tight text-slate-900"><?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?></span>
         </a>
 
         <?php if ($headerPrimary !== []): ?>
@@ -430,7 +430,7 @@ $searchAction = !$u ? '/patients' : ($u['role'] === 'super_admin' ? '/admin/clin
     <?php endif; ?>
 
     <footer class="mt-auto border-t border-slate-200 px-4 py-4 text-center text-[11px] text-slate-400 sm:px-6 lg:px-8 no-print">
-      <?= e($appName) ?> · multi-tenant queue management · <?= e(date('Y')) ?>
+      <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?> · multi-tenant queue management · <?= e(date('Y')) ?>
       · clinic data isolated per tenant · request <?= e($requestId ?? '') ?>
     </footer>
   </div>

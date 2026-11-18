@@ -70,7 +70,9 @@ Router::post('/t/{token}/reschedule', [PublicController::class, 'rescheduleTrack
 Router::post('/t/{token}/rate', [PublicController::class, 'rateVisit']);
 Router::get('/demo/board', [PublicController::class, 'demoBoard']);
 Router::get('/manifest.webmanifest', [PublicController::class, 'manifest']);
-Router::get('/sw.js', [PublicController::class, 'serviceWorker']);
+// /sw.js is a real file in public/. The route that used to be here served a
+// stale qp-v1 copy that .htaccess never reached (Apache sends existing files
+// straight to disk), so the tests were green against code no browser ran.
 
 /* ----------------------------------------------------------------- auth */
 Router::get('/login', [AuthController::class, 'showLogin']);

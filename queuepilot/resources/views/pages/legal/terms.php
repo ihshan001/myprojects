@@ -7,7 +7,7 @@
  * who owns the patient data, what happens when a bill is unpaid, and what
  * happens to the data when an account closes.
  */
-$company = $company !== '' ? $company : 'QueuePilot';
+$company = $company !== '' ? $company : (string) \App\Core\Env::get('app.name', 'QueuePilot');
 $contact = $contact !== '' ? $contact : 'the address on your invoice';
 ?>
 <div class="mx-auto max-w-3xl">

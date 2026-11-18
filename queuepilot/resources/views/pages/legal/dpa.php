@@ -6,7 +6,7 @@
  * guarantees, and the arrangement must be in writing. This is that writing. It
  * is short on purpose: a DPA nobody reads is not a safeguard.
  */
-$company = $company !== '' ? $company : 'QueuePilot';
+$company = $company !== '' ? $company : (string) \App\Core\Env::get('app.name', 'QueuePilot');
 $contact = $contact !== '' ? $contact : 'the address on your invoice';
 ?>
 <div class="mx-auto max-w-3xl">

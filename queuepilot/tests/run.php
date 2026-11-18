@@ -7483,6 +7483,101 @@ Assert::test('a solo owner can set their own name, because nothing else will', f
 });
 
 
+Assert::test('grace runs from the due date, even when dunning is late', function (): void {
+    // The owner asked for the deadline to be the due date. Passing "today"
+    // into beginGrace let a missed cron extend the grace: a clinic 10 days
+    // overdue got until due+15 because that is when the job finally ran.
+    $source = (string) file_get_contents(QP_ROOT . '/tools/dunning.php');
+
+    Assert::true(
+        str_contains($source, "substr((string) \$c['renews_on'], 0, 10)"),
+        'dunning derives the anchor from the due date'
+    );
+    Assert::true(
+        !preg_match('/beginGrace\(\(int\) \$c\[\'id\'\], \$today\)/', $source),
+        'and does not anchor it to the day the job happened to run'
+    );
+
+    // Behaviour, not just the call site.
+    $lifecycle = new \App\Services\LifecycleService();
+    $id = \App\Core\Db::insert(
+        'INSERT INTO clinics (name, slug, billing_status, renews_on, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)',
+        ['Grace Anchor', 'grace-anchor-' . bin2hex(random_bytes(3)), 'active',
+         date('Y-m-d', strtotime('-10 days')), now_iso(), now_iso()]
+    );
+    $row = \App\Core\Db::one('SELECT renews_on FROM clinics WHERE id = ?', [(int) $id]);
+    $lifecycle->beginGrace((int) $id, substr((string) $row['renews_on'], 0, 10));
+
+    $after = \App\Core\Db::one('SELECT grace_until FROM clinics WHERE id = ?', [(int) $id]);
+    $days = (int) round((strtotime((string) $after['grace_until']) - strtotime((string) $row['renews_on'])) / 86400);
+
+    Assert::same(\App\Services\LifecycleService::GRACE_DAYS, $days, 'grace ends five days after the due date');
+    Assert::same(5, \App\Services\LifecycleService::GRACE_DAYS, 'the policy is five days');
+
+    \App\Core\Db::run('DELETE FROM clinics WHERE id = ?', [(int) $id]);
+});
+
+Assert::test('the brand is configurable rather than written into every page', function (): void {
+    // The owner has not settled the product name. A name that only changes in
+    // config while eleven views hardcode it is not configurable at all.
+    $offenders = [];
+    $dir = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($dir as $file) {
+        if (!$file->isFile() || $file->getExtension() !== 'php') {
+            continue;
+        }
+        $body = (string) file_get_contents($file->getPathname());
+        // A single fallback default is allowed — `Env::get('app.name',
+        // 'QueuePilot')` only fires when the setting is absent. What is not
+        // allowed is the name appearing in markup, where it cannot be changed.
+        $body = str_replace("Env::get('app.name', 'QueuePilot')", '', $body);
+        if (preg_match_all('/\bQueuePilot\b/', $body, $m) > 0) {
+            $offenders[] = str_replace(QP_ROOT . '/resources/views/', '', $file->getPathname()) . ' (' . count($m[0]) . ')';
+        }
+    }
+    Assert::same([], $offenders, 'no view hardcodes the product name: ' . implode(', ', $offenders));
+
+    // And the name must actually come from configuration.
+    $config = (string) file_get_contents(QP_ROOT . '/config/config.php');
+    Assert::true(
+        (bool) preg_match("/'name'\s*=>\s*getenv\('APP_NAME'\)/", $config),
+        'the app name is read from APP_NAME'
+    );
+});
+
+
+Assert::test('an unpaid invoice tells the clinic where to send the money', function (): void {
+    // Bank transfer is the only payment route. A billing page that shows
+    // "Rs 7,900 unpaid" and a "I have paid" box, but never says which account,
+    // is not a payment flow — the clinic has to phone and ask.
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/billing/index.php');
+
+    Assert::true(str_contains($view, 'How to pay'), 'there is a how-to-pay panel');
+    Assert::true(str_contains($view, 'bank_account_no'), 'it reads the account number from config');
+    Assert::true(str_contains($view, 'bank_account_name'), 'and the account name');
+    Assert::true(str_contains($view, 'Bank transfer only'), 'and says transfer is the only route');
+
+    // The reference instruction is the difference between a reconciled payment
+    // and an anonymous deposit somebody has to hunt for.
+    Assert::true(
+        str_contains($view, 'Put the invoice number in the reference'),
+        'it tells them to put the invoice number in the reference'
+    );
+
+    // When the bank block is empty it must say so rather than render blanks.
+    Assert::true(
+        str_contains($view, 'bank details are not set up'),
+        'an unconfigured install says so instead of showing empty fields'
+    );
+
+    $config = (string) file_get_contents(QP_ROOT . '/config/config.php');
+    foreach (['COMPANY_LEGAL_NAME', 'COMPANY_BANK', 'COMPANY_BANK_ACCOUNT_NO', 'COMPANY_EMAIL'] as $key) {
+        Assert::true(str_contains($config, "getenv('{$key}')"), "{$key} is configurable");
+    }
+});
+
+
 $code = Assert::summary();
 Database::cleanup($dbPath);
 echo "\n";

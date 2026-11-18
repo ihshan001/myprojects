@@ -8,7 +8,7 @@
  * them stop. The legal minimum is a checklist; this is the checklist arranged
  * so somebody standing at a clinic desk can read it in a minute.
  */
-$company = $company !== '' ? $company : 'QueuePilot';
+$company = $company !== '' ? $company : (string) \App\Core\Env::get('app.name', 'QueuePilot');
 $contact = $contact !== '' ? $contact : 'the address on your clinic receipt';
 ?>
 <div class="mx-auto max-w-3xl">
@@ -22,8 +22,8 @@ $contact = $contact !== '' ? $contact : 'the address on your clinic receipt';
     <div class="mt-6 rounded-lg bg-teal-50 p-4 ring-1 ring-teal-200">
       <p class="text-sm font-semibold text-teal-900">The short version</p>
       <p class="mt-1 text-sm leading-relaxed text-teal-900">
-        <strong>Your clinic owns your information. QueuePilot only stores it for them.</strong>
-        Your clinic decides what is collected and why. QueuePilot provides the
+        <strong>Your clinic owns your information. <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?> only stores it for them.</strong>
+        Your clinic decides what is collected and why. <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?> provides the
         software and is not allowed to use your information for anything else.
       </p>
     </div>

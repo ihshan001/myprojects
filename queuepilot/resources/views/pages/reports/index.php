@@ -234,7 +234,7 @@ foreach ($byHour as $h) { $peak = max($peak, (int) $h['total']); }
     <div>
       <p class="text-[11px] leading-relaxed text-slate-600">
         <b>This is what these consultations are worth at each doctor's fee — not what has been
-        collected.</b> QueuePilot does not take payments: money is handed over at the desk or by
+        collected.</b> <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?> does not take payments: money is handed over at the desk or by
         transfer, and the system never sees it. Use this figure to reconcile a day's cash drawer,
         not as a bank balance.
       </p>

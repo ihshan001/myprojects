@@ -17,7 +17,7 @@ $val = static fn (string $k, string $d = ''): string => (string) ($old[$k] ?? $d
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#06322E">
   <meta name="robots" content="noindex, nofollow">
-  <title>Create your clinic · QueuePilot</title>
+  <title>Create your clinic · <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?></title>
   <link rel="icon" href="/assets/img/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="<?= e(asset('build/app.css')) ?>">
 </head>
@@ -27,7 +27,7 @@ $val = static fn (string $k, string $d = ''): string => (string) ($old[$k] ?? $d
 <div class="auth-split">
   <!-- The brand side: the offer, and exactly what it sets up. -->
   <aside class="auth-brand">
-    <a class="auth-brand-mark" href="/" aria-label="QueuePilot — home">
+    <a class="auth-brand-mark" href="/" aria-label="<?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?> — home">
       <span class="h-9 w-9 shrink-0 rounded-[0.625rem] p-0.5" style="background-image:linear-gradient(140deg,#0F766E,#06322E)">
         <svg viewBox="0 0 32 32" class="h-full w-full" aria-hidden="true">
           <circle cx="14" cy="14" r="6.4" fill="none" stroke="#fff" stroke-width="2.6"/>
@@ -35,7 +35,7 @@ $val = static fn (string $k, string $d = ''): string => (string) ($old[$k] ?? $d
           <circle cx="23.4" cy="23.4" r="2.6" fill="#E0A63C"/>
         </svg>
       </span>
-      <span class="lp-display text-[1.1875rem] font-semibold text-white">QueuePilot</span>
+      <span class="lp-display text-[1.1875rem] font-semibold text-white"><?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?></span>
     </a>
 
     <div class="auth-brand-body">
@@ -159,7 +159,7 @@ $val = static fn (string $k, string $d = ''): string => (string) ($old[$k] ?? $d
             I accept the <a href="/terms" target="_blank" class="font-medium text-teal-700 underline">terms</a>
             and the <a href="/dpa" target="_blank" class="font-medium text-teal-700 underline">data processing agreement</a>
             for this clinic. The clinic is the data controller for patient information;
-            QueuePilot stores and displays it on the clinic's instructions.
+            <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?> stores and displays it on the clinic's instructions.
           </span>
         </label>
 
@@ -169,7 +169,7 @@ $val = static fn (string $k, string $d = ''): string => (string) ($old[$k] ?? $d
         </button>
         <p class="auth-note">
           By creating a clinic you agree that patient data in your clinic is yours, and that
-          QueuePilot will not use it for anything except operating your queues.
+          <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?> will not use it for anything except operating your queues.
         </p>
       </form>
 

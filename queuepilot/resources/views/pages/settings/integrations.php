@@ -22,7 +22,7 @@
 <div class="card card-pad mb-4">
   <h1 class="text-2xl font-bold tracking-tight text-slate-900">Integrations</h1>
   <p class="mt-1 max-w-prose text-sm text-slate-500">
-    Systems QueuePilot can send to. Connecting one here switches it on for your clinic — the credentials
+    Systems <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?> can send to. Connecting one here switches it on for your clinic — the credentials
     themselves are held by your deployment, never in this page.
   </p>
 </div>

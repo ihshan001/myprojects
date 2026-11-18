@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title><?= e($title ?? 'Error') ?> · QueuePilot</title>
+  <title><?= e($title ?? 'Error') ?> · <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?></title>
   <link rel="stylesheet" href="<?= e(asset('build/app.css')) ?>">
 </head>
 <body class="flex min-h-full items-center justify-center bg-slate-50 px-5">

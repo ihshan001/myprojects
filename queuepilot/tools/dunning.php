@@ -102,7 +102,14 @@ if (!$apply) {
 }
 
 foreach ($toWarn as $c) {
-    $service->beginGrace((int) $c['id'], $today);
+    // Anchored to the due date, not to today. Passing $today meant that a
+    // dunning run which was late — a missed cron, a weekend, a holiday — gave
+    // the clinic five days from the moment the job noticed, so a clinic could
+    // sit unpaid for a fortnight and still be inside a "five day" grace. The
+    // owner asked for the deadline to be the due date; a scheduled job must
+    // not move the deadline by failing to run.
+    $dueOn = substr((string) $c['renews_on'], 0, 10);
+    $service->beginGrace((int) $c['id'], $dueOn);
 }
 $suspended = $service->suspendOverdue($today);
 
