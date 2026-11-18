@@ -79,11 +79,11 @@ if (!function_exists('asset')) {
 }
 
 if (!function_exists('redirect')) {
-    function redirect(string $to): void { Response::redirect($to); }
+    function redirect(string $to): never { Response::redirect($to); }
 }
 
 if (!function_exists('back')) {
-    function back(string $fallback = '/'): void
+    function back(string $fallback = '/'): never
     {
         $ref = $_SERVER['HTTP_REFERER'] ?? '';
         $host = $_SERVER['HTTP_HOST'] ?? '';
@@ -91,7 +91,6 @@ if (!function_exists('back')) {
         if ($ref !== '' && $host !== '' && str_contains($ref, $host)) {
             $path = parse_url($ref, PHP_URL_PATH) ?: $fallback;
             Response::redirect($path);
-            return;
         }
         Response::redirect($fallback);
     }

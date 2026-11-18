@@ -13,10 +13,28 @@ final class Response
         echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
 
-    public static function redirect(string $to, int $status = 302): void
+    /**
+     * Redirect and stop.
+     *
+     * This terminates. It did not use to, and every caller in the codebase
+     * assumed it did — a controller that hit a validation error, redirected,
+     * and then carried on to the write below it would perform the write on a
+     * request the user was told had failed. That is exactly what happened in
+     * the password-change handler: a wrong current password redirected and
+     * then went on to set the new one anyway.
+     *
+     * Every one of the ~200 call sites intends "and do nothing else", and a
+     * redirect whose script continues must return 302 rather than 200 anyway,
+     * so exiting is the only correct behaviour. A caller that genuinely wants
+     * to do more work should rebuild the response explicitly.
+     */
+    public static function redirect(string $to, int $status = 302): never
     {
-        http_response_code($status);
-        header('Location: ' . $to);
+        if (!headers_sent()) {
+            http_response_code($status);
+            header('Location: ' . $to);
+        }
+        exit;
     }
 
     public static function securityHeaders(): void

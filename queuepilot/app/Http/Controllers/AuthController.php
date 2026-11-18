@@ -248,6 +248,69 @@ final class AuthController
         ]);
     }
 
+    /**
+     * Change your own password.
+     *
+     * Reached two ways: voluntarily from the security page, and forcibly on
+     * first sign-in when an admin created the account with a temporary
+     * password. The second case is why must_change_password exists at all — a
+     * password an administrator chose and read out over the phone must stop
+     * being the password after it has been used once.
+     */
+    public function changePassword(): void
+    {
+        $user = Auth::user();
+        $current = (string) Request::input('current_password', '');
+        $new     = (string) Request::input('password', '');
+        $confirm = (string) Request::input('password_confirmation', '');
+
+        $errors = [];
+
+        // The current password is required even when changing a temporary one:
+        // otherwise a stolen unlocked laptop is a permanent account takeover.
+        if ($current === '' || !password_verify($current, (string) $user['password_hash'])) {
+            $errors['current_password'] = 'That is not your current password.';
+        }
+
+        $min = (int) \App\Core\Env::get('security.password_min', 10);
+        if (strlen($new) < $min) {
+            $errors['password'] = "Use at least {$min} characters.";
+        } elseif ($new !== $confirm) {
+            $errors['password'] = 'The two passwords do not match.';
+        } elseif (password_verify($new, (string) $user['password_hash'])) {
+            $errors['password'] = 'That is your current password. Choose a different one.';
+        }
+
+        if ($errors !== []) {
+            Session::flash('password_errors', $errors);
+            redirect('/settings/password');
+        }
+
+        \App\Core\Db::run(
+            'UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?',
+            [password_hash($new, PASSWORD_DEFAULT), (int) $user['id']]
+        );
+        (new \App\Services\AuditService())->log(
+            (int) $user['clinic_id'],
+            'user.password_changed',
+            'user',
+            (int) $user['id'],
+            ['self' => true]
+        );
+        flash('success', 'Your password has been changed.');
+        redirect('/settings');
+    }
+
+    /** The page with the form. */
+    public function showChangePassword(): void
+    {
+        view('settings/password', [
+            'title'     => 'Change password',
+            'errors'    => Session::takeFlash('password_errors') ?? [],
+            'forced'    => (bool) (Auth::user()['must_change_password'] ?? false),
+        ]);
+    }
+
     public function beginTwoFactor(): void
     {
         $result = \App\Services\TotpService::beginEnrolment((int) Auth::id());

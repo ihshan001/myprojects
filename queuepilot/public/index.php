@@ -65,6 +65,26 @@ View::share('debug', $config['app']['debug']);
 View::share('tenantClinic', Tenant::clinic());
 View::share('tenantKind', Tenant::kind());
 
+/* A password somebody else chose must not survive its first use.
+ *
+ * Admins create staff accounts with a temporary password and then have to get
+ * that password to the person — over the phone, in a WhatsApp message, on a
+ * slip of paper. By the time the new staff member signs in, that password is
+ * the least secret thing about the account. Forcing a change on first use is
+ * what makes the temporary password temporary.
+ *
+ * Checked before routing and after two-factor, so an account with both flags
+ * set cannot use the second to skip the first.
+ */
+if (Auth::check() && (int) (Auth::user()['must_change_password'] ?? 0) === 1) {
+    $exempt = ['/settings/password', '/logout', '/locale', '/api/health'];
+    if (!in_array(Request::path(), $exempt, true)) {
+        flash('warning', 'Choose your own password before continuing — the one you signed in with was issued to you.');
+        Response::redirect('/settings/password');
+        exit;
+    }
+}
+
 /* Two-factor is not optional for the people who can see every clinic.
  *
  * A super admin can read every patient record on the platform. One stolen

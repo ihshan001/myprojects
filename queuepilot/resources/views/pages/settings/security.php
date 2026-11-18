@@ -70,6 +70,17 @@
   </div>
 
   <div class="card card-pad">
+    <h2 class="text-sm font-bold text-slate-900">Password</h2>
+    <p class="mt-2 text-xs leading-relaxed text-slate-600">
+      Change the password you sign in with. Your current one is required, so a
+      session left open on a shared machine cannot lock you out.
+    </p>
+    <a href="/settings/password" class="btn-secondary mt-4 w-full">
+      <svg class="h-4 w-4"><use href="#i-lock"/></svg>Change password
+    </a>
+  </div>
+
+  <div class="card card-pad">
     <h2 class="text-sm font-bold text-slate-900">How this works</h2>
     <ul class="mt-3 space-y-2.5 text-[11px] leading-relaxed text-slate-600">
       <li><strong class="text-slate-800">TOTP, RFC 6238.</strong> Codes are computed from a shared secret and the clock — no SMS, so no SIM-swap attack and no per-message cost.</li>

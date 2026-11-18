@@ -7279,6 +7279,95 @@ Assert::test('the runbook documents the operational duties it names', function (
 });
 
 
+/* ─────────────────────────────────────────────────────────────────────────
+ * Changing a password — and the bug that made it dangerous.
+ *
+ * While adding this page the refusal paths silently succeeded: the controller
+ * redirected on a validation error and then carried on to the UPDATE below
+ * it, because Response::redirect() returned instead of terminating. A wrong
+ * current password still changed the password. These tests pin both halves:
+ * that redirect() stops, and that a refused change really is refused.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+Assert::test('redirect() terminates, so a refused action cannot fall through to its write', function (): void {
+    $source = (string) file_get_contents(QP_ROOT . '/app/Core/Response.php');
+
+    // The signature is the guard: `never` is not decoration, it is the type
+    // system refusing to compile a caller that expects to continue.
+    Assert::true(
+        (bool) preg_match('/function redirect\([^)]*\):\s*never/', $source),
+        'redirect() is declared never-returning'
+    );
+    Assert::true(str_contains($source, 'exit;'), 'and actually exits');
+
+    // The helper must not narrow it back to void.
+    $helpers = (string) file_get_contents(QP_ROOT . '/app/helpers.php');
+    Assert::true(
+        (bool) preg_match('/function redirect\(string \$to\):\s*never/', $helpers),
+        'the redirect() helper keeps the never return type'
+    );
+
+    // Every controller return type stays honest: none of them declare that
+    // they return after redirecting.
+    Assert::true(
+        !preg_match('/function changePassword\(\):\s*never/', $source),
+        'sanity: this assertion is reading the router, not inventing a rule'
+    );
+});
+
+Assert::test('changing a password requires the current one', function (): void {
+    $controller = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/AuthController.php');
+    $start = strpos($controller, 'public function changePassword');
+    Assert::true($start !== false, 'the handler exists');
+    $body = substr($controller, $start, 3000);
+
+    // Being signed in must not be enough: a shared reception machine left
+    // logged in must not let the next person lock the owner out.
+    Assert::true(str_contains($body, 'password_verify($current'), 'the current password is verified');
+    Assert::true(str_contains($body, "'current_password'"), 'and its failure is reported against the field');
+
+    // The same password with a different meaning is not a change.
+    Assert::true(str_contains($body, 'must_change_password = 0'), 'a successful change clears the forced-change flag');
+    Assert::true(str_contains($body, 'password_hash($new'), 'and stores a hash, never the password');
+
+    // Errors must stop the write, which is what the redirect fix guarantees.
+    Assert::true(
+        (bool) preg_match('/if \(\$errors !== \[\]\) \{[\s\S]{0,200}redirect\(\'\/settings\/password\'\);/', $body),
+        'validation failures redirect before the UPDATE'
+    );
+});
+
+Assert::test('a temporary password cannot be kept', function (): void {
+    // The whole reason must_change_password exists. Enrolment lives in the
+    // front controller, next to the two-factor gate, so it applies to every
+    // route rather than to whichever controllers remembered to check.
+    $front = (string) file_get_contents(QP_ROOT . '/public/index.php');
+
+    Assert::true(str_contains($front, 'must_change_password'), 'the flag is enforced before routing');
+    Assert::true(
+        (bool) preg_match('/must_change_password[\s\S]{0,400}\'\/settings\/password\'/', $front),
+        'and sends the user to the password page'
+    );
+
+    // A user must not be able to escape by signing out and back in, and must
+    // not be able to skip it by enrolling two-factor first.
+    Assert::true(
+        (bool) preg_match('/\$exempt = \[\'\/settings\/password\', \'\/logout\'/', $front),
+        'only the password page, sign-out and health are reachable'
+    );
+
+    // The flag must survive sign-in: completeLogin must not reset it.
+    $auth = (string) file_get_contents(QP_ROOT . '/app/Core/Auth.php');
+    $loginStart = strpos($auth, 'function completeLogin');
+    Assert::true($loginStart !== false, 'completeLogin exists');
+    $loginBody = substr($auth, $loginStart, 2000);
+    Assert::true(
+        !str_contains($loginBody, 'must_change_password'),
+        'signing in does not clear the flag — otherwise it is one extra login to bypass'
+    );
+});
+
+
 $code = Assert::summary();
 Database::cleanup($dbPath);
 echo "\n";

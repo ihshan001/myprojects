@@ -96,6 +96,9 @@ Router::get('/invite/{token}', [AuthController::class, 'showInvite'], ['csrf' =>
 Router::post('/invite/{token}', [AuthController::class, 'acceptInvite']);
 // Account security (2FA enrolment) — any signed-in user
 Router::get('/settings/security', [AuthController::class, 'security'], ['auth' => true]);
+// Your own password. Also the landing page for a temporary one.
+Router::get('/settings/password', [AuthController::class, 'showChangePassword'], ['auth' => true]);
+Router::post('/settings/password', [AuthController::class, 'changePassword'], ['auth' => true]);
 Router::post('/settings/security/2fa/begin', [AuthController::class, 'beginTwoFactor'], ['auth' => true]);
 Router::post('/settings/security/2fa/confirm', [AuthController::class, 'confirmTwoFactor'], ['auth' => true]);
 Router::post('/settings/security/2fa/disable', [AuthController::class, 'disableTwoFactor'], ['auth' => true]);
