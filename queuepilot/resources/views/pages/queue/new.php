@@ -169,6 +169,19 @@ $selectedPatient = (int) ($preselect ?? 0);
         <p class="help">Kept internal — never shown on the public tracking page.</p>
       </div>
 
+      <?php /* The PDPA requires the notice at the point of collection, and this
+               is the point: the moment a receptionist types a name and a number.
+               It is placed immediately above the button, where the eye already
+               is, rather than at the foot of the page where it would be seen by
+               nobody. The receptionist is the one who has to be able to answer
+               "what happens to my details", so the wording is written to be read
+               aloud. */ ?>
+      <p class="rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500 ring-1 ring-slate-200">
+        This patient's name and number are stored to run the queue. Their clinic
+        is responsible for the record; the public board shows the token only.
+        <a href="/privacy" target="_blank" class="font-medium text-teal-700 underline">Privacy notice</a>
+      </p>
+
       <button class="btn-primary btn-lg w-full" type="submit" <?= $queues === [] ? 'disabled' : '' ?>>
         <svg class="h-4 w-4"><use href="#i-plus"/></svg>
         Issue token

@@ -401,6 +401,13 @@ final class PublicController
         if (Db::scalar('SELECT id FROM users WHERE email = ?', [$data['email']])) {
             $errors['email'] = 'An account with this email already exists. Try signing in.';
         }
+        // The clinic becomes the data controller the moment it collects a
+        // patient's name, and we become the processor. A processor arrangement
+        // has to be agreed in writing, not implied by using the form, so the
+        // box is required rather than decorative.
+        if (Request::string('accept_terms') !== '1') {
+            $errors['accept_terms'] = 'Please accept the terms and the data processing agreement.';
+        }
 
         if ($errors !== []) {
             Session::flash('old', array_diff_key($data, ['password' => 1]));

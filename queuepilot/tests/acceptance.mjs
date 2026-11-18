@@ -208,9 +208,30 @@ async function main() {
       city: 'Negombo',
       district: 'Gampaha',
       plan: 'starter',
+      // The clinic accepts the terms and the DPA at signup; the server refuses
+      // the form without it. A test that skips this is testing a signup nobody
+      // can perform.
+      accept_terms: '1',
     });
     const bounced = landed(res);
     check('signup is accepted', bounced === null, bounced || '');
+
+    // A processor arrangement cannot be accepted by leaving a box alone.
+    const refused = await stranger.get('/register');
+    const refusedToken = /name="_token"\s+value="([^"]+)"/.exec(refused.html)?.[1];
+    const noTerms = await stranger.post('/register', {
+      _token: refusedToken,
+      name: 'No Terms Clinic',
+      owner_name: 'Nobody',
+      email: `noterms.${Date.now()}@example.com`,
+      password,
+      plan: 'starter',
+      city: 'Negombo',
+      district: 'Gampaha',
+    });
+    check('signup without accepting the terms is refused',
+      noTerms.status === 302 && String(noTerms.location || '').includes('/register'),
+      `HTTP ${noTerms.status} -> ${noTerms.location}`);
 
     // Signing up no longer buys access. This is the whole approval model, so
     // it is asserted rather than assumed: if this ever passes, a stranger can

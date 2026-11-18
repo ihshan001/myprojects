@@ -153,6 +153,16 @@ $val = static fn (string $k, string $d = ''): string => (string) ($old[$k] ?? $d
           </div>
         </fieldset>
 
+        <label class="flex items-start gap-2.5 rounded-lg bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-600 ring-1 ring-slate-200">
+          <input type="checkbox" name="accept_terms" value="1" required class="mt-0.5">
+          <span>
+            I accept the <a href="/terms" target="_blank" class="font-medium text-teal-700 underline">terms</a>
+            and the <a href="/dpa" target="_blank" class="font-medium text-teal-700 underline">data processing agreement</a>
+            for this clinic. The clinic is the data controller for patient information;
+            QueuePilot stores and displays it on the clinic's instructions.
+          </span>
+        </label>
+
         <button class="lp-btn w-full" type="submit">
           Submit clinic application
           <svg class="h-4 w-4"><use href="#i-arrow-right"/></svg>

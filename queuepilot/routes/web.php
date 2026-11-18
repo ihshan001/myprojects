@@ -34,6 +34,7 @@ use App\Http\Controllers\AppointmentPolicyController;
 use App\Http\Controllers\BreakController;
 use App\Http\Controllers\IncidentController;
 use App\Http\Controllers\OnboardingController;
+use App\Http\Controllers\LegalController;
 use App\Http\Controllers\OnboardingStatusController;
 use App\Http\Controllers\PriorityRuleController;
 use App\Http\Controllers\WorkflowController;
@@ -44,6 +45,14 @@ use App\Http\Controllers\RoomController;
 Router::get('/', [PublicController::class, 'landing']);
 Router::get('/features', [PublicController::class, 'features']);
 Router::get('/pricing', [PublicController::class, 'pricing']);
+/* ------------------------------------------------------------- legal */
+// Public and unauthenticated on purpose: a privacy notice that needs a login
+// is not a notice. These are the pages the PDPA requires to be reachable at
+// the point where data is collected.
+Router::get('/privacy', [LegalController::class, 'privacy']);
+Router::get('/terms', [LegalController::class, 'terms']);
+Router::get('/dpa', [LegalController::class, 'dpa']);
+
 Router::get('/register', [PublicController::class, 'registerForm']);
 Router::post('/register', [PublicController::class, 'register']);
 Router::get('/t/{token}', [PublicController::class, 'track'], ['csrf' => false]);

@@ -94,6 +94,14 @@ for base, _, files in os.walk(views_dir):
                     continue
                 path = norm.split('?')[0].split('#')[0].rstrip('/') or '/'
                 checked += 1
+                # Static files are not routes. /assets/img/icon.svg is served
+                # straight off disk by the web server and will never appear in
+                # the route table; flagging eighteen of them taught everybody
+                # to ignore this report's "bad links" column, which is worse
+                # than not reporting at all.
+                if path.startswith('/assets/'):
+                    if os.path.exists(os.path.join(ROOT, 'public', path.lstrip('/'))):
+                        continue
                 if not any(re.match(pr, path) for pr, _ in path_res):
                     bad_links.append((rel, kind, url,
                                       src[:m.start()].count('\n')+1))

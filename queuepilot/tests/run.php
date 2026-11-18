@@ -5383,6 +5383,78 @@ Assert::test('an unpaid clinic is warned for five days, then suspended, and payi
     Assert::same('active', $row['billing_status'], 'a re-run of dunning leaves a paid clinic alone');
 });
 
+Assert::test('the PDPA information a patient is owed actually exists and is reachable', function (): void {
+    // Sri Lanka's Personal Data Protection Act No. 9 of 2022 requires a
+    // controller to give a data subject specific information at the point of
+    // collection: who the controller is, what is collected, why, on what
+    // basis, who it is shared with, whether it leaves the country, how long it
+    // is kept, and how to complain. Those are assertions, not aspirations —
+    // each one is checked here, because a privacy notice that omits the
+    // retention period is not compliant and nothing else would notice.
+    $privacy = (string) file_get_contents(QP_ROOT . '/resources/views/pages/legal/privacy.php');
+
+    $required = [
+        'data controller'      => 'identifies the clinic as controller',
+        'data processor'       => 'and us as processor',
+        'Personal Data Protection Act' => 'names the Act',
+        'What is collected'    => 'lists what is collected',
+        'lawful basis'         => 'states the lawful basis',
+        'transferred outside Sri Lanka' => 'answers the cross-border question',
+        'How long it is kept'  => 'states retention',
+        'Data Protection Authority' => 'says how to complain',
+    ];
+    foreach ($required as $phrase => $why) {
+        Assert::true(stripos($privacy, $phrase) !== false, $why);
+    }
+
+    // Reachable without signing in — a notice behind a login is not a notice.
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    foreach (['/privacy', '/terms', '/dpa'] as $path) {
+        Assert::true(
+            preg_match('~Router::get\(' . preg_quote("'{$path}'", '~') . '~', $routes) === 1,
+            "{$path} is a public GET route"
+        );
+    }
+    Assert::true(
+        preg_match('~Router::get\(./privacy., \[LegalController::class, .privacy.\]\)~', $routes) === 1,
+        'and it is served by the legal controller, not a redirect to the landing page'
+    );
+});
+
+Assert::test('the clinic must accept the processor agreement before it collects anybody', function (): void {
+    // The clinic becomes a data controller the instant a receptionist types a
+    // patient's name. A processor arrangement has to be agreed rather than
+    // assumed, so signup refuses without it — enforced on the server, not only
+    // by `required` on a checkbox, which any client can drop.
+    $public = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/PublicController.php');
+    Assert::true(
+        strpos($public, "accept_terms") !== false,
+        'signup checks that the terms were accepted'
+    );
+    Assert::true(
+        preg_match('~accept_terms.*?\$errors\[.accept_terms.\]~s', $public) === 1,
+        'and refuses with a message rather than silently continuing'
+    );
+
+    $register = (string) file_get_contents(QP_ROOT . '/resources/views/pages/auth/register.php');
+    Assert::true(strpos($register, 'name="accept_terms"') !== false, 'the checkbox exists');
+    Assert::true(strpos($register, '/dpa') !== false, 'and links the agreement it asks you to accept');
+});
+
+Assert::test('the notice is shown where the data is actually collected', function (): void {
+    // The requirement is "at the point of collection", which is the queue desk
+    // form, not the footer of the marketing site.
+    $queueNew = (string) file_get_contents(QP_ROOT . '/resources/views/pages/queue/new.php');
+    Assert::true(
+        strpos($queueNew, '/privacy') !== false,
+        'the queue desk links the privacy notice beside the name field'
+    );
+    Assert::true(
+        stripos($queueNew, 'token only') !== false || stripos($queueNew, 'public board') !== false,
+        'and tells the receptionist what the public sees'
+    );
+});
+
 Assert::test('no outbound link is built from the platform domain alone', function (): void {
     // With one clinic per deployment, `APP_URL . path` was right. With twenty
     // clinics on twenty subdomains it sends people to the platform root: a
