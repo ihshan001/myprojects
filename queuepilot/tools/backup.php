@@ -31,14 +31,14 @@ use App\Core\Env;
 
 $root = dirname(__DIR__);
 $backupDir = $root . '/storage/backups';
-$argvList = $GLOBALS['argv'] ?? [];
-$verify = in_array('--verify', $argvList, true);
-$keep = 14;
-foreach ($argvList as $i => $arg) {
-    if ($arg === '--keep' && isset($argvList[$i + 1])) {
-        $keep = max(1, (int) $argvList[$i + 1]);
-    }
-}
+// App\Support\Argv, not $GLOBALS['argv']. The php-wasm harness does not
+// populate $argv, so `--verify` and `--keep` were silently ignored: the
+// restore drill always ran as a fresh backup instead of verifying the last
+// one, which is the one thing this tool exists to do. A backup tool that
+// quietly does something else is worse than one that errors.
+$verify = App\Support\Argv::has('--verify');
+$keepArg = App\Support\Argv::value('--keep');
+$keep = $keepArg !== null ? max(1, (int) $keepArg) : 14;
 
 if (!is_dir($backupDir) && !@mkdir($backupDir, 0770, true) && !is_dir($backupDir)) {
     fwrite(defined('STDERR') ? STDERR : fopen('php://stderr', 'w'), "Cannot create {$backupDir}\n");

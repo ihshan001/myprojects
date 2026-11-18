@@ -5178,6 +5178,31 @@ Assert::test('approval, trial and decline are the only ways out of pending', fun
     );
 });
 
+Assert::test('no tool reads $argv directly, because the runtime never fills it', function (): void {
+    // A recurring, silent failure in this project: the php-wasm harness only
+    // sets $_SERVER['argv'], so `$argv` is null and any flag read from it is
+    // ignored without an error. It has now cost three separate bugs —
+    // purge.php --yes, backup.php --verify, queue-worker.php --loop — and
+    // every one of them looked like "the feature was never finished" rather
+    // than "the flag was never read". The helper exists; this is the guard
+    // that makes people use it.
+    $offenders = [];
+    foreach (glob(QP_ROOT . '/tools/*.php') ?: [] as $file) {
+        $code = (string) file_get_contents($file);
+        // Strip block comments: several tools *describe* the trap in prose.
+        $code = preg_replace('~/\*.*?\*/~s', '', $code) ?? $code;
+        // Then single-line comments: without this, a tool that *documents*
+        // the trap is flagged as committing it, which is how a guard like
+        // this gets switched off in frustration.
+        $code = preg_replace('~^\s*(\*|//|#).*$~m', '', $code) ?? $code;
+        $code = preg_replace('~//.*$~m', '', $code) ?? $code;
+        if (preg_match('~\$(argv|GLOBALS\s*\[\s*.argv.\s*\])~', $code)) {
+            $offenders[] = basename($file);
+        }
+    }
+    Assert::same([], $offenders, 'tools read arguments through App\Support\Argv');
+});
+
 Assert::test('an approved clinic is a live clinic', function (): void {
     $clinicId = 116;
     seedTenant($clinicId, 'approval', 'Approval Clinic');

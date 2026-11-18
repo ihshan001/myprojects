@@ -15,12 +15,12 @@ require dirname(__DIR__) . '/app/bootstrap.php';
 
 use App\Services\NotificationService;
 
-$loop = null;
-foreach ($argv ?? [] as $i => $arg) {
-    if ($arg === '--loop') {
-        $loop = (int) ($argv[$i + 1] ?? 30);
-    }
-}
+// App\Support\Argv, not $argv. The php-wasm harness this project runs PHP on
+// does not populate $argv at all — it only sets $_SERVER['argv'] — so reading
+// $argv directly made `--loop` silently do nothing: the worker ran one pass
+// and exited. On a cron-scheduled host that is fine by accident; for anybody
+// running this under a supervisor it looked like the worker kept dying.
+$loop = App\Support\Argv::has('--loop') ? (int) (App\Support\Argv::value('--loop') ?? 30) : null;
 
 $service = new NotificationService();
 
