@@ -216,6 +216,10 @@ final class ClinicController
             // unchecked box sends nothing, which is the safe default.
             'notify_approach' => Request::input('notify_approach') ? 1 : 0,
             'approach_threshold' => max(1, min(10, Request::int('approach_threshold', 2))),
+            'legal_name' => mb_substr(trim(Request::string('legal_name')), 0, 160),
+            'tax_id' => mb_substr(trim(Request::string('tax_id')), 0, 64),
+            'billing_email' => mb_substr(trim(Request::string('billing_email')), 0, 160),
+            'po_number' => mb_substr(trim(Request::string('po_number')), 0, 64),
         ]);
 
         (new AuditService())->log($clinicId, 'clinic.settings_updated', 'clinic', $clinicId, ['name' => $name]);

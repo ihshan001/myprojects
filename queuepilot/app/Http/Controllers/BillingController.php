@@ -21,6 +21,48 @@ use App\Services\ClinicService;
  */
 final class BillingController
 {
+    /**
+     * One invoice, as a document a clinic can print, save to PDF and hand to
+     * an accountant.
+     *
+     * Scoped to the signed-in clinic's own invoices: an invoice id from
+     * another clinic must 404, not 403, so the page cannot be used to probe
+     * which invoice numbers exist on the platform.
+     */
+    public function invoice(string $id): void
+    {
+        $clinicId = Auth::clinicId();
+        if ($clinicId === null) {
+            abort(403, 'Platform administrators do not have a clinic subscription.');
+            return;
+        }
+
+        $invoice = Db::one(
+            'SELECT * FROM invoices WHERE id = ? AND clinic_id = ?',
+            [(int) $id, $clinicId]
+        );
+        if ($invoice === null) {
+            abort(404, 'That invoice does not exist.');
+            return;
+        }
+
+        $clinic = Auth::clinic();
+        $plan = Db::one('SELECT name FROM plans WHERE id = ?', [(int) ($clinic['plan_id'] ?? 0)]);
+
+        header('Content-Type: text/html; charset=utf-8');
+        // The document must not be served from a cache: a status change (paid,
+        // rejected) has to show the moment the page is reloaded.
+        header('Cache-Control: no-store');
+        view('billing/invoice', [
+            'title' => 'Invoice ' . $invoice['number'],
+            'invoice' => $invoice,
+            'clinic' => $clinic,
+            'planName' => (string) ($plan['name'] ?? ''),
+            'company' => (array) \App\Core\Env::get('company', []),
+            'appName' => (string) \App\Core\Env::get('app.name', 'QueuePilot'),
+        ], false);   // false = the view is already a complete document
+    }
+
     public function index(): void
     {
         $clinicId = Auth::clinicId();

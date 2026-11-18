@@ -71,6 +71,32 @@ if (!isset($tabs[$tab])) {
             <input class="input" id="city" name="city" value="<?= e((string) ($c['city'] ?? '')) ?>"></div>
           <div><label class="label" for="district">District</label>
             <input class="input" id="district" name="district" value="<?= e((string) ($c['district'] ?? '')) ?>"></div>
+
+          <?php /* Billing identity. Not patient data, but the invoice is a legal
+                   document and these are the fields an accountant needs. */ ?>
+          <div class="sm:col-span-2 pt-1">
+            <p class="text-[11px] font-bold uppercase tracking-wide text-slate-400">Invoice details</p>
+            <p class="mt-1 text-[11px] leading-relaxed text-slate-500">
+              Shown on every invoice. Leave the legal name blank to use the clinic name above.
+            </p>
+          </div>
+          <div class="sm:col-span-2"><label class="label" for="legal_name">Registered business name</label>
+            <input class="input" id="legal_name" name="legal_name" maxlength="160"
+                   value="<?= e((string) ($c['legal_name'] ?? '')) ?>"
+                   placeholder="<?= e((string) $c['name']) ?>"></div>
+          <div><label class="label" for="tax_id">VAT / TIN</label>
+            <input class="input" id="tax_id" name="tax_id" maxlength="64"
+                   value="<?= e((string) ($c['tax_id'] ?? '')) ?>"></div>
+          <div><label class="label" for="po_number">Purchase order</label>
+            <input class="input" id="po_number" name="po_number" maxlength="64"
+                   value="<?= e((string) ($c['po_number'] ?? '')) ?>"
+                   placeholder="If your accounts dept needs one">
+          </div>
+          <div class="sm:col-span-2"><label class="label" for="billing_email">Invoices to</label>
+            <input class="input" id="billing_email" name="billing_email" type="email" maxlength="160"
+                   value="<?= e((string) ($c['billing_email'] ?? '')) ?>"
+                   placeholder="accounts@yourclinic.lk — defaults to the clinic email">
+          </div>
           <div><label class="label" for="brand_color">Brand colour</label>
             <div class="flex gap-2">
               <input class="h-10 w-12 cursor-pointer rounded-lg border border-slate-300" type="color"

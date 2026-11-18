@@ -7578,6 +7578,270 @@ Assert::test('an unpaid invoice tells the clinic where to send the money', funct
 });
 
 
+/* ── Telling the line what is happening ─────────────────────────────────── */
+
+Assert::test('a notice reaches everyone still waiting, and is deduped', function (): void {
+    seedTenant(961, 'notice-clinic', 'Notice Clinic');
+    $queueId = Db::insert(
+        'INSERT INTO queues (clinic_id, name, session_date, status, created_at)
+         VALUES (?, ?, ?, ?, ?)',
+        [961, 'Notice Queue', Db::today(), 'open', now_iso()]
+    );
+
+    $entryIds = [];
+    foreach ([['N1', '+94771000001'], ['N2', '+94771000002'], ['N3', null]] as [$label, $phone]) {
+        $patientId = Db::insert(
+            'INSERT INTO patients (clinic_id, code, full_name, phone, created_at)
+             VALUES (?, ?, ?, ?, ?)',
+            [961, $label, 'Notice Patient ' . $label, $phone, now_iso()]
+        );
+        $entryIds[] = Db::insert(
+            'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_label, token_no,
+                status, priority, sort_weight, source, joined_at, track_token, version)
+             VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0)',
+            [961, (int) $queueId, (int) $patientId, $label, (int) substr($label, 1),
+             'waiting', 10, 'walkin', now_iso(), bin2hex(random_bytes(16))]
+        );
+    }
+
+    $service = new \App\Services\NotificationService();
+    $message = 'The doctor has been called away. Your token keeps its place.';
+
+    $first = $service->notifyWaiting(961, (int) $queueId, $message);
+    Assert::same(2, $first, 'both waiting patients with a number are messaged');
+
+    // The patient with no phone is skipped, not silently counted.
+    $queued = (int) Db::scalar('SELECT COUNT(*) FROM notifications WHERE clinic_id = 961');
+    Assert::same(2, $queued, 'the patient without a number gets no message and no row');
+
+    // Pressing the button twice must not text anybody twice — but a different
+    // message is news and does go out.
+    Assert::same(0, $service->notifyWaiting(961, (int) $queueId, $message), 'the same notice is not repeated');
+    Assert::same(2, $service->notifyWaiting(961, (int) $queueId, 'We are closing early today.'), 'a different notice does go out');
+
+    // An empty message is not a message.
+    Assert::same(0, $service->notifyWaiting(961, (int) $queueId, '   '), 'an empty notice sends nothing');
+
+    // The message body must carry the token, or the patient cannot tell which
+    // person it refers to.
+    $row = Db::one("SELECT payload_json FROM notifications WHERE clinic_id = 961 AND template = 'entry_notice' LIMIT 1");
+    $payload = json_decode((string) $row['payload_json'], true);
+    Assert::true(str_contains((string) $payload['body'], 'token N'), 'the message names the token');
+
+    foreach (['notifications', 'queue_entries', 'patients', 'queues'] as $t) {
+        Db::run("DELETE FROM {$t} WHERE clinic_id = 961");
+    }
+    Db::run('DELETE FROM clinics WHERE id = 961');
+});
+
+Assert::test('the notice is a button, never a side effect of pausing', function (): void {
+    // The whole design decision: an automatic SMS on every two-minute pause
+    // spends the clinic's credit and teaches patients to ignore messages.
+    $session = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/QueueController.php');
+
+    $start = strpos($session, 'public function sessionControl');
+    Assert::true($start !== false, 'sessionControl exists');
+    $body = substr($session, $start, 4000);
+    Assert::true(
+        !str_contains($body, 'notifyWaiting'),
+        'pausing a queue does not message anyone on its own'
+    );
+
+    // And there is a deliberate control for it.
+    Assert::true(str_contains($session, 'public function notifyWaiting'), 'the deliberate action exists');
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    Assert::true(str_contains($routes, "'/queue/notify'"), 'and it is routed');
+
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/dashboard/index.php');
+    Assert::true(str_contains($view, 'Tell everyone waiting'), 'the board offers it');
+    Assert::true(str_contains($view, 'Session interrupted'), 'with a preset for the case that actually needs one');
+});
+
+/* ── The invoice as a document ──────────────────────────────────────────── */
+
+Assert::test('an invoice opens as a printable document with the clinic on it', function (): void {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/billing/invoice.php');
+
+    // Bank-transfer billing needs a document a clinic can file, not a row in a
+    // table. It must be standalone: printer, PDF, accountant's inbox.
+    Assert::true(str_starts_with(trim($view), '<!doctype html>'), 'it is a complete document');
+    Assert::true(str_contains($view, '@media print'), 'and has print styles');
+    foreach (['Billed to', 'Total due', 'How to pay', 'data controller'] as $phrase) {
+        Assert::true(str_contains($view, $phrase), "it carries '{$phrase}'");
+    }
+
+    // The billing identity, not the signup name.
+    Assert::true(str_contains($view, "clinic['legal_name']"), 'it bills the registered business name');
+    Assert::true(str_contains($view, "clinic['tax_id']"), 'and shows the VAT/TIN');
+    Assert::true(str_contains($view, "clinic['po_number']"), 'and the purchase order the accounts dept asked for');
+
+    // It must not inherit the console chrome.
+    Assert::true(!str_contains($view, 'Sign out'), 'no admin navigation is printed');
+});
+
+Assert::test('one clinic cannot open another clinic\'s invoice', function (): void {
+    $controller = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/BillingController.php');
+    $start = strpos($controller, 'public function invoice');
+    Assert::true($start !== false, 'the invoice action exists');
+    $body = substr($controller, $start, 2000);
+
+    Assert::true(
+        (bool) preg_match('/FROM invoices WHERE id = \? AND clinic_id = \?/', $body),
+        'the query is scoped by clinic_id, so an id from another tenant finds nothing'
+    );
+    // 404, not 403: a 403 would confirm that the invoice number exists.
+    Assert::true(
+        (bool) preg_match("/abort\(404,\s*'That invoice does not exist\.'\)/", $body),
+        'and a foreign invoice reads as missing rather than forbidden'
+    );
+
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    Assert::true(str_contains($routes, "'/billing/invoices/{id}'"), 'the route exists');
+});
+
+Assert::test('the clinic can put its own billing identity on the invoice', function (): void {
+    $schema = (string) file_get_contents(QP_ROOT . '/database/migrations/0027_billing_identity.sqlite.sql');
+    foreach (['tax_id', 'billing_email', 'po_number'] as $column) {
+        Assert::true(str_contains($schema, $column), "clinics.{$column} is added");
+    }
+    Assert::true(
+        is_file(QP_ROOT . '/database/migrations/0027_billing_identity.mysql.sql'),
+        'and there is a MySQL counterpart — production is MySQL'
+    );
+
+    $settings = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/index.php');
+    foreach (['legal_name', 'tax_id', 'billing_email', 'po_number'] as $field) {
+        Assert::true(str_contains($settings, 'name="' . $field . '"'), "the settings form collects {$field}");
+    }
+
+    // Blank legal name must fall back to the clinic name, not render empty.
+    $service = (string) file_get_contents(QP_ROOT . '/app/Services/ClinicService.php');
+    Assert::true(
+        (bool) preg_match("/\\\$data\['legal_name'\] \?\? ''\) !== '' \? \\\$data\['legal_name'\] : \\\$data\['name'\]/", $service),
+        'a blank legal name falls back to the clinic name'
+    );
+});
+
+
+Assert::test('the host drill and load test exist and are safe to run in production', function (): void {
+    // These are the two verification tools a new host needs, and both have to
+    // be safe: a drill that writes to production or a load test that picks a
+    // live queue is worse than no tool.
+    foreach (['host-drill.php', 'loadtest.php'] as $tool) {
+        Assert::true(is_file(QP_ROOT . '/tools/' . $tool), "tools/{$tool} exists");
+    }
+
+    $drill = (string) file_get_contents(QP_ROOT . '/tools/host-drill.php');
+    // The key check must reject the fallback that ships in the repository.
+    Assert::true(
+        str_contains($drill, 'dev-only-key-change-me-in-env'),
+        'the host drill knows about the shared dev key'
+    );
+    // The checks that fail silently otherwise.
+    foreach (['must_change_password', 'legal_name', 'price_yearly'] as $column) {
+        Assert::true(str_contains($drill, $column), "it verifies {$column} exists (migrations ran)");
+    }
+    Assert::true(str_contains($drill, 'is_writable'), 'it checks storage is writable');
+    Assert::true(
+        str_contains($drill, 'file_put_contents'),
+        'and proves it by writing, because is_writable lies on a full disk'
+    );
+
+    $load = (string) file_get_contents(QP_ROOT . '/tools/loadtest.php');
+    // It must make its own queue: a load test that picks a live queue would
+    // dump hundreds of fake patients into a clinic's real session.
+    Assert::true(str_contains($load, 'INSERT INTO queues'), 'the load test creates its own queue');
+    Assert::true(str_contains($load, '--cleanup'), 'and can remove everything it made');
+    Assert::true(str_contains($load, 'DISTINCT token_label'), 'it verifies uniqueness from the database, not from the loop');
+});
+
+
+Assert::test('production refuses to boot on the key that ships in the repository', function (): void {
+    // A fallback key has to exist so a fresh clone runs. It is committed, so it
+    // is public. An install that forgets APP_KEY would encrypt every TOTP
+    // secret with a key anybody can read from this repo — and would never
+    // notice, because everything keeps working.
+    $config = (string) file_get_contents(QP_ROOT . '/config/config.php');
+    Assert::true(
+        str_contains($config, 'dev-only-key-change-me-in-env'),
+        'the development fallback still exists, so a clone boots'
+    );
+
+    $front = (string) file_get_contents(QP_ROOT . '/public/index.php');
+    Assert::true(
+        (bool) preg_match("/'env'\] === 'production'[\s\S]{0,200}dev-only-key-change-me-in-env/", $front),
+        'the front controller compares the key against it in production'
+    );
+    Assert::true(
+        (bool) preg_match("/APP_KEY is not set[\s\S]{0,600}http_response_code\(500\)|http_response_code\(500\)[\s\S]{0,600}APP_KEY is not set/", $front),
+        'and refuses with a 500 rather than running'
+    );
+    // The message has to tell the operator what to type, or they will guess.
+    Assert::true(
+        str_contains($front, 'bin2hex(random_bytes(32))'),
+        'and the error says how to generate a real key'
+    );
+
+    // The drill checks the same thing from the outside.
+    $drill = (string) file_get_contents(QP_ROOT . '/tools/host-drill.php');
+    Assert::true(
+        str_contains($drill, 'not the shared fallback'),
+        'the host drill reports it too, on a host where the app already boots'
+    );
+});
+
+
+Assert::test('both migration dialects are checked for copy-paste drift', function (): void {
+    // The test suite only ever executes the .sqlite.sql half. The .mysql.sql
+    // half runs for the first time on a clinic's server, so a copy-paste
+    // mistake there is invisible until it matters.
+    $checker = QP_ROOT . '/tools/dialect-check.php';
+    Assert::true(is_file($checker), 'tools/dialect-check.php exists');
+
+    $source = (string) file_get_contents($checker);
+    // Each rule that corresponds to a substitution actually made in this repo.
+    foreach ([
+        "datetime\\s*\\(\\s*'now'",
+        'AUTOINCREMENT',
+        'INSERT\\s+OR\\s+',
+        'AUTO_INCREMENT',
+        'ENGINE\\s*=',
+    ] as $needle) {
+        Assert::true(str_contains($source, $needle), "it rejects {$needle} in the wrong dialect");
+    }
+
+    // Comments are stripped before scanning, because the prose in these files
+    // legitimately names the other dialect.
+    Assert::true(str_contains($source, "preg_replace('/--[^\\n]*/'"), 'it ignores comments before scanning');
+
+    // Every migration must have both halves.
+    $files = glob(QP_ROOT . '/database/migrations/*.sql') ?: [];
+    $names = [];
+    foreach ($files as $f) {
+        if (preg_match('/^(\d{4}[a-z]?_[a-z0-9_]+)\.(sqlite|mysql)\.sql$/', basename($f), $m)) {
+            $names[$m[1]][$m[2]] = true;
+        }
+    }
+    $unpaired = [];
+    foreach ($names as $name => $pair) {
+        if (!isset($pair['sqlite']) || !isset($pair['mysql'])) {
+            $unpaired[] = $name;
+        }
+    }
+    Assert::same([], $unpaired, 'no migration ships only one dialect');
+
+    // And the specific bug found: the MySQL half must not use datetime('now').
+    $mysqlHits = [];
+    foreach (glob(QP_ROOT . '/database/migrations/*.mysql.sql') ?: [] as $f) {
+        $code = preg_replace('/--[^\n]*/', '', (string) file_get_contents($f)) ?? '';
+        if (preg_match("/datetime\s*\(\s*'now'\s*\)/i", $code)) {
+            $mysqlHits[] = basename($f);
+        }
+    }
+    Assert::same([], $mysqlHits, 'no MySQL migration calls SQLite\'s datetime()');
+});
+
+
 $code = Assert::summary();
 Database::cleanup($dbPath);
 echo "\n";

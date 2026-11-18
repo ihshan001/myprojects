@@ -162,6 +162,50 @@ listen there).
 
 ---
 
+## 2b. Checking a new host before it goes live
+
+Two drills, both safe to run on production:
+
+```bash
+php tools/host-drill.php      # 24 checks, ~2 seconds, writes nothing
+php tools/loadtest.php --count 500 --clinic 1
+php tools/loadtest.php --clinic 1 --cleanup
+```
+
+**`host-drill.php`** is the one to run first on a new host, and again after any
+server change. It checks the six things that break silently on shared hosting:
+
+| Check | What it catches |
+| --- | --- |
+| `APP_KEY` present, long, not the repository fallback | 2FA secrets encrypted with a publicly-known key |
+| Session directory writable, not world-readable, outside `public/` | Every request arriving signed out; downloadable sessions |
+| Database answers, quickly | The obvious outage, and a subtly slow one |
+| Every column the code reads exists | Migrations not run — the app looks fine and throws on first use |
+| Storage writable (actual write, not `is_writable`) | Disk full or quota exceeded while `is_writable` still says yes |
+| Debug off, 2FA required, monitor token set | Stack traces to the public; a platform with no second factor |
+
+It writes nothing and changes nothing. A failure prints the fix next to it.
+
+**`tools/dialect-check.php`** compares every migration pair for
+copy-paste drift between SQLite and MySQL. This one earns its place: it found
+`0015_session_start.mysql.sql` calling SQLite's `datetime('now')`, which MySQL
+does not have. Nothing else in the repository would have caught it — the test
+suite only ever executes the SQLite half — and the first execution against MySQL
+is on a clinic's host.
+
+```bash
+php tools/dialect-check.php
+```
+
+It checks spelling, not behaviour. It cannot tell you a migration will *run*;
+only a MySQL host does that.
+
+**`loadtest.php`** measures the token allocator on *this* host with *this*
+database. On SQLite it manages roughly 260–680 tokens/second with zero
+duplicates; InnoDB on a shared host will be different, which is the reason to
+run it rather than trust the number. It creates a throwaway queue and deletes
+it with `--cleanup`. Never run it against a live queue id.
+
 ## 3. A clinic that has stopped using the system
 
 This is the flow the owner asked for explicitly, and it is **not** a timer.

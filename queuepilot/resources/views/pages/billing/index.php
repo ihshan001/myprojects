@@ -82,7 +82,10 @@
           <tbody>
             <?php foreach ($invoices as $inv): ?>
               <tr>
-                <td class="font-mono text-[11px]"><?= e((string) $inv['number']) ?></td>
+                <td class="font-mono text-[11px]">
+                  <a class="text-teal-700 underline decoration-dotted hover:decoration-solid"
+                     href="/billing/invoices/<?= (int) $inv['id'] ?>"><?= e((string) $inv['number']) ?></a>
+                </td>
                 <td class="hidden sm:table-cell text-[11px] text-slate-500"><?= e((string) $inv['period_from']) ?> → <?= e((string) $inv['period_to']) ?></td>
                 <td class="numeric text-xs"><?= e(money((float) $inv['amount'])) ?></td>
                 <td>

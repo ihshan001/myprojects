@@ -154,7 +154,8 @@ final class ClinicService
         Db::run(
             'UPDATE clinics SET name = ?, phone = ?, email = ?, address_line = ?, city = ?, district = ?,
                     brand_color = ?, locale = ?, token_prefix = ?, late_grace_minutes = ?,
-                    notify_approach = ?, approach_threshold = ?, updated_at = ?
+                    notify_approach = ?, approach_threshold = ?,
+                    legal_name = ?, tax_id = ?, billing_email = ?, po_number = ?, updated_at = ?
               WHERE id = ?',
             [
                 $data['name'], $data['phone'] ?? null, $data['email'] ?? null,
@@ -164,6 +165,13 @@ final class ClinicService
                 (int) ($data['late_grace_minutes'] ?? 15),
                 !empty($data['notify_approach']) ? 1 : 0,
                 max(1, min(10, (int) ($data['approach_threshold'] ?? 2))),
+                // Billing identity. Blank falls back to the clinic's own name
+                // and email rather than rendering an empty invoice header: an
+                // invoice with no legal name on it cannot be filed.
+                ($data['legal_name'] ?? '') !== '' ? $data['legal_name'] : $data['name'],
+                ($data['tax_id'] ?? '') !== '' ? $data['tax_id'] : null,
+                ($data['billing_email'] ?? '') !== '' ? $data['billing_email'] : ($data['email'] ?? null),
+                ($data['po_number'] ?? '') !== '' ? $data['po_number'] : null,
                 Db::now(), $clinicId,
             ]
         );

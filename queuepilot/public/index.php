@@ -65,6 +65,32 @@ View::share('debug', $config['app']['debug']);
 View::share('tenantClinic', Tenant::clinic());
 View::share('tenantKind', Tenant::kind());
 
+/* Refuse to run in production on the key that ships in the repository.
+ *
+ * The fallback key exists so a fresh clone boots. It is committed to version
+ * control, so it is public. Running production on it would mean the TOTP
+ * secrets — the thing that protects every platform admin account — are
+ * encrypted with a key everyone already has.
+ *
+ * Failing loudly at boot is the only acceptable behaviour: a 500 on every
+ * request gets fixed in minutes, whereas a silently weak key never gets fixed
+ * at all.
+ */
+if ($config['app']['env'] === 'production'
+    && $config['app']['key'] === 'dev-only-key-change-me-in-env-8f3a1c9d') {
+    http_response_code(500);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo "APP_KEY is not set.\n\n"
+       . "This install is in production but is using the development key that ships\n"
+       . "in the repository, which is public. Every encrypted secret in this\n"
+       . "database — including two-factor secrets — is readable with it.\n\n"
+       . "Generate one and put it in .env, then restart PHP:\n\n"
+       . "  php -r \"echo 'APP_KEY=' . bin2hex(random_bytes(32)), PHP_EOL;\" >> .env\n\n"
+       . "Changing the key invalidates existing two-factor enrolments; users\n"
+       . "re-enrol at /settings/security.\n";
+    exit;
+}
+
 /* A password somebody else chose must not survive its first use.
  *
  * Admins create staff accounts with a temporary password and then have to get

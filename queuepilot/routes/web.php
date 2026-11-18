@@ -137,6 +137,10 @@ Router::post('/queue/action', [QueueController::class, 'action'], ['auth' => tru
 Router::post('/queue/step', [QueueController::class, 'markStep'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/session/start', [QueueController::class, 'startSession'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/session', [QueueController::class, 'sessionControl'], ['auth' => true, 'ability' => 'queue.operate']);
+// Tell the line what is happening. A deliberate button, never automatic: an
+// SMS on every two-minute pause spends the clinic's credit and teaches
+// patients to ignore the messages that matter.
+Router::post('/queue/notify', [QueueController::class, 'notifyWaiting'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/delay', [QueueController::class, 'announceDelay'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::get('/display', [DisplayController::class, 'screen'], ['auth' => true]);
 Router::get('/settings/displays', [DisplayController::class, 'displays'], ['auth' => true, 'ability' => 'clinic.manage']);
@@ -283,6 +287,9 @@ Router::get('/audit', [ReportController::class, 'audit'], ['auth' => true, 'abil
 
 /* -------------------------------------------------------------- billing */
 Router::get('/billing', [BillingController::class, 'index'], ['auth' => true]);
+// The printable document. Bank-transfer billing needs an invoice a clinic can
+// actually file, not just a row in a table.
+Router::get('/billing/invoices/{id}', [BillingController::class, 'invoice'], ['auth' => true]);
 Router::post('/billing/plan', [BillingController::class, 'changePlan'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/billing/pay', [BillingController::class, 'pay'], ['auth' => true, 'ability' => 'billing.view']);
 Router::post('/billing/withdraw-claim', [BillingController::class, 'withdrawClaim'], ['auth' => true, 'ability' => 'billing.view']);

@@ -22,6 +22,13 @@ return [
         // arriving on one of these is the platform's own surface and carries
         // no clinic, even though it may share the parent domain.
         'root_hosts' => getenv('APP_ROOT_HOSTS') ?: '',
+        // A fallback exists so a fresh clone boots without setup. It is in the
+        // repository, so it is public, and every install that forgets APP_KEY
+        // would share it — which would make every encrypted 2FA secret on
+        // those installs readable by anyone who has read this file. In
+        // production that has to be a hard stop, not a warning:
+        // tools/host-drill.php checks for it, and the front controller refuses
+        // to boot on it below.
         'key'      => getenv('APP_KEY') ?: 'dev-only-key-change-me-in-env-8f3a1c9d',
         'timezone' => getenv('APP_TIMEZONE') ?: 'Asia/Colombo',
         'locales'  => ['en' => 'English', 'si' => 'සිංහල', 'ta' => 'தமிழ்'],

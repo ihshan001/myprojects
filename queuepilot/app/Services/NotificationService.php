@@ -278,6 +278,94 @@ final class NotificationService
      *
      * @return int how many messages were newly queued
      */
+    /**
+     * Tell everyone still waiting what is happening, deliberately.
+     *
+     * A pause is not a delay with a number: the doctor has stepped out, or the
+     * session was abandoned, and the line has no idea how long. Silence is
+     * what makes a patient walk to the desk and then leave; telling them "we
+     * will call you" is worth more than a precise guess we cannot make.
+     *
+     * This is only ever called from an explicit button. An automatic message
+     * on every two-minute pause would be worse than silence — it trains
+     * patients to ignore the messages that matter.
+     *
+     * Deduped on the announcement text, so pressing the button twice does not
+     * text anybody twice, while a *different* announcement does reach them.
+     *
+     * @return int number of messages queued
+     */
+    public function notifyWaiting(int $clinicId, int $queueId, string $message): int
+    {
+        $message = trim($message);
+        if ($message === '') {
+            return 0;
+        }
+
+        $queue = Db::one(
+            'SELECT q.id, q.name, c.name AS clinic_name
+               FROM queues q JOIN clinics c ON c.id = q.clinic_id
+              WHERE q.id = ? AND q.clinic_id = ?',
+            [$queueId, $clinicId]
+        );
+        if (!$queue) {
+            return 0;
+        }
+
+        $waiting = Db::all(
+            "SELECT e.id, e.token_label, p.phone
+               FROM queue_entries e JOIN patients p ON p.id = e.patient_id
+              WHERE e.clinic_id = ? AND e.queue_id = ? AND e.status IN ('waiting','on_hold')
+                AND p.phone IS NOT NULL AND p.phone <> ''
+              ORDER BY e.sort_weight, e.id",
+            [$clinicId, $queueId]
+        );
+
+        $queued = 0;
+        foreach ($waiting as $entry) {
+            // Keyed on the announcement itself: a repeat is noise, a change of
+            // message is news.
+            $dedupe = 'notice:' . $queueId . ':' . sha1($message) . ':' . (int) $entry['id'];
+            if (Db::scalar('SELECT id FROM notifications WHERE dedupe_key = ?', [$dedupe]) !== null) {
+                continue;
+            }
+
+            $body = sprintf(
+                '%s — token %s. %s',
+                (string) $queue['clinic_name'],
+                (string) $entry['token_label'],
+                $message
+            );
+
+            try {
+                Db::insert(
+                    'INSERT INTO notifications (clinic_id, entry_id, channel, template, to_number, payload_json,
+                        dedupe_key, status, attempts, scheduled_at, created_at)
+                     VALUES (?,?,?,?,?,?,?,?,0,?,?)',
+                    [
+                        $clinicId, (int) $entry['id'], 'sms', 'entry_notice',
+                        self::mask((string) $entry['phone']),
+                        json_encode(['body' => $body, 'to' => (string) $entry['phone'], 'notice' => $message], JSON_UNESCAPED_UNICODE),
+                        $dedupe, 'queued', Db::now(), Db::now(),
+                    ]
+                );
+                $queued++;
+            } catch (\PDOException $e) {
+                if (!str_contains($e->getMessage(), 'UNIQUE') && !str_contains($e->getMessage(), 'Duplicate')) {
+                    throw $e;
+                }
+            }
+        }
+
+        if ($queued > 0) {
+            Log::info('notification.notice_queued', [
+                'clinic' => $clinicId, 'queue' => $queueId, 'count' => $queued,
+            ]);
+        }
+
+        return $queued;
+    }
+
     public function notifyDelay(int $clinicId, int $queueId, int $minutes, string $note = ''): int
     {
         if ($minutes <= 0) {
