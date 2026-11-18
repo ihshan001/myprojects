@@ -35,6 +35,7 @@ use App\Http\Controllers\BreakController;
 use App\Http\Controllers\IncidentController;
 use App\Http\Controllers\OnboardingController;
 use App\Http\Controllers\LegalController;
+use App\Http\Controllers\WelcomeController;
 use App\Http\Controllers\OnboardingStatusController;
 use App\Http\Controllers\PriorityRuleController;
 use App\Http\Controllers\WorkflowController;
@@ -45,6 +46,12 @@ use App\Http\Controllers\RoomController;
 Router::get('/', [PublicController::class, 'landing']);
 Router::get('/features', [PublicController::class, 'features']);
 Router::get('/pricing', [PublicController::class, 'pricing']);
+/* ----------------------------------------------------------- welcome */
+// The link an approved clinic receives. Public because the owner is not signed
+// in yet, and the token in the URL is the credential.
+Router::get('/welcome/{token}', [WelcomeController::class, 'show']);
+Router::post('/welcome/{token}', [WelcomeController::class, 'accept']);
+
 /* ------------------------------------------------------------- legal */
 // Public and unauthenticated on purpose: a privacy notice that needs a login
 // is not a notice. These are the pages the PDPA requires to be reachable at

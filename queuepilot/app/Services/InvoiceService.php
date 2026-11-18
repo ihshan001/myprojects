@@ -50,7 +50,8 @@ final class InvoiceService
 
         $clinics = Db::all(
             "SELECT c.id, c.name, c.billing_status, c.renews_on, c.trial_ends_on,
-                    c.currency, p.name AS plan_name, p.price_monthly, p.code AS plan_code
+                    c.currency, p.name AS plan_name, p.price_monthly, p.price_yearly,
+                    p.code AS plan_code, c.billing_cycle
                FROM clinics c
                LEFT JOIN plans p ON p.id = c.plan_id
               WHERE c.closed_at IS NULL
@@ -72,9 +73,18 @@ final class InvoiceService
             }
 
             $renewsOn = substr((string) $c['renews_on'], 0, 10);
-            // The period being billed is the month that ends on the renewal date.
+            $yearly   = ((string) ($c['billing_cycle'] ?? 'monthly')) === 'yearly';
+
+            // The period being billed ends on the renewal date. That is arrears,
+            // and it is deliberate: the clinic pays for the time it has actually
+            // had, so a clinic that never used the platform is not charged for a
+            // month it could not reach. A yearly clinic gets one invoice for the
+            // twelve months behind it, not twelve monthly ones — the whole point
+            // of the discount is that it is billed once.
             $periodTo   = $renewsOn;
-            $periodFrom = date('Y-m-d', strtotime($renewsOn . ' -1 month'));
+            $periodFrom = $yearly
+                ? date('Y-m-d', strtotime($renewsOn . ' -1 year'))
+                : date('Y-m-d', strtotime($renewsOn . ' -1 month'));
 
             $exists = Db::scalar(
                 'SELECT id FROM invoices WHERE clinic_id = ? AND period_from = ?',
@@ -85,7 +95,12 @@ final class InvoiceService
             }
 
             $number = $this->nextNumber($periodFrom);
-            $amount = (float) $c['price_monthly'];
+            // A yearly clinic is invoiced once for twelve months at the yearly
+            // price — twelve monthly invoices would waste the discount's whole
+            // point and produce twelve chances to suspend a paying customer.
+            $amount = $yearly
+                ? (float) ($c['price_yearly'] ?? $c['price_monthly'] * 12)
+                : (float) $c['price_monthly'];
 
             $created[] = [
                 'clinic_id'   => (int) $c['id'],

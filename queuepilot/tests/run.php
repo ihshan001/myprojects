@@ -38,10 +38,13 @@ function seedPlans(): void
         [4, 'enterprise', 'Enterprise', 0, 999, 999, 999, 40],
     ];
     foreach ($plans as [$id, $code, $name, $price, $docs, $staff, $queues, $sort]) {
+        // Mirrors tools/seed.php: yearly is derived at 20% off, so a test that
+        // checks the arithmetic checks the same rule production uses.
         Db::run(
-            'INSERT INTO plans (id, code, name, price_monthly, max_doctors, max_staff, max_queues, features, sort_order)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [$id, $code, $name, $price, $docs, $staff, $queues, 'Test plan', $sort]
+            'INSERT INTO plans (id, code, name, price_monthly, price_yearly, yearly_discount_pct,
+                                max_doctors, max_staff, max_queues, features, sort_order)
+             VALUES (?, ?, ?, ?, ?, 20, ?, ?, ?, ?, ?)',
+            [$id, $code, $name, $price, round($price * 12 * 0.8, 2), $docs, $staff, $queues, 'Test plan', $sort]
         );
     }
 }
@@ -6948,6 +6951,331 @@ Assert::test('the two screens that were wired to nothing now have nav entries', 
         str_contains($layout, "Auth::can('clinic.manage')\n                    ? ['/settings/displays'"),
         'and the screens link only appears for a role that can open it'
     );
+});
+
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Closing a clinic: a human decides, never a timer.
+ *
+ * The owner reversed the automatic purge. These tests exist because that
+ * decision is easy to undo by accident — a future refactor that makes
+ * purgeable() the deletion gate would restore exactly the behaviour the
+ * owner rejected, and nothing else in the suite would notice.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+Assert::test('a due clinic is reported for contact but is NOT authorised for deletion', function (): void {
+    $lifecycle = new \App\Services\LifecycleService();
+
+    // A clinic closed well past the window.
+    // Closure is recorded as a request date plus the purge date derived from
+    // it; the platform never deletes on that date, it only starts asking.
+    $closed = \App\Core\Db::insert(
+        'INSERT INTO clinics (name, slug, site_host, billing_status, closure_requested_at, purge_after, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        ['Closed For Ages', 'closed-for-ages', 'closed-for-ages.queue.lk', 'closed',
+         date('Y-m-d H:i:s', strtotime('-200 days')),
+         date('Y-m-d H:i:s', strtotime('-110 days')), now_iso(), now_iso()]
+    );
+
+    $due = $lifecycle->purgeable();
+    $ids = array_map(static fn (array $c): int => (int) $c['id'], $due);
+    Assert::true(in_array((int) $closed, $ids, true), 'a clinic closed for 200 days appears as due');
+
+    // It must carry the contact details, because the point of being due is
+    // that somebody has to email and phone them.
+    $entry = null;
+    foreach ($due as $c) {
+        if ((int) $c['id'] === (int) $closed) {
+            $entry = $c;
+        }
+    }
+    Assert::true($entry !== null, 'the clinic was found in the due list');
+    // Contact details are what makes the next step possible: somebody has to
+    // email and then phone this clinic before anyone may delete anything.
+    Assert::true(array_key_exists('email', (array) $entry), 'due clinics come with an email to write to');
+    Assert::true(array_key_exists('phone', (array) $entry), 'and a phone number to call');
+
+    // The decisive assertion: being due does not authorise deletion.
+    $approved = array_map(
+        static fn (array $c): int => (int) $c['id'],
+        $lifecycle->approvedForPurge()
+    );
+    Assert::true(!in_array((int) $closed, $approved, true), 'but it is NOT in the approved-for-deletion list');
+
+    \App\Core\Db::run('DELETE FROM clinics WHERE id = ?', [(int) $closed]);
+});
+
+Assert::test('approving deletion requires a note and an actor, and can be revoked', function (): void {
+    $lifecycle = new \App\Services\LifecycleService();
+    $clinicId = \App\Core\Db::insert(
+        'INSERT INTO clinics (name, slug, billing_status, closure_requested_at, purge_after, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)',
+        ['Purge Candidate', 'purge-candidate', 'closed',
+         date('Y-m-d H:i:s', strtotime('-120 days')),
+         date('Y-m-d H:i:s', strtotime('-30 days')), now_iso(), now_iso()]
+    );
+
+    // A bare "yes" is not a record of a decision.
+    $thin = $lifecycle->approvePurge((int) $clinicId, 'ok', 1);
+    Assert::false($thin['ok'], 'a one-word note is refused — it is the only audit trail');
+
+    $blank = $lifecycle->approvePurge((int) $clinicId, '', 1);
+    Assert::false($blank['ok'], 'no note at all is refused');
+
+    $proper = $lifecycle->approvePurge(
+        (int) $clinicId,
+        'Phoned the owner 2026-11-06; clinic closed permanently, records not needed.',
+        1
+    );
+    Assert::true($proper['ok'], 'a real note from a named person is accepted');
+
+    $approved = array_map(
+        static fn (array $c): int => (int) $c['id'],
+        $lifecycle->approvedForPurge()
+    );
+    Assert::true(in_array((int) $clinicId, $approved, true), 'and it now appears as authorised');
+
+    $stored = \App\Core\Db::one('SELECT purge_approved_at, purge_approved_by FROM clinics WHERE id = ?', [(int) $clinicId]);
+    Assert::true(!empty($stored['purge_approved_at']), 'the decision is stamped with a time');
+    Assert::same(1, (int) $stored['purge_approved_by'], 'and with who made it');
+
+    // Changing your mind must work right up until the deletion runs.
+    $revoked = $lifecycle->revokePurgeApproval((int) $clinicId, 1);
+    Assert::true($revoked['ok'], 'approval can be revoked');
+
+    $after = array_map(
+        static fn (array $c): int => (int) $c['id'],
+        $lifecycle->approvedForPurge()
+    );
+    Assert::true(!in_array((int) $clinicId, $after, true), 'and the clinic is no longer scheduled for deletion');
+
+    \App\Core\Db::run('DELETE FROM clinics WHERE id = ?', [(int) $clinicId]);
+});
+
+Assert::test('the purge tool will not delete without approval', function (): void {
+    // A source-level guard. The whole reversal is that purge.php asks two
+    // different questions: who is due, and who is authorised. A tool that
+    // deletes from the "due" list is the old behaviour wearing a new name.
+    $tool = (string) file_get_contents(QP_ROOT . '/tools/purge.php');
+
+    Assert::true(str_contains($tool, 'approvedForPurge'), 'purge.php asks for approved clinics');
+    Assert::true(
+        (bool) preg_match('/!App\\\\Support\\\\Argv::has\(\'--yes\'\)|--dry-run/', $tool),
+        'and still defaults to a dry run'
+    );
+
+    // Delete statements must be driven by the approved list, not the due list.
+    Assert::true(
+        !preg_match('/foreach \(\s*\$due\b[^)]*\)[^{]*\{[^}]*DELETE/s', $tool),
+        'no delete statement is fed from the "due" list'
+    );
+});
+
+/* ── Yearly billing ─────────────────────────────────────────────────────── */
+
+Assert::test('a yearly clinic is invoiced once for a year at the discounted price', function (): void {
+    $plan = \App\Core\Db::one("SELECT price_monthly, price_yearly, yearly_discount_pct FROM plans WHERE code = 'professional'");
+    Assert::true($plan !== null, 'the professional plan exists');
+
+    $monthly = (float) $plan['price_monthly'];
+    $yearly  = (float) $plan['price_yearly'];
+
+    // Offered terms were: 20% off the monthly price for a yearly commitment.
+    $expected = round($monthly * 12 * 0.8, 2);
+    Assert::same($expected, $yearly, 'yearly price is a 20% discount on twelve months');
+    Assert::same(20.0, (float) $plan['yearly_discount_pct'], 'the discount is recorded as 20%');
+
+    // The saving must be real and must not round to nothing.
+    $saving = round($monthly * 12 - $yearly, 2);
+    Assert::true($saving > 0, "a yearly commitment saves money ({$saving})");
+    Assert::true($saving > $monthly * 2, 'and saves more than two months — otherwise why commit');
+});
+
+Assert::test('every seeded plan has a yearly price consistent with its discount', function (): void {
+    $plans = \App\Core\Db::all('SELECT code, price_monthly, price_yearly, yearly_discount_pct FROM plans');
+    Assert::true(count($plans) >= 4, 'the plans are seeded');
+
+    foreach ($plans as $p) {
+        $monthly = (float) $p['price_monthly'];
+        $pct     = (float) $p['yearly_discount_pct'];
+        $expected = round($monthly * 12 * (1 - $pct / 100), 2);
+        Assert::same(
+            $expected,
+            (float) $p['price_yearly'],
+            "{$p['code']}: yearly price matches its stated discount"
+        );
+    }
+});
+
+Assert::test('a yearly clinic is billed once for twelve months, not twelve times', function (): void {
+    // The discount only means something if the invoice is annual. Twelve
+    // monthly invoices at the yearly rate would be a bug nobody notices until
+    // a clinic is suspended for an amount they already paid.
+    seedTenant(941, 'yearly-clinic', 'Yearly Clinic');
+    Db::run(
+        "UPDATE clinics SET billing_status='active', renews_on='2026-12-02', billing_cycle='yearly',
+                plan_id = (SELECT id FROM plans WHERE code = 'professional')
+          WHERE id = 941"
+    );
+
+    $service = new App\Services\InvoiceService();
+    $due = $service->generateDue(false, '2026-12-02');
+
+    $mine = array_values(array_filter($due, static fn (array $r): bool => $r['clinic_id'] === 941));
+    Assert::same(1, count($mine), 'exactly one invoice, not twelve');
+    Assert::same('2025-12-02', $mine[0]['period_from'], 'the period covers the whole year behind it');
+    Assert::same('2026-12-02', $mine[0]['period_to'], 'ending on the renewal date');
+
+    $plan = Db::one("SELECT price_monthly, price_yearly FROM plans WHERE code = 'professional'");
+    Assert::same((float) $plan['price_yearly'], (float) $mine[0]['amount'], 'charged the yearly price, not monthly');
+
+    // And the yearly price is genuinely cheaper than twelve monthly invoices.
+    Assert::true(
+        (float) $mine[0]['amount'] < (float) $plan['price_monthly'] * 12,
+        'which is less than paying monthly for a year'
+    );
+});
+
+/* ── Welcome links ──────────────────────────────────────────────────────── */
+
+Assert::test('a welcome link is single-use, expiring, and stored hashed', function (): void {
+    $service = new \App\Services\WelcomeService();
+
+    $clinicId = \App\Core\Db::insert(
+        'INSERT INTO clinics (name, slug, billing_status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)',
+        ['Welcome Unit Clinic', 'welcome-unit-clinic', 'active', now_iso(), now_iso()]
+    );
+    $userId = \App\Core\Db::insert(
+        'INSERT INTO users (clinic_id, name, email, password_hash, role, is_active, created_at)
+         VALUES (?, ?, ?, ?, ?, 1, ?)',
+        [(int) $clinicId, 'Unit Owner', 'unit-owner@example.test', password_hash('OldPass#2026', PASSWORD_DEFAULT), 'clinic_admin', now_iso()]
+    );
+
+    $issued = $service->issue((int) $clinicId, (int) $userId);
+    Assert::true($issued['ok'], 'a link is issued');
+    Assert::true(strlen((string) $issued['token']) >= 32, 'the token is long enough to not be guessed');
+
+    // What is stored must not be the token itself: a database read should not
+    // hand somebody a working login link.
+    $row = \App\Core\Db::one(
+        'SELECT token_hash, expires_at, accepted_at FROM staff_invites WHERE clinic_id = ? ORDER BY id DESC LIMIT 1',
+        [(int) $clinicId]
+    );
+    Assert::true($row !== null, 'the invite is recorded');
+    Assert::true($row['token_hash'] !== $issued['token'], 'the raw token is not stored');
+    Assert::same(hash('sha256', (string) $issued['token']), (string) $row['token_hash'], 'only its sha256 is');
+
+    $days = (int) round((strtotime((string) $row['expires_at']) - time()) / 86400);
+    Assert::true($days >= 13 && $days <= 14, "the link expires in about two weeks (got {$days} days)");
+    Assert::true($row['accepted_at'] === null, 'and starts unused');
+
+    // Redeeming it sets a password the owner chooses, and works once.
+    $redeemed = $service->redeem((string) $issued['token'], 'MyOwnPass#2026');
+    Assert::true($redeemed['ok'], 'the link sets a password');
+
+    $user = \App\Core\Db::one('SELECT password_hash, email_verified_at FROM users WHERE id = ?', [(int) $userId]);
+    Assert::true(password_verify('MyOwnPass#2026', (string) $user['password_hash']), 'and the chosen password is what works');
+    Assert::true($user['email_verified_at'] !== null, 'receiving the link proves the address');
+
+    $again = $service->redeem((string) $issued['token'], 'AnotherPass#2026');
+    Assert::false($again['ok'], 'the same link cannot be used twice');
+
+    \App\Core\Db::run('DELETE FROM staff_invites WHERE clinic_id = ?', [(int) $clinicId]);
+    \App\Core\Db::run('DELETE FROM users WHERE id = ?', [(int) $userId]);
+    \App\Core\Db::run('DELETE FROM clinics WHERE id = ?', [(int) $clinicId]);
+});
+
+Assert::test('an expired welcome link is refused and says why', function (): void {
+    $service = new \App\Services\WelcomeService();
+    $clinicId = \App\Core\Db::insert(
+        'INSERT INTO clinics (name, slug, billing_status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)',
+        ['Expired Invite Clinic', 'expired-invite-clinic', 'active', now_iso(), now_iso()]
+    );
+    $userId = \App\Core\Db::insert(
+        'INSERT INTO users (clinic_id, name, email, password_hash, role, is_active, created_at)
+         VALUES (?, ?, ?, ?, ?, 1, ?)',
+        [(int) $clinicId, 'Expired Owner', 'expired-owner@example.test', password_hash('x', PASSWORD_DEFAULT), 'clinic_admin', now_iso()]
+    );
+
+    $issued = $service->issue((int) $clinicId, (int) $userId);
+    \App\Core\Db::run(
+        'UPDATE staff_invites SET expires_at = ? WHERE token_hash = ?',
+        [date('Y-m-d H:i:s', strtotime('-1 day')), hash('sha256', (string) $issued['token'])]
+    );
+
+    $result = $service->redeem((string) $issued['token'], 'TooLate#2026');
+    Assert::false($result['ok'], 'an expired link does not work');
+    Assert::true(str_contains(strtolower((string) $result['error']), 'expired'), 'and the error says it expired, not "invalid"');
+
+    \App\Core\Db::run('DELETE FROM staff_invites WHERE clinic_id = ?', [(int) $clinicId]);
+    \App\Core\Db::run('DELETE FROM users WHERE id = ?', [(int) $userId]);
+    \App\Core\Db::run('DELETE FROM clinics WHERE id = ?', [(int) $clinicId]);
+});
+
+/* ── Two-factor ─────────────────────────────────────────────────────────── */
+
+Assert::test('two-factor is mandatory for platform admins and optional for clinic staff', function (): void {
+    $front = (string) file_get_contents(QP_ROOT . '/public/index.php');
+
+    Assert::true(str_contains($front, 'Auth::isSuper()'), 'the enforced path applies to super admins');
+    Assert::true(
+        str_contains($front, "totp_enabled_at") && str_contains($front, "'/settings/security'"),
+        'an unenrolled admin is sent to enrolment'
+    );
+
+    // It must be switchable off, or a lost phone bricks the platform.
+    Assert::true(str_contains($front, 'security.require_2fa_super'), 'enforcement can be disabled for recovery');
+    $config = (string) file_get_contents(QP_ROOT . '/config/config.php');
+    Assert::true(
+        (bool) preg_match("/'require_2fa_super'\s*=>.*?: 'true'/s", $config),
+        'and it is ON by default — a config that defaults off is a config that stays off'
+    );
+
+    // A clinic user must not be forced: they have no authenticator policy.
+    Assert::true(
+        !preg_match('/Auth::check\(\)\s*&&\s*!Auth::isSuper\(\)[^}]*totp_enabled_at/s', $front),
+        'clinic staff are not forced to enrol'
+    );
+});
+
+/* ── Health monitoring ──────────────────────────────────────────────────── */
+
+Assert::test('the health endpoint is closed to anonymous callers', function (): void {
+    $controller = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/MonitorController.php');
+
+    // An open health page lists tenants and staff details. It must require a
+    // bearer token, and must not reveal whether the token was merely absent.
+    Assert::true(str_contains($controller, 'hash_equals'), 'the token is compared in constant time');
+    Assert::true(str_contains($controller, "'not_found'"), 'an unauthorised caller gets the same 404 either way');
+
+    $config = (string) file_get_contents(QP_ROOT . '/config/config.php');
+    Assert::true(str_contains($config, "'token' => getenv('MONITOR_TOKEN')"), 'the token comes from the environment');
+
+    // 503 for critical is what makes an uptime monitor work without parsing.
+    Assert::true(str_contains($controller, '503'), 'critical health returns 503 so a plain HTTP monitor alarms');
+});
+
+Assert::test('the runbook documents the operational duties it names', function (): void {
+    $path = QP_ROOT . '/docs/RUNBOOK.md';
+    Assert::true(is_file($path), 'a runbook exists');
+
+    $doc = (string) file_get_contents($path);
+    Assert::true(str_contains($doc, 'MONITOR_TOKEN'), 'it explains how to enable monitoring');
+    Assert::true(str_contains($doc, 'App passwords'), 'it explains the Google free tier, which is what was chosen');
+    Assert::true(str_contains($doc, '500'), 'it states the daily sending limit rather than pretending there is none');
+    Assert::true(str_contains($doc, 'approve-purge'), 'the closure decision has a documented command, not a database edit');
+    Assert::true(
+        str_contains(strtolower($doc), 'not a timer')
+            || str_contains(strtolower($doc), 'nothing is deleted automatically'),
+        'it states that closure is never automatic'
+    );
+
+    // The tools the runbook tells people to run must exist.
+    foreach (['approve-purge.php', 'mail-test.php', 'purge.php', 'healthcheck.php'] as $tool) {
+        Assert::true(is_file(QP_ROOT . '/tools/' . $tool), "tools/{$tool} exists");
+    }
 });
 
 

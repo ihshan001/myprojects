@@ -39,6 +39,11 @@ return [
         'charset'  => 'utf8mb4',
     ],
     'security' => [
+        // Platform admins must enrol two-factor. Left ON in production: one
+        // stolen owner password would otherwise expose every clinic at once.
+        // Turning it off is a break-glass act — the health check reports it.
+        'require_2fa_super' => filter_var(getenv('SECURITY_REQUIRE_2FA_SUPER') ?: 'true', FILTER_VALIDATE_BOOLEAN),
+
         'session_name'        => 'qp_session',
         // File-backed sessions in a directory we control. Native PHP hosts can
         // point this at /var/lib/php/sessions; the WASM runtime cannot write

@@ -243,6 +243,12 @@ $expectedPublicPosts = [
     // only add a walk-in at the default weight — it cannot read, call, move or
     // prioritise anything that already exists.
     '/kiosk/{key}',
+    // The welcome link that sets an owner's own password after approval. Same
+    // shape as the invitation route beside it: a 256-bit token stored only as
+    // a sha256, single-use, expiring in 14 days, and superseded the moment a
+    // newer link is issued. It writes exactly one password to exactly one user
+    // and can read nothing.
+    '/welcome/{token}',
     '/forgot-password', '/reset-password/{token}', '/invite/{token}',
     '/login/2fa', '/login/2fa/cancel', '/logout', '/locale',
 ];

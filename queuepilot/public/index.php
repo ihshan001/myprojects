@@ -11,6 +11,7 @@ declare(strict_types=1);
 $config = require dirname(__DIR__) . '/app/bootstrap.php';
 
 use App\Core\Auth;
+use App\Core\Env;
 use App\Core\Lang;
 use App\Core\Request;
 use App\Core\Response;
@@ -63,6 +64,31 @@ View::share('requestId', $requestId);
 View::share('debug', $config['app']['debug']);
 View::share('tenantClinic', Tenant::clinic());
 View::share('tenantKind', Tenant::kind());
+
+/* Two-factor is not optional for the people who can see every clinic.
+ *
+ * A super admin can read every patient record on the platform. One stolen
+ * password is therefore every clinic compromised at once, and a password is
+ * the easiest thing in this system to steal: it is typed into shared office
+ * machines, reused from other sites, and phished. Enrolment is a one-off
+ * thirty seconds with any authenticator app.
+ *
+ * Enforced here rather than per route, so it covers the admin screens and any
+ * future ones. The escape hatches are deliberate: the enrolment page itself,
+ * sign-out, health, and the CLI (which has no session at all). A user locked
+ * out because they lost their phone needs a human anyway, and the recovery
+ * path is `tools/security-check.php` plus a database update by the operator.
+ */
+if (Auth::check() && Auth::isSuper() && (bool) Env::get('security.require_2fa_super', true)) {
+    $u = Auth::user();
+    if (empty($u['totp_enabled_at'])) {
+        $exempt = ['/settings/security', '/logout', '/locale', '/api/health'];
+        if (!in_array(Request::path(), $exempt, true)) {
+            Response::redirect('/settings/security?2fa=required');
+            exit;
+        }
+    }
+}
 
 /* Tenant binding — the replay guard.
  *

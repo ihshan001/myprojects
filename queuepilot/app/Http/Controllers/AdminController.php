@@ -169,13 +169,37 @@ final class AdminController
                 'trial'   => $lifecycle->grantTrial($clinicId, (int) Request::input('trial_days', 14), Auth::id()),
                 'decline' => $lifecycle->decline($clinicId, (string) Request::input('reason', ''), Auth::id()),
             };
-            flash($result['ok'] ? 'success' : 'error', $result['ok']
+            $message = $result['ok']
                 ? match ($action) {
                     'approve' => $clinic['name'] . ' is approved and live.',
                     'trial'   => $clinic['name'] . ' is on a trial until ' . ($result['trial_ends_on'] ?? '') . '.',
                     'decline' => $clinic['name'] . ' was declined. They can see the reason you gave.',
                 }
-                : $result['error']);
+                : $result['error'];
+
+            // Sending the owner their addresses and a password link is the
+            // last step of approval, and the one that is easiest to forget —
+            // an approved clinic nobody told about is a support call tomorrow.
+            // Reported honestly: if mail is not configured the clinic is still
+            // approved, and the operator needs to know the email never left so
+            // they can pass the link on by hand.
+            if ($result['ok'] && in_array($action, ['approve', 'trial'], true)) {
+                $welcome = new \App\Services\WelcomeService();
+                $issued = $welcome->issue($clinicId, Auth::id());
+                if ($issued['ok']) {
+                    $sent = $welcome->send(
+                        Db::one('SELECT * FROM clinics WHERE id = ?', [$clinicId]) ?? $clinic,
+                        (string) $issued['token'],
+                        (string) $issued['email'],
+                        (string) $issued['name']
+                    );
+                    $message .= $sent['sent']
+                        ? ' A welcome email with both addresses has been sent.'
+                        : ' Mail is not configured, so no welcome email was sent — copy the link from the clinic page.';
+                }
+            }
+
+            flash($result['ok'] ? 'success' : 'error', $message);
             redirect('/admin/clinics');
             return;
         }

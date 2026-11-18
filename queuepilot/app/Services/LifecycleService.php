@@ -497,17 +497,94 @@ final class LifecycleService
      *
      * @return array<int, array<string, mixed>>
      */
+    /**
+     * Clinics whose retention window has ended.
+     *
+     * These are NOT authorised for deletion. The owner's rule is that a closed
+     * clinic is *contacted* — an email, then a phone call — and a person
+     * decides whether the data goes. `purge_approved_at` is that decision
+     * recorded, and only `approvedForPurge()` returns clinics that may actually
+     * be deleted.
+     *
+     * The distinction is the whole point: a timer that deletes on its own is
+     * one missed email away from destroying a clinic's records because nobody
+     * was at their desk in month four.
+     *
+     * @return list<array<string,mixed>>
+     */
     public function purgeable(?string $now = null): array
     {
         return Db::all(
-            'SELECT id, name, slug, closure_requested_at, purge_after
+            'SELECT id, name, slug, email, phone, closure_requested_at, purge_after, purge_approved_at
                FROM clinics
               WHERE closure_requested_at IS NOT NULL
-                AND closed_at IS NULL
                 AND purge_after IS NOT NULL
                 AND purge_after <= ?',
             [$now ?? Db::now()]
         );
+    }
+
+    /**
+     * Clinics a human has agreed may be deleted.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function approvedForPurge(?string $now = null): array
+    {
+        return Db::all(
+            'SELECT id, name, slug, closure_requested_at, purge_after, purge_approved_at, purge_approved_by
+               FROM clinics
+              WHERE closure_requested_at IS NOT NULL
+                AND purge_after IS NOT NULL
+                AND purge_after <= ?
+                AND purge_approved_at IS NOT NULL',
+            [$now ?? Db::now()]
+        );
+    }
+
+    /**
+     * Record that the clinic was contacted and a person decided to delete.
+     *
+     * Requires a note as well as an actor: "who decided and why" is the only
+     * thing that makes an irreversible deletion reviewable afterwards.
+     *
+     * @return array{ok:bool, error?:string}
+     */
+    public function approvePurge(int $clinicId, string $note, ?int $actorId = null): array
+    {
+        $clinic = Db::one('SELECT * FROM clinics WHERE id = ?', [$clinicId]);
+        if (!$clinic) {
+            return ['ok' => false, 'error' => 'That clinic does not exist.'];
+        }
+        if ($clinic['closure_requested_at'] === null) {
+            return ['ok' => false, 'error' => 'That clinic has not requested closure.'];
+        }
+        if ($clinic['purge_after'] === null || strtotime((string) $clinic['purge_after']) > time()) {
+            return ['ok' => false, 'error' => 'The retention window has not ended yet.'];
+        }
+        if (mb_strlen(trim($note)) < 10) {
+            return ['ok' => false, 'error' => 'Record how they were contacted and what they said.'];
+        }
+
+        Db::run(
+            'UPDATE clinics SET purge_approved_at = ?, purge_approved_by = ?, updated_at = ? WHERE id = ?',
+            [Db::now(), $actorId, Db::now(), $clinicId]
+        );
+        (new AuditService())->log($clinicId, 'clinic.purge_approved', 'clinic', $clinicId, [
+            'note' => trim($note), 'actor' => $actorId,
+        ]);
+        Log::warn('clinic.purge_approved', ['clinic' => $clinicId, 'actor' => $actorId]);
+
+        return ['ok' => true];
+    }
+
+    /** Withdraw a deletion decision. Available until the purge actually runs. */
+    public function revokePurgeApproval(int $clinicId, ?int $actorId = null): array
+    {
+        Db::run('UPDATE clinics SET purge_approved_at = NULL, purge_approved_by = NULL, updated_at = ? WHERE id = ?',
+            [Db::now(), $clinicId]);
+        (new AuditService())->log($clinicId, 'clinic.purge_revoked', 'clinic', $clinicId, ['actor' => $actorId]);
+        return ['ok' => true];
     }
 
     /**

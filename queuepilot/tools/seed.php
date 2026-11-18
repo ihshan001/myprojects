@@ -28,12 +28,25 @@ $plans = [
     ['clinic_plus', 'Clinic Plus', 14900, 15, 25, 20, 30, 'Priority support, WhatsApp, custom branding, display screens', 3],
     ['enterprise', 'Enterprise', 0, 999, 999, 999, 40, 'Multi-branch, SSO, dedicated onboarding, API access', 4],
 ];
+// Yearly price is derived, never typed twice. Storing a hand-entered yearly
+// figure next to a monthly one is how they drift apart, and the drift is
+// invisible until a clinic is charged the wrong amount once a year.
+$yearlyDiscountPct = 20;
 foreach ($plans as [$code, $name, $price, $docs, $staff, $qs, $sort, $features]) {
+    $priceYearly = round($price * 12 * (1 - $yearlyDiscountPct / 100), 2);
     if (!Db::scalar('SELECT id FROM plans WHERE code = ?', [$code])) {
         Db::insert(
-            'INSERT INTO plans (code, name, price_monthly, currency, max_doctors, max_staff, max_queues, features, sort_order, is_active, created_at)
-             VALUES (?,?,?,?,?,?,?,?,?,1,?)',
-            [$code, $name, $price, 'LKR', $docs, $staff, $qs, $features, $sort, Db::now()]
+            'INSERT INTO plans (code, name, price_monthly, price_yearly, yearly_discount_pct,
+                                currency, max_doctors, max_staff, max_queues, features, sort_order, is_active, created_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?)',
+            [$code, $name, $price, $priceYearly, $yearlyDiscountPct,
+             'LKR', $docs, $staff, $qs, $features, $sort, Db::now()]
+        );
+    } else {
+        // Keep an existing install's prices in step when the discount changes.
+        Db::run(
+            'UPDATE plans SET price_yearly = ?, yearly_discount_pct = ? WHERE code = ?',
+            [$priceYearly, $yearlyDiscountPct, $code]
         );
     }
 }

@@ -211,3 +211,24 @@ if (!function_exists('db')) {
 if (!function_exists('now_iso')) {
     function now_iso(): string { return Db::now(); }
 }
+
+if (!function_exists('err')) {
+    /**
+     * Write to STDERR where there is one.
+     *
+     * CLI tools used `fwrite(STDERR, ...)` directly, which dies with
+     * "Undefined constant STDERR" anywhere STDERR is not defined — the
+     * wasm runtime used for local testing, and any SAPIs that do not open the
+     * three standard streams. Failing on the error path is worse than the
+     * error being reported, so everything goes through here.
+     */
+    function err(string $message): void
+    {
+        $stream = defined('STDERR') ? constant('STDERR') : @fopen('php://stderr', 'w');
+        if ($stream === false || $stream === null) {
+            echo $message;
+            return;
+        }
+        fwrite($stream, $message);
+    }
+}
