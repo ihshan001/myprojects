@@ -31,7 +31,13 @@
     <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Renews</p>
     <p class="mt-1 text-xl font-bold text-slate-900"><?= e($c['renews_on'] ? date('j M Y', strtotime((string) $c['renews_on'])) : '—') ?></p>
     <p class="text-xs text-slate-500">
-      <?= $c['billing_status'] === 'trial' ? 'Trial ends ' . e((string) $c['trial_ends_on']) : 'Automatic reminder by email' ?>
+      <?php if ($c['billing_status'] === 'trial'): ?>
+        Trial ends <?= e((string) $c['trial_ends_on']) ?> — we will email you before it does
+      <?php elseif ($c['billing_status'] === 'active'): ?>
+        We email an invoice on this date, and again before anything stops
+      <?php else: ?>
+        Not billing yet
+      <?php endif; ?>
     </p>
   </div>
   <div class="card card-pad">

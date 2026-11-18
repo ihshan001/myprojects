@@ -127,6 +127,17 @@ $val = static fn (string $k, string $d = ''): string => (string) ($old[$k] ?? $d
           </div>
         </div>
 
+        <?php if (!empty($enquiry)): ?>
+          <div class="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+            <p class="font-bold">Enterprise is priced on application.</p>
+            <p class="mt-1 leading-relaxed">
+              You can still create the clinic now — nothing is charged until we have
+              agreed a price and you have approved it. Choose a starting plan below;
+              we will talk to you before anything starts billing.
+            </p>
+          </div>
+        <?php endif; ?>
+
         <fieldset class="rounded-2xl border p-4" style="border-color:var(--lp-line)">
           <legend class="label px-1">Choose a plan</legend>
           <div class="grid gap-2 sm:grid-cols-2">

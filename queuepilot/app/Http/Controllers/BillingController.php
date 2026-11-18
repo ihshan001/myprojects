@@ -202,6 +202,15 @@ final class BillingController
             'amount' => $invoice['amount'], 'reference' => $reference,
         ]);
 
+        // The bell only reaches somebody looking at the console. The person who
+        // can check the bank is more likely to be in their inbox, and a claim
+        // that waits until they next sign in is a clinic that stays suspended.
+        try {
+            (new \App\Services\PlatformAlertService())->paymentClaimed($clinicId, $invoiceId);
+        } catch (\Throwable $e) {
+            \App\Core\Log::warn('platform.claim_alert_failed', ['error' => $e->getMessage()]);
+        }
+
         // Every platform administrator sees it, so a claim cannot sit
         // unnoticed behind one person's login.
         foreach (Db::all("SELECT id FROM users WHERE role = 'super_admin' AND is_active = 1") as $admin) {

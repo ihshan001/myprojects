@@ -100,19 +100,61 @@ final class WelcomeService
      *
      * @return array{ok:bool, sent:bool, error?:string}
      */
+    /**
+     * The URL a patient opens to see the queue.
+     *
+     * Prefers a named screen key, then the clinic-wide legacy token, and only
+     * falls back to the bare site host if neither exists. A clinic that has
+     * been approved always has at least one of them (signup writes the
+     * clinic-wide token), so the fallback is for a half-migrated database,
+     * not the normal path.
+     */
+    private function boardUrl(array $clinic): string
+    {
+        $clinicId = (int) $clinic['id'];
+        $site     = rtrim(\App\Core\Tenant::siteUrl($clinic), '/');
+
+        $key = (string) (Db::scalar(
+            'SELECT display_key FROM public_display_keys
+              WHERE clinic_id = ? AND revoked_at IS NULL AND kind = ?
+              ORDER BY id LIMIT 1',
+            [$clinicId, 'waiting_room']
+        ) ?: '');
+
+        if ($key === '') {
+            $key = (string) (Db::scalar(
+                "SELECT value FROM settings WHERE scope='clinic' AND owner_id=? AND key_name='display_token'",
+                [$clinicId]
+            ) ?: '');
+        }
+
+        return $key === '' ? $site : $site . '/board/' . $key;
+    }
+
     public function send(array $clinic, string $token, string $email, string $name): array
     {
         $siteUrl = \App\Core\Tenant::siteUrl($clinic);
         $opsUrl  = \App\Core\Tenant::opsUrl($clinic);
         $link    = rtrim($opsUrl, '/') . '/welcome/' . $token;
 
+        // The address that actually shows the queue. `siteUrl` is a bare host;
+        // the board a patient opens is /board/<key>, and the key lives in the
+        // clinic's settings. Printing only the host sent the owner to a page
+        // with nothing on it — the one link they are told to put on a counter
+        // card. Falls back to the host when no key exists yet, rather than
+        // printing an address that 404s.
+        $boardUrl = $this->boardUrl($clinic);
+
         $body = "Hello {$name},\n\n"
             . "Your clinic {$clinic['name']} has been approved and is ready.\n\n"
             . "Two addresses, and they do different jobs:\n\n"
-            . "  Patients and the waiting-room screen:\n    {$siteUrl}\n\n"
+            . "  The queue your patients watch — put this on the waiting-room TV\n"
+            . "  or print it on a card:\n    {$boardUrl}\n\n"
+            . ($siteUrl !== $boardUrl ? "  Your clinic's public page:\n    {$siteUrl}\n\n" : '')
             . "  Staff sign-in and everything you manage:\n    {$opsUrl}\n\n"
-            . "Keep the second one private. It is deliberately hard to guess, so it\n"
-            . "will not be found by somebody trying clinic names — do not publish it.\n\n"
+            . "Keep that last address private. It is deliberately hard to guess, so\n"
+            . "it will not be found by somebody trying clinic names — do not publish\n"
+            . "it. The queue link above it is meant to be shared: put it on the TV.\n\n"
             . "Set your password here, and you are ready to see your first patient:\n\n"
             . "  {$link}\n\n"
             . "That link works once and expires in " . self::LINK_TTL_DAYS . " days. If it\n"

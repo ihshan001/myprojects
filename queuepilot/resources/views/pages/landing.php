@@ -508,8 +508,17 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
               </li>
             <?php endif; ?>
           </ul>
-          <a href="/register" class="<?= $featured ? 'lp-btn' : 'lp-btn-ghost' ?> mt-6 w-full">
-            <?= $price > 0 ? 'Apply for your clinic' : 'Start a conversation' ?>
+          <?php
+            // Carry the plan the visitor is looking at. Landing on a bare
+            // /register preselected Professional for everyone, so somebody who
+            // chose Starter was silently signed up to the middle plan — the
+            // one choice on this page a visitor had already made for us.
+            $applyHref = $price > 0
+                ? '/register?plan=' . urlencode((string) $plan['code'])
+                : '/register?plan=' . urlencode((string) $plan['code']) . '&enquiry=1';
+          ?>
+          <a href="<?= e($applyHref) ?>" class="<?= $featured ? 'lp-btn' : 'lp-btn-ghost' ?> mt-6 w-full">
+            <?= $price > 0 ? 'Apply for ' . e((string) $plan['name']) : 'Enquire about ' . e((string) $plan['name']) ?>
           </a>
         </div>
       <?php endforeach; ?>

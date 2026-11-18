@@ -43,6 +43,11 @@ final class AdminController
             // worker died or a backup is stale.
             'alerts' => (new \App\Services\MonitorService())->openAlerts(),
             'health' => (new \App\Services\MonitorService())->run(),
+            // Work waiting on a human, shown above the tenant table. A clinic
+            // that applied on Friday and is still pending on Tuesday was not
+            // declined, it was missed — and until an admin opens /admin/clinics
+            // this is the only place that says so.
+            'notices' => (new \App\Services\PlatformAlertService())->unread((int) (Auth::id() ?? 0)),
             'totals' => [
                 'clinics' => count($clinics),
                 'active' => count(array_filter($clinics, fn ($c) => $c['billing_status'] === 'active')),

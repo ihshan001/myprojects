@@ -50,6 +50,7 @@ final class InvoiceService
 
         $clinics = Db::all(
             "SELECT c.id, c.name, c.billing_status, c.renews_on, c.trial_ends_on,
+                    c.approved_at, c.created_at,
                     c.currency, p.name AS plan_name, p.price_monthly, p.price_yearly,
                     p.code AS plan_code, c.billing_cycle
                FROM clinics c
@@ -85,6 +86,18 @@ final class InvoiceService
             $periodFrom = $yearly
                 ? date('Y-m-d', strtotime($renewsOn . ' -1 year'))
                 : date('Y-m-d', strtotime($renewsOn . ' -1 month'));
+
+            // A clinic's first invoice must not bill a period before the clinic
+            // existed. Approval sets renews_on one cycle out, so when that first
+            // cycle closes the arithmetic above reaches back to a date before
+            // signup — for a clinic approved mid-month that is up to a month of
+            // imaginary service at full price, shown to the customer on their
+            // first ever invoice. Clamp the start to the day the clinic went
+            // live, which is also the day they were promised the service from.
+            $wentLive = substr((string) ($c['approved_at'] ?: $c['created_at'] ?: ''), 0, 10);
+            if ($wentLive !== '' && $periodFrom < $wentLive) {
+                $periodFrom = $wentLive;
+            }
 
             $exists = Db::scalar(
                 'SELECT id FROM invoices WHERE clinic_id = ? AND period_from = ?',
@@ -141,6 +154,25 @@ final class InvoiceService
                 'warning',
                 '/billing'
             );
+
+            // In-app only reaches staff who sign in. The person who approves the
+            // bank transfer is the owner, and they need it in their inbox —
+            // otherwise the first they hear of it is when the service stops.
+            $invoiceId = (int) (Db::scalar(
+                'SELECT id FROM invoices WHERE clinic_id = ? AND number = ?',
+                [(int) $c['id'], $number]
+            ) ?: 0);
+            if ($invoiceId > 0) {
+                try {
+                    (new InvoiceMailer())->issued((int) $c['id'], $invoiceId);
+                } catch (\Throwable $e) {
+                    // A mail failure must not roll back the invoice. The invoice
+                    // is the record; the email is a courtesy.
+                    Log::warn('billing.invoice_email_failed', [
+                        'clinic' => (int) $c['id'], 'invoice' => $invoiceId, 'error' => $e->getMessage(),
+                    ]);
+                }
+            }
         }
 
         return $created;

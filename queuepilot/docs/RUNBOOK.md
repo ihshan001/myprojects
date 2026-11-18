@@ -206,6 +206,80 @@ duplicates; InnoDB on a shared host will be different, which is the reason to
 run it rather than trust the number. It creates a throwaway queue and deletes
 it with `--cleanup`. Never run it against a live queue id.
 
+## 2c. The path a clinic takes from stranger to paying customer
+
+This is the whole lifecycle, written down because it is the one flow where a
+mistake is invisible: every step succeeds, and the customer still ends up
+without what they paid for.
+
+```
+1  VISITOR      /  →  pricing  →  clicks a plan
+                 the CTA carries ?plan=<code>; register preselects it.
+                 A bogus ?plan= falls back to professional, never to a
+                 plan code with no price row.
+
+2  APPLY        POST /register
+                 clinic created with billing_status = 'pending'.
+                 No trial. A trial is a platform decision, not a signup
+                 bonus, and the copy says so.
+                 → the platform is alerted (email + bell). An application
+                   nobody is told about is an application nobody reviews.
+
+3  REVIEW       Platform admin opens /admin
+                 "N things waiting on you" at the top, and the decision
+                 queue at /admin/clinics. Approve, grant trial, or decline
+                 with a reason the clinic can read.
+
+4a TRIAL        Grant trial (14 days by default, 1–90)
+                 No invoice — a trial that invoices is not a trial.
+                 Both addresses are provisioned, welcome email sent.
+
+4b PAID         Approve (paid)
+                 billing_status = 'active', renews_on = one cycle out.
+                 The FIRST invoice is raised when that period closes.
+
+5  WELCOME      One email, three facts the owner does not have:
+                 · the board URL a patient opens   /board/<key>
+                 · the clinic's public page        (when it differs)
+                 · the staff sign-in URL           (ops host)
+                 plus a single-use link to set a password. No password is
+                 ever emailed — a credential in an inbox is a credential
+                 someone else can read.
+
+6  RUN          Owner sets hours, doctors, and issues a token.
+                 NOT blocked on payment during a trial; blocked on the
+                 owner confirming their address, which is deliberate.
+
+7  INVOICE      Arrears. When renews_on passes, one invoice is raised for
+                 the period that just ended — clamped to the day the clinic
+                 went live, so a clinic approved on the 19th is never
+                 billed for the 19th of the previous month.
+                 → emailed with the amount, the period, the due date, the
+                   stop date, and the bank details.
+
+8  PAY          Bank transfer. The owner records the reference at /billing.
+                 → the platform is alerted (email + bell).
+
+9  VERIFY       Admin matches it against the bank and verifies.
+                 Invoice → paid, subscription extended, receipt emailed.
+
+10 LAPSE        If unpaid: 5 days after the due date the service stops.
+                 Law: the due date, not when the cron ran. The warning email
+                 is sent when grace starts and names the date. Nothing is
+                 deleted, ever, on a timer.
+```
+
+### What to check if a step does not happen
+
+| Symptom | Cause |
+| --- | --- |
+| No alert email on signup | `MAIL_TRANSPORT=none` (default), or `COMPANY_ALERTS_EMAIL` and the super-admin address are both empty. The bell row always appears — check /admin |
+| Welcome email says the same URL twice | The clinic has no `site_host` yet, which is correct until `APP_DOMAIN` is set. The board URL is still correct and is printed first |
+| No invoice after activating a paid plan | Correct. Activation sets `renews_on` one cycle out; the invoice is arrears and appears when that date passes. Run `php tools/cron.php` if you expected it today |
+| A clinic on a trial gets an invoice | It should not — `generateDue()` skips `billing_status = 'trial'` explicitly |
+| Invoice covers time before signup | Should be impossible now; the period start is clamped to `approved_at`/`created_at`. If you see it, the clamp was removed |
+| Payment claimed but no alert | Same mail cause as above; the bell row is in /admin |
+
 ## 3. A clinic that has stopped using the system
 
 This is the flow the owner asked for explicitly, and it is **not** a timer.

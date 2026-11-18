@@ -87,6 +87,11 @@ return [
         'reg_number'  => getenv('COMPANY_REG_NUMBER') ?: '',
         'vat_number'  => getenv('COMPANY_VAT_NUMBER') ?: '',
         'email'       => getenv('COMPANY_EMAIL') ?: '',
+        // Where operational alerts go: a new clinic applied, a payment claimed,
+        // a queue worker died. Separate from COMPANY_EMAIL because that one is
+        // printed on invoices to customers, and an address on a public invoice
+        // collects spam that nobody wants mixed into "a clinic is waiting".
+        'alerts_email' => getenv('COMPANY_ALERTS_EMAIL') ?: (getenv('COMPANY_EMAIL') ?: ''),
         'phone'       => getenv('COMPANY_PHONE') ?: '',
         // Bank transfer only — no gateway. These are shown to the clinic
         // alongside every unpaid invoice, because an invoice that does not say

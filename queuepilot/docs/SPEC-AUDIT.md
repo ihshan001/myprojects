@@ -5,8 +5,8 @@ the Phase 1 / Phase 2 / Phase 3 brief and the "difficult part" table is listed
 below with its real status: **built and tested**, **built, not exercised**, or
 **not built**.
 
-Last verified: **376 automated checks**, 60 acceptance, 15 browser, 13 tool
-checks, 222 files lint-clean, `tools/healthcheck.php` green, `tools/host-drill.php`
+Last verified: **382 automated checks**, 60 acceptance, 15 browser, 12 tool
+checks, 224 files lint-clean, `tools/healthcheck.php` green, `tools/host-drill.php`
 24/24, and `/api/health` reporting `ok`.
 
 Legend: ● built + tested · ◐ built, verified by hand but no automated test ·
@@ -277,6 +277,44 @@ the brief — it is work that needs something the project does not have yet.
    labels, zero duplicates, zero failures. **MySQL is still unmeasured** — it is
    the production target and behaves differently under InnoDB row locks. Run
    the tool on the real host before the first clinic.
+
+### Found by walking the actual customer journey
+
+Traced end to end — stranger → application → admin review → trial or paid
+activation → welcome email → invoice → payment → receipt — and five things were
+wrong in ways that would not have surfaced as errors:
+
+1. **Every pricing CTA linked to a bare `/register`.** The register form defaulted
+   to Professional, so a visitor who chose Starter was signed up to the middle
+   plan. The one decision they had already made for us was the one we discarded.
+   The CTA now carries `?plan=`, the form honours it, and an unknown code falls
+   back to Professional rather than to a code with no price row.
+2. **The welcome email printed the same URL twice.** It said "two addresses, and
+   they do different jobs" and then printed `siteUrl` and `opsUrl`, which are both
+   the bare host until `APP_DOMAIN` is set. The address a patient actually opens is
+   `/board/<key>` — the link the owner is told to put on a counter card — and it
+   was never in the email. Now printed first, with the ops host clearly marked
+   private.
+3. **No invoice email existed.** The only email in the product was the welcome
+   link, while the Subscription page told every customer "Automatic reminder by
+   email". `InvoiceMailer` now sends the invoice, the receipt, and a dated
+   arrears warning, and reports honestly when `MAIL_TRANSPORT=none` means nothing
+   left.
+4. **The grace clock started silently.** `beginGrace()` wrote `grace_until` and
+   told nobody. A working clinic could be switched off without ever being warned.
+   It now emails the actual stop date.
+5. **A first invoice billed a period before the clinic existed.** Approval sets
+   `renews_on` one cycle out; when that cycle closed, the arrears arithmetic
+   reached back a month — to before signup — at full price, on the customer's
+   first ever invoice. The period start is now clamped to the go-live date.
+
+And one structural gap: **a signup notified nobody.** The approval gate meant
+nothing to an admin who did not open `/admin/clinics`, so a Friday application
+could sit until Tuesday. Signup now sends an email to `COMPANY_ALERTS_EMAIL` and
+writes a `platform_notifications` row per admin, surfaced at the top of `/admin`.
+Payments claims do the same. The new table exists because `staff_notifications`
+has a NOT NULL foreign key to `clinics(id)` — filing "a clinic applied" under
+some other tenant's id would have leaked it into that clinic's bell.
 
 ### Found while closing the list
 

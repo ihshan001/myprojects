@@ -362,11 +362,24 @@ final class PublicController
             return;
         }
         $plans = (new ClinicService())->plans();
-        $selected = Request::string('plan', 'professional');
+
+        // Honour the plan the visitor clicked on the pricing page, and only if
+        // it is a plan that exists. An unknown ?plan= falls back to the middle
+        // plan rather than registering somebody on a plan code that resolves to
+        // no plan row and no price.
+        $requested = mb_strtolower(Request::string('plan', ''));
+        $codes = array_map(static fn (array $p): string => (string) $p['code'], $plans);
+        $selected = in_array($requested, $codes, true) ? $requested : 'professional';
+
+        // Enterprise is priced on application. Arriving with the enquiry flag
+        // means the visitor wants a conversation, not a self-serve signup, so
+        // the page says so instead of quietly signing them up to it.
+        $enquiry = Request::string('enquiry') === '1';
         view('auth/register', [
             'title' => 'Create your clinic',
             'plans' => $plans,
             'selected' => $selected,
+            'enquiry' => $enquiry,
             'old' => [],
         ], false);
     }
@@ -431,6 +444,23 @@ final class PublicController
                 }
             } catch (\Throwable $e) {
                 \App\Core\Log::warn('auth.verification_send_failed', ['error' => $e->getMessage()]);
+            }
+
+            // Tell the platform somebody is waiting. A signup that only
+            // appears on a page nobody opened is a signup that gets missed —
+            // and an unapproved clinic cannot issue a single token, so being
+            // missed means the owner sits with a system they cannot use.
+            try {
+                $planName = (string) (Db::scalar('SELECT name FROM plans WHERE code = ?', [$plan]) ?: '');
+                $fresh = Db::one('SELECT * FROM clinics WHERE id = ?', [(int) $result['clinic_id']]);
+                if ($fresh !== null) {
+                    (new \App\Services\PlatformAlertService())->clinicApplied(
+                        $fresh + ['owner_name' => $data['owner_name']],
+                        $planName
+                    );
+                }
+            } catch (\Throwable $e) {
+                \App\Core\Log::warn('platform.apply_alert_failed', ['error' => $e->getMessage()]);
             }
 
             [$ok] = Auth::attempt($data['email'], $data['password'], Request::ip());

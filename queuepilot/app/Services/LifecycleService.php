@@ -281,6 +281,14 @@ final class LifecycleService
         ]);
         Log::info('clinic.grace_started', ['clinic' => $clinicId, 'until' => $until]);
 
+        // Tell them, with the date. Starting a clock in the database and not
+        // saying so is how a working clinic gets switched off by surprise.
+        try {
+            (new InvoiceMailer())->paymentDue($clinicId);
+        } catch (\Throwable $e) {
+            Log::warn('billing.payment_due_email_failed', ['clinic' => $clinicId, 'error' => $e->getMessage()]);
+        }
+
         return ['ok' => true, 'grace_until' => $until];
     }
 

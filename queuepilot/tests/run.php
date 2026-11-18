@@ -2935,7 +2935,9 @@ Assert::test('a clinic in one group is not listed under another', function (): v
 
 Assert::test('an invoice is raised for a clinic that has reached its renewal date', function (): void {
     seedTenant(40, 'billing-clinic', 'Billing Clinic');
-    Db::run("UPDATE clinics SET billing_status='active', renews_on='2026-12-02' WHERE id = 40");
+    // A clinic live long before this period, so the clamp below does not bite.
+    Db::run("UPDATE clinics SET billing_status='active', renews_on='2026-12-02',
+             approved_at='2026-06-01 09:00:00', created_at='2026-06-01 09:00:00' WHERE id = 40");
 
     $service = new App\Services\InvoiceService();
     $due = $service->generateDue(false, '2026-12-02');
@@ -2946,6 +2948,23 @@ Assert::test('an invoice is raised for a clinic that has reached its renewal dat
     Assert::same('2026-12-02', $mine[0]['period_to']);
 
     Assert::same(1, (int) Db::scalar('SELECT COUNT(*) FROM invoices WHERE clinic_id = 40'), 'the row exists');
+});
+
+Assert::test('a first invoice never bills a period before the clinic existed', function (): void {
+    // Approval sets renews_on one cycle out, so when that first cycle closes
+    // the arrears arithmetic reaches back a month — to a date before signup.
+    // A clinic approved on the 19th was invoiced for the 19th of the previous
+    // month, a month of service it never received and could not have used.
+    seedTenant(1942, 'invoice-clamp-clinic', 'Invoice Clamp Clinic');
+    Db::run("UPDATE clinics SET billing_status='active', renews_on='2026-12-19',
+             approved_at='2026-11-19 10:00:00', created_at='2026-11-19 09:00:00' WHERE id = 1942");
+
+    (new App\Services\InvoiceService())->generateDue(false, '2026-12-19');
+    $row = Db::one('SELECT period_from, period_to FROM invoices WHERE clinic_id = 1942');
+
+    Assert::true($row !== null, 'the invoice is still raised');
+    Assert::same('2026-11-19', $row['period_from'], 'it starts the day the clinic went live');
+    Assert::same('2026-12-19', $row['period_to'], 'and ends on the renewal date');
 });
 
 Assert::test('running the generator again bills nobody twice', function (): void {
@@ -5322,9 +5341,15 @@ Assert::test('one clinic cannot reach another clinic\'s rows, and the guard is s
         //   platform_users         explicitly clinic-less: that is the point
         //   support_replies        keyed by ticket_id; the ticket carries it
         //   incident_entries       keyed by incident_id
+        //
+        //   platform_notifications  addressed to a platform admin, who belongs
+        //                           to no clinic. A clinic_id here would have to
+        //                           borrow some tenant's id, which is how one
+        //                           clinic ends up reading another's mail.
         $isTenantless = in_array($name, ['clinics', 'plans', 'schema_migrations', 'rate_limits',
             'login_attempts', 'email_verifications', 'organisations', 'platform_users',
-            'support_replies', 'incident_entries', 'settings', 'password_resets'], true);
+            'support_replies', 'incident_entries', 'settings', 'password_resets',
+            'platform_notifications'], true);
         if (!$isTenantless && !in_array('clinic_id', $cols, true)) {
             $missing[] = $name;
         }
@@ -7111,17 +7136,20 @@ Assert::test('a yearly clinic is billed once for twelve months, not twelve times
     // The discount only means something if the invoice is annual. Twelve
     // monthly invoices at the yearly rate would be a bug nobody notices until
     // a clinic is suspended for an amount they already paid.
-    seedTenant(941, 'yearly-clinic', 'Yearly Clinic');
+    seedTenant(1941, 'yearly-clinic', 'Yearly Clinic');
+    // Live long before the year being billed, so the go-live clamp does not
+    // shorten the period — this test is about the period being a year long.
     Db::run(
         "UPDATE clinics SET billing_status='active', renews_on='2026-12-02', billing_cycle='yearly',
+                approved_at='2025-01-15 09:00:00', created_at='2025-01-15 09:00:00',
                 plan_id = (SELECT id FROM plans WHERE code = 'professional')
-          WHERE id = 941"
+          WHERE id = 1941"
     );
 
     $service = new App\Services\InvoiceService();
     $due = $service->generateDue(false, '2026-12-02');
 
-    $mine = array_values(array_filter($due, static fn (array $r): bool => $r['clinic_id'] === 941));
+    $mine = array_values(array_filter($due, static fn (array $r): bool => $r['clinic_id'] === 1941));
     Assert::same(1, count($mine), 'exactly one invoice, not twelve');
     Assert::same('2025-12-02', $mine[0]['period_from'], 'the period covers the whole year behind it');
     Assert::same('2026-12-02', $mine[0]['period_to'], 'ending on the renewal date');
@@ -7839,6 +7867,135 @@ Assert::test('both migration dialects are checked for copy-paste drift', functio
         }
     }
     Assert::same([], $mysqlHits, 'no MySQL migration calls SQLite\'s datetime()');
+});
+
+
+Assert::test('the platform is told when a clinic applies, in both channels', function (): void {
+    // The approval gate is worth nothing if the gatekeeper is not told there is
+    // somebody at it. /admin/clinics was the only signal and it is a page you
+    // have to remember to open.
+    $config = require QP_ROOT . '/config/config.php';
+    $config['mail']['transport'] = 'log';
+    $config['company']['alerts_email'] = 'platform-ops@example.test';
+    \App\Core\Env::init($config);
+
+    seedTenant(1971, 'applicant-clinic', 'Applicant Clinic');
+    Db::run("UPDATE clinics SET billing_status='pending', email='applicant@example.test' WHERE id = 1971");
+
+    $before = @file_get_contents(QP_ROOT . '/storage/logs/mail.log') ?: '';
+    $result = (new \App\Services\PlatformAlertService())->clinicApplied(
+        Db::one('SELECT * FROM clinics WHERE id = 1971') + ['owner_name' => 'Test Owner'],
+        'Professional'
+    );
+
+    Assert::true($result['email_sent'], 'the alert email leaves');
+    Assert::same(1, $result['admins_notified'], 'and every platform admin gets a bell row');
+
+    $after = @file_get_contents(QP_ROOT . '/storage/logs/mail.log') ?: '';
+    $added = substr($after, strlen($before));
+    Assert::true(str_contains($added, 'platform-ops@example.test'), 'it goes to COMPANY_ALERTS_EMAIL');
+    Assert::true(str_contains($added, 'Applicant Clinic'), 'and names the clinic so the inbox is scannable');
+    Assert::true(str_contains($added, '/admin/clinics'), 'and links to the decision queue');
+
+    // The row must be a platform row, not a tenant one: staff_notifications has
+    // a NOT NULL foreign key to clinics(id) and belongs to a tenant's bell.
+    $row = Db::one('SELECT * FROM platform_notifications ORDER BY id DESC LIMIT 1');
+    Assert::true($row !== null, 'the bell row was written');
+    Assert::same('New clinic waiting: Applicant Clinic', (string) $row['title']);
+
+    $app = new \App\Services\PlatformAlertService();
+    $unread = $app->unread((int) $row['user_id']);
+    Assert::true(count($unread) >= 1, 'the admin sees it unread');
+
+    $app->markRead((int) $row['id'], (int) $row['user_id']);
+    $stillUnread = array_filter($app->unread((int) $row['user_id']), static fn ($n) => (int) $n['id'] === (int) $row['id']);
+    Assert::same([], array_values($stillUnread), 'and dismissing it clears it');
+});
+
+Assert::test('a clinic is emailed its invoice, and a receipt when it is paid', function (): void {
+    // The Subscription page promised "Automatic reminder by email" while the
+    // only email in the product was the welcome link.
+    $config = require QP_ROOT . '/config/config.php';
+    $config['mail']['transport'] = 'log';
+    $config['company']['bank'] = 'Test Bank';
+    $config['company']['bank_account_no'] = '1234567';
+    \App\Core\Env::init($config);
+
+    seedTenant(1972, 'mailed-clinic', 'Mailed Clinic');
+    Db::run("UPDATE clinics SET billing_status='active', renews_on='2026-12-02', email='billing@mailed.test',
+             approved_at='2026-01-05 09:00:00', created_at='2026-01-05 09:00:00' WHERE id = 1972");
+    (new \App\Services\InvoiceService())->generateDue(false, '2026-12-02');
+
+    $invoice = Db::one('SELECT * FROM invoices WHERE clinic_id = 1972 ORDER BY id DESC LIMIT 1');
+    Assert::true($invoice !== null, 'the invoice exists');
+
+    $before = @file_get_contents(QP_ROOT . '/storage/logs/mail.log') ?: '';
+    $sent = (new \App\Services\InvoiceMailer())->issued(1972, (int) $invoice['id']);
+    Assert::true($sent['sent'], 'the invoice email leaves');
+    $added = substr(@file_get_contents(QP_ROOT . '/storage/logs/mail.log') ?: '', strlen($before));
+
+    Assert::true(str_contains($added, 'billing@mailed.test'), 'it goes to the billing address');
+    Assert::true(str_contains($added, (string) $invoice['number']), 'it quotes the invoice number');
+    Assert::true(str_contains($added, 'Test Bank'), 'and says where to pay — an invoice that cannot be paid is not one');
+    Assert::true(str_contains($added, '/billing'), 'and links to the page where the transfer is recorded');
+
+    // A receipt after verification.
+    $paid = Db::one('SELECT * FROM clinics WHERE id = 1972');
+    $before2 = @file_get_contents(QP_ROOT . '/storage/logs/mail.log') ?: '';
+    $receipt = (new \App\Services\InvoiceMailer())->receipt(1972, (int) $invoice['id']);
+    Assert::true($receipt['sent'], 'the receipt leaves');
+    $added2 = substr(@file_get_contents(QP_ROOT . '/storage/logs/mail.log') ?: '', strlen($before2));
+    Assert::true(str_contains($added2, 'Payment received'), 'and it says the payment was matched');
+});
+
+Assert::test('an invoice email reports honestly when there is no mail transport', function (): void {
+    // MAIL_TRANSPORT=none is the default install. A caller that assumes the
+    // email went out will tell an operator "we emailed them" when we did not.
+    $config = require QP_ROOT . '/config/config.php';
+    $config['mail']['transport'] = 'none';
+    \App\Core\Env::init($config);
+
+    seedTenant(1973, 'nomail-clinic', 'No Mail Clinic');
+    Db::run("UPDATE clinics SET billing_status='active', renews_on='2026-12-02', email='n@nomail.test' WHERE id = 1973");
+    (new \App\Services\InvoiceService())->generateDue(false, '2026-12-02');
+    $invoice = Db::one('SELECT * FROM invoices WHERE clinic_id = 1973 ORDER BY id DESC LIMIT 1');
+
+    $result = (new \App\Services\InvoiceMailer())->issued(1973, (int) $invoice['id']);
+    Assert::false($result['sent'], 'it reports the email did not go');
+    Assert::true(str_contains((string) ($result['reason'] ?? ''), 'not configured'), 'and says why');
+
+    // Restore a working config for the rest of the suite.
+    $restore = require QP_ROOT . '/config/config.php';
+    $restore['mail']['transport'] = 'log';
+    \App\Core\Env::init($restore);
+});
+
+Assert::test('grace sends a dated warning, not just a database timestamp', function (): void {
+    seedTenant(1974, 'grace-clinic', 'Grace Clinic');
+    Db::run("UPDATE clinics SET billing_status='active', renews_on='2026-12-02', grace_until=NULL,
+             email='grace@example.test' WHERE id = 1974");
+    Db::run("INSERT INTO invoices (clinic_id, number, period_from, period_to, amount, currency, status, created_at)
+             VALUES (1974,'INV-GRACE-TEST','2026-11-02','2026-12-02',3500,'LKR','unpaid',?)", [Db::now()]);
+
+    $result = (new \App\Services\LifecycleService())->beginGrace(1974, '2026-12-02');
+    Assert::true($result['ok'], 'grace starts');
+    // 5 days from the due date, never "whenever the cron ran".
+    Assert::same('2026-12-07', $result['grace_until'], 'the deadline is the due date plus five');
+});
+
+Assert::test('the welcome email carries the board URL, not just a bare host', function (): void {
+    // The email says "two addresses, and they do different jobs" and then
+    // printed the same host twice, because a clinic with no subdomain yet has
+    // an empty site_host and ops_host. The address a patient actually opens is
+    // /board/<key>, and printing the host sent the owner to a page with nothing
+    // on it — the one link they are told to put on a counter card.
+    $source = (string) file_get_contents(QP_ROOT . '/app/Services/WelcomeService.php');
+    Assert::true(str_contains($source, 'boardUrl'), 'the service builds a board URL');
+    Assert::true(str_contains($source, "'/board/'"), 'from the display key');
+    Assert::true(
+        str_contains($source, 'public_display_keys') && str_contains($source, 'display_token'),
+        'falling back through both key mechanisms'
+    );
 });
 
 

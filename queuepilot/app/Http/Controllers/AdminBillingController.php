@@ -85,7 +85,20 @@ final class AdminBillingController
             '/billing'
         );
 
-        flash('success', 'Payment verified. Invoice ' . ($invoice['number'] ?? '') . ' is settled and the subscription is active.');
+        // The receipt is the message that ends the worry. An in-app banner is
+        // only seen by whoever signs in next, which for a one-doctor clinic is
+        // not necessarily the person who made the transfer.
+        $mailed = '';
+        if ($invoice !== null) {
+            try {
+                $receipt = (new \App\Services\InvoiceMailer())->receipt((int) $payment['clinic_id'], (int) $invoice['id']);
+                $mailed = $receipt['sent'] ? ' A receipt has been emailed to the clinic.' : '';
+            } catch (\Throwable $e) {
+                \App\Core\Log::warn('billing.receipt_email_failed', ['error' => $e->getMessage()]);
+            }
+        }
+
+        flash('success', 'Payment verified. Invoice ' . ($invoice['number'] ?? '') . ' is settled and the subscription is active.' . $mailed);
         redirect('/admin/billing');
     }
 

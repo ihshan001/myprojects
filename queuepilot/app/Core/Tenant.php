@@ -219,6 +219,25 @@ final class Tenant
         return $scheme . '://' . $host;
     }
 
+    /**
+     * The platform's own console address.
+     *
+     * Deliberately separate from siteUrl()/opsUrl(): those answer "where does
+     * this clinic live", and this answers "where does the operator live". A
+     * platform alert must point at the console, and for a platform admin there
+     * is no clinic to ask about — the test that forbids `APP_URL . path`
+     * everywhere else is right, but a rule with no sanctioned exception just
+     * gets worked around.
+     */
+    public static function platformUrl(string $path = ''): string
+    {
+        $base = rtrim((string) Env::get('app.url', ''), '/');
+        if ($base === '') {
+            return $path === '' ? '' : '/' . ltrim($path, '/');
+        }
+        return $base . ($path === '' ? '' : '/' . ltrim($path, '/'));
+    }
+
     /** Absolute base URL for the clinic's staff backend. */
     public static function opsUrl(array $clinic): string
     {
