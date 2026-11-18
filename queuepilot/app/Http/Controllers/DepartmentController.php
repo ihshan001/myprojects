@@ -45,7 +45,7 @@ final class DepartmentController
                 function (array $carry, array $d) use ($clinicId): array {
                     $key = $this->displayKeyFor($clinicId, (int) $d['id']);
                     if ($key !== null) {
-                        $carry[(int) $d['id']] = rtrim((string) \App\Core\Env::get('app.url', ''), '/') . '/board/' . $key;
+                        $carry[(int) $d['id']] = clinic_url((int) $clinicId, '/board/' . $key);
                     }
                     return $carry;
                 },
@@ -189,7 +189,7 @@ final class DepartmentController
         (new \App\Services\AuditService())->log($clinicId, 'department.display_key_issued', 'department', (int) $id);
         \App\Core\Session::flash('department_display_key', [
             'id' => (int) $id,
-            'url' => rtrim((string) \App\Core\Env::get('app.url', ''), '/') . '/board/' . $token,
+            'url' => clinic_url((int) $clinicId, '/board/' . $token),
         ]);
 
         flash('success', 'Display link issued for ' . $department['name'] . '. The old link, if any, no longer updates.');

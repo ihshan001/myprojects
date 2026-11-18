@@ -59,8 +59,20 @@ final class NotificationService
             return; // already enqueued for this event
         }
 
-        $link = rtrim((string) Env::get('app.url', ''), '/') . '/t/' . (string) Db::scalar(
-            'SELECT track_token FROM queue_entries WHERE id = ?', [$entryId]
+        // The patient's own clinic address, not the platform root. A tracking
+        // link is the one URL a patient is most likely to open hours later
+        // from a message that has travelled; it has to land on the clinic that
+        // issued it.
+        // Named $trackRow, not $entry: $entry already holds the token, queue
+        // and clinic data this method renders from. Shadowing it here emptied
+        // every placeholder in every SMS — a bug that would have shipped as
+        // "the messages are blank" and been traced to the template engine.
+        $trackRow = Db::one(
+            'SELECT track_token, clinic_id FROM queue_entries WHERE id = ?', [$entryId]
+        );
+        $link = clinic_url(
+            (int) ($trackRow['clinic_id'] ?? $clinicId),
+            '/t/' . (string) ($trackRow['track_token'] ?? '')
         );
 
         // The clinic's own wording if it has any, otherwise the shipped copy.
@@ -205,8 +217,10 @@ final class NotificationService
             // the confirmation page. A one-off 40-character signature makes the
             // message two parts; that cost buys a reschedule that never needs a
             // phone call, which is the thing patients actually complain about.
-            $link = rtrim((string) Env::get('app.url', 'http://localhost:8080'), '/')
-                . \App\Services\AppointmentService::manageUrl((int) $a['id'], (string) $a['scheduled_for']);
+            $link = clinic_url(
+                (int) $a['clinic_id'],
+                \App\Services\AppointmentService::manageUrl((int) $a['id'], (string) $a['scheduled_for'])
+            );
             $body = strtr((new TemplateService())->body((int) $a['clinic_id'], 'appointment_reminder'), [
                 '{clinic}' => (string) $a['clinic_name'],
                 '{when}'   => $when,

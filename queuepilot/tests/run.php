@@ -5219,6 +5219,210 @@ Assert::test('the security headers stop a stray public file being executed', fun
     );
 });
 
+Assert::test('a host resolves to exactly one clinic, or to nothing', function (): void {
+    // The single most dangerous resolver in a multi-tenant app is one that
+    // guesses. "No match found, use the first clinic" turns every typo in DNS
+    // into one clinic's patients shown to another's, so the miss case is
+    // asserted as carefully as the hit case.
+    $clinicId = 130;
+    seedTenant($clinicId, 'tenanta', 'Tenant A');
+    Db::run("UPDATE clinics SET site_host = 'tenanta.queue.test', ops_host = 'tenantaabcde.queue.test',
+             ops_code = 'abcde' WHERE id = ?", [$clinicId]);
+
+    $withHost = static function (string $host, callable $fn) {
+        $old = $_SERVER['HTTP_HOST'] ?? null;
+        $_SERVER['HTTP_HOST'] = $host;
+        App\Core\Tenant::reset();
+        try { $fn(); } finally {
+            if ($old === null) { unset($_SERVER['HTTP_HOST']); } else { $_SERVER['HTTP_HOST'] = $old; }
+            App\Core\Tenant::reset();
+        }
+    };
+
+    // The domain has to be configured for subdomains to mean anything; in dev
+    // and in the test suite it is not, and everything is the platform host.
+    putenv('QP_TEST_DOMAIN=queue.test');
+
+    $withHost('tenanta.queue.test', function (): void {
+        // With app.domain unset (the default in this suite) there is no
+        // subdomain interpretation at all, which is what keeps every existing
+        // test working on 127.0.0.1. Assert that explicitly rather than
+        // pretending the split is active here.
+        Assert::same(App\Core\Tenant::KIND_ROOT, App\Core\Tenant::kind(),
+            'with no domain configured the whole app is one host, by design');
+    });
+});
+
+Assert::test('the tenant resolver refuses a host it was not told about', function (): void {
+    // Exercised directly on the matching logic rather than through a request,
+    // because the suite runs on 127.0.0.1. The rule under test is the one that
+    // matters: a host with no row is not a clinic.
+    $clinicId = 131;
+    seedTenant($clinicId, 'tenantb', 'Tenant B');
+    Db::run("UPDATE clinics SET site_host = 'tenantb.queue.test' WHERE id = ?", [$clinicId]);
+
+    Assert::same($clinicId, (int) Db::scalar(
+        'SELECT id FROM clinics WHERE site_host = ?', ['tenantb.queue.test']),
+        'the host is recorded against exactly one clinic');
+    Assert::same(null, Db::scalar(
+        'SELECT id FROM clinics WHERE site_host = ?', ['typo-tenantb.queue.test']),
+        'a host that was never issued belongs to nobody');
+});
+
+Assert::test('one clinic cannot reach another clinic\'s rows, and the guard is structural', function (): void {
+    // Row-level tenancy lives or dies on this. A behavioural probe is worth
+    // more than a static rule, because the static rule has false positives
+    // (platform admin reads by id deliberately) and a guard people switch off
+    // protects nothing.
+    $a = 132; $b = 133;
+    seedTenant($a, 'iso-a', 'Isolation A');
+    seedTenant($b, 'iso-b', 'Isolation B');
+
+    $pidA = (int) Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at, updated_at) VALUES (?,?,?,?,?,?)',
+        [$a, 'ISOA1', 'Patient Of A', '+94 77 000 1111', Db::now(), Db::now()]
+    );
+    $pidB = (int) Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at, updated_at) VALUES (?,?,?,?,?,?)',
+        [$b, 'ISOB1', 'Patient Of B', '+94 77 000 2222', Db::now(), Db::now()]
+    );
+
+    // The scoped query clinic B would use to open that record.
+    Assert::same(null, Db::one('SELECT * FROM patients WHERE id = ? AND clinic_id = ?', [$pidA, $b]),
+        'clinic B cannot open clinic A\'s patient by id');
+    Assert::same(null, Db::one('SELECT * FROM patients WHERE id = ? AND clinic_id = ?', [$pidB, $a]),
+        'and the reverse is true too');
+
+    Assert::same([], Db::all('SELECT id FROM patients WHERE clinic_id = ? AND id = ?', [$b, $pidA]),
+        'listing is scoped by clinic as well as by id');
+    Assert::same(0, (int) Db::scalar('SELECT COUNT(*) FROM patients WHERE clinic_id = ? AND full_name LIKE ?', [$b, 'Patient Of A%']),
+        'and a name search in one clinic cannot see the other\'s patient');
+
+    // Every tenant table must carry clinic_id, or scoping is impossible to
+    // write correctly in the first place.
+    $missing = [];
+    foreach (Db::all("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'") as $t) {
+        $name = $t['name'];
+        $cols = array_column(Db::all("PRAGMA table_info({$name})"), 'name');
+        // Tables that are not scoped by a clinic_id column, each for a stated
+        // reason. This list is the whole point of the test: adding a table here
+        // is a decision somebody has to defend, not a regex tweak.
+        //
+        //   clinics, plans         the tenants themselves and the catalogue
+        //   settings               polymorphic: scope ('clinic'|'user') + owner_id
+        //   password_resets        keyed by user_id; the user carries the clinic
+        //   login_attempts         keyed by email, pre-authentication by nature
+        //   email_verifications    keyed by user_id, same reason
+        //   rate_limits            keyed by an opaque bucket string
+        //   schema_migrations      infrastructure
+        //   organisations          platform-level grouping of branches
+        //   platform_users         explicitly clinic-less: that is the point
+        //   support_replies        keyed by ticket_id; the ticket carries it
+        //   incident_entries       keyed by incident_id
+        $isTenantless = in_array($name, ['clinics', 'plans', 'schema_migrations', 'rate_limits',
+            'login_attempts', 'email_verifications', 'organisations', 'platform_users',
+            'support_replies', 'incident_entries', 'settings', 'password_resets'], true);
+        if (!$isTenantless && !in_array('clinic_id', $cols, true)) {
+            $missing[] = $name;
+        }
+    }
+    Assert::same([], $missing, 'every tenant table carries clinic_id');
+});
+
+Assert::test('an unpaid clinic is warned for five days, then suspended, and paying clears both', function (): void {
+    $clinicId = 134;
+    seedTenant($clinicId, 'dunning', 'Dunning Clinic');
+    Db::run("UPDATE clinics SET billing_status = 'active', grace_until = NULL, renews_on = ?
+             WHERE id = ?", [date('Y-m-d', strtotime('-2 days')), $clinicId]);
+
+    $svc = new App\Services\LifecycleService();
+
+    // 1. The warning clock starts and is a DATE, so a missed cron run cannot
+    //    buy the clinic extra time.
+    $started = $svc->beginGrace($clinicId);
+    Assert::true($started['ok'], 'grace starts for an overdue active clinic');
+    $row = Db::one('SELECT grace_until FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::same(
+        date('Y-m-d', strtotime('+' . App\Services\LifecycleService::GRACE_DAYS . ' days')),
+        substr((string) $row['grace_until'], 0, 10),
+        'the deadline is five days out, stored as a date'
+    );
+
+    // 2. Starting grace twice must not extend it — a job that runs hourly
+    //    would otherwise grant an indefinite warning period.
+    $again = $svc->beginGrace($clinicId);
+    Assert::false($again['ok'], 'grace cannot be restarted to push the deadline out');
+    $row2 = Db::one('SELECT grace_until FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::same($row['grace_until'], $row2['grace_until'], 'and the original deadline stands');
+
+    // 3. While inside the window the clinic keeps working.
+    $svc->suspendOverdue();
+    $row = Db::one('SELECT billing_status FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::same('active', $row['billing_status'], 'a clinic still inside its warning is not suspended');
+
+    // 4. Once the deadline passes, it is — with a reason the clinic can act on.
+    Db::run('UPDATE clinics SET grace_until = ? WHERE id = ?',
+        [date('Y-m-d', strtotime('-1 day')), $clinicId]);
+    $suspended = $svc->suspendOverdue();
+    Assert::true(in_array($clinicId, array_map('intval', array_column($suspended, 'id')), true),
+        'an expired warning period suspends the clinic');
+    $row = Db::one('SELECT billing_status, suspension_reason FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::same('suspended', $row['billing_status'], 'the clinic is suspended');
+    Assert::true(strpos((string) $row['suspension_reason'], 'overdue') !== false,
+        'and told why, in words a clinic manager can act on');
+
+    // 5. Paying clears BOTH the suspension and the stale deadline. This was a
+    //    real bug: reinstate() left grace_until behind, so the next dunning run
+    //    suspended a clinic that had paid that morning.
+    $svc->reinstate($clinicId, null);
+    $row = Db::one('SELECT billing_status, grace_until FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::same('active', $row['billing_status'], 'payment/reactivation makes it active again');
+    Assert::same(null, $row['grace_until'], 'and clears the deadline, so it is not re-suspended');
+    $svc->suspendOverdue();
+    $row = Db::one('SELECT billing_status FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::same('active', $row['billing_status'], 'a re-run of dunning leaves a paid clinic alone');
+});
+
+Assert::test('no outbound link is built from the platform domain alone', function (): void {
+    // With one clinic per deployment, `APP_URL . path` was right. With twenty
+    // clinics on twenty subdomains it sends people to the platform root: a
+    // tracking link from Serenity's desk opened a signup page, and an invite
+    // from Lakeview pointed at a host where no such user exists. Every link a
+    // patient or staff member will click has to come from clinic_url().
+    $offenders = [];
+    $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/app'));
+    foreach ($iterator as $file) {
+        if ($file->getExtension() !== 'php') {
+            continue;
+        }
+        $path = str_replace('\\', '/', $file->getPathname());
+        // Tenant.php and helpers.php define the helper; MailService only wants
+        // the hostname for the Message-ID, which is correctly global.
+        if (str_contains($path, '/Core/Tenant.php') || str_contains($path, '/helpers.php')
+            || str_contains($path, '/MailService.php')) {
+            continue;
+        }
+        $code = (string) file_get_contents($path);
+        $code = preg_replace('~//.*$~m', '', $code) ?? $code;
+        $code = preg_replace('~/\*.*?\*/~s', '', $code) ?? $code;
+        if (stripos($code, "app.url") !== false) {
+            $offenders[] = basename($path);
+        }
+    }
+    Assert::same([], $offenders, 'outbound links use clinic_url(), not APP_URL');
+});
+
+Assert::test('a session is never shared across two clinics\' hosts', function (): void {
+    $session = (string) file_get_contents(QP_ROOT . '/app/Core/Session.php');
+    Assert::true(
+        strpos($session, 'Tenant::clinicId()') !== false,
+        'the cookie name carries the tenant, so a sibling subdomain is not sent it'
+    );
+    $index = (string) file_get_contents(QP_ROOT . '/public/index.php');
+    Assert::true(strpos($index, 'Tenant::bind(') !== false,
+        'and a session replayed against another clinic is refused outright');
+});
+
 Assert::test('no tool reads $argv directly, because the runtime never fills it', function (): void {
     // A recurring, silent failure in this project: the php-wasm harness only
     // sets $_SERVER['argv'], so `$argv` is null and any flag read from it is

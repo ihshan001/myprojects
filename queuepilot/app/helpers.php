@@ -25,6 +25,41 @@ if (!function_exists('csrf_token')) {
     function csrf_token(): string { return Csrf::token(); }
 }
 
+if (!function_exists('clinic_url')) {
+    /**
+     * An absolute URL on the clinic's own address, for anything a patient or
+     * a staff member will click.
+     *
+     * Every outbound link used to be `APP_URL . path`, which was correct while
+     * one deployment served one host. With twenty clinics on twenty
+     * subdomains it is wrong in a way that is easy to miss and expensive to
+     * live with: a tracking link emailed from Serenity's desk would point at
+     * the platform root, where there is no clinic — so the patient's "where am
+     * I in the queue" link opens a signup page.
+     *
+     * $surface is 'site' (patient-facing, default) or 'ops' (staff-facing).
+     * Falls back to APP_URL when the clinic has no host yet, which is the
+     * honest answer for a clinic that has not been provisioned.
+     */
+    function clinic_url(int $clinicId, string $path = '/', string $surface = 'site'): string
+    {
+        static $cache = [];
+        if (!array_key_exists($clinicId, $cache)) {
+            $cache[$clinicId] = App\Core\Db::one(
+                'SELECT site_host, ops_host FROM clinics WHERE id = ?', [$clinicId]
+            );
+        }
+        $row = $cache[$clinicId];
+        if ($row === null) {
+            return rtrim((string) App\Core\Env::get('app.url', ''), '/') . '/' . ltrim($path, '/');
+        }
+        $base = $surface === 'ops'
+            ? App\Core\Tenant::opsUrl($row)
+            : App\Core\Tenant::siteUrl($row);
+        return rtrim($base, '/') . '/' . ltrim($path, '/');
+    }
+}
+
 if (!function_exists('url')) {
     function url(string $path = ''): string { return '/' . ltrim($path, '/'); }
 }

@@ -16,9 +16,17 @@ use App\Core\Request;
 use App\Core\Response;
 use App\Core\Router;
 use App\Core\Session;
+use App\Core\Tenant;
 use App\Core\View;
 
 Response::securityHeaders();
+
+// Which clinic, and which of its two sites? Resolved from the Host header
+// before anything else, because the login form, the display board and the
+// tracking page all have to know which clinic they belong to before a session
+// exists. An unknown host resolves to nothing and is refused below — a
+// resolver that guessed would serve one clinic's patients to another.
+Tenant::resolve();
 
 Session::start();
 
@@ -53,6 +61,43 @@ View::share('branchChoices', $branchChoices);
 View::share('activeBranchId', Auth::clinicId());
 View::share('requestId', $requestId);
 View::share('debug', $config['app']['debug']);
+View::share('tenantClinic', Tenant::clinic());
+View::share('tenantKind', Tenant::kind());
+
+/* Tenant binding — the replay guard.
+ *
+ * A session cookie issued on one clinic's host is still a valid session record
+ * in the shared database. What stops it working on another clinic's host is
+ * this check: the signed-in user's clinic must be the host's clinic.
+ *
+ * It runs before routing, so it covers routes that do not exist yet, and it is
+ * deliberately a logout rather than a 403 — a cookie presented to the wrong
+ * clinic is either a misconfiguration or an attack, and neither deserves a
+ * session that keeps working.
+ */
+if (Auth::check() && !Auth::isSuper() && !Tenant::isRoot()) {
+    $u = Auth::user();
+    if (!Tenant::bind((int) $u['id'], $u['clinic_id'] !== null ? (int) $u['clinic_id'] : null)) {
+        \App\Core\Log::warn('tenant.bind_refused', [
+            'user' => (int) $u['id'],
+            'user_clinic' => $u['clinic_id'],
+            'host_clinic' => Tenant::clinicId(),
+            'host' => Tenant::host(),
+        ]);
+        Session::destroy();
+        Response::redirect('/login');
+        exit;
+    }
+}
+
+// The public site carries no staff session. A patient typing the display URL
+// must not be shown a console they are not signed in to, and a staff member
+// browsing the board should see the board.
+if (Auth::check() && !Auth::isSuper() && Tenant::isSite()
+    && !str_starts_with(Request::path(), '/logout')) {
+    Session::destroy();
+    Session::start();
+}
 
 // SaaS gate. Three states, three different doors, and one rule: a clinic that
 // has not been approved can be signed in but cannot work.
@@ -92,6 +137,40 @@ if (Auth::check() && !Auth::isSuper()) {
             Response::redirect('/onboarding-status');
             exit;
         }
+    }
+}
+
+/* Surface separation — the two sites do different jobs.
+ *
+ * SITE host (<slug>.queue.lk) is public: the display board, queue position,
+ *   tracking links, the booking page. It is handed to patients, printed on
+ *   slips, and must work with no session at all.
+ * OPS host (unguessable) is staff-only: login, console, settings, reports.
+ *
+ * A route that needs a session has no business on the site host, and a route
+ * that takes no session has no business on the ops host (a login form on an
+ * address nobody can guess is fine, but the public board there is dead weight
+ * and a wider surface). Enforced here rather than per route, for the same
+ * reason as the lifecycle gate: it must cover routes added later.
+ */
+if (!Tenant::isRoot()) {
+    $path = Request::path();
+    $publicPaths = ['/login', '/logout', '/locale', '/live', '/board', '/t', '/position',
+                    '/demo', '/assets', '/api/display', '/api/queue/board', '/book',
+                    '/booking', '/sw.js', '/favicon.ico', '/health'];
+    $isPublicPath = false;
+    foreach ($publicPaths as $prefix) {
+        if ($path === $prefix || str_starts_with($path, $prefix . '/')
+            || str_starts_with($path, $prefix . '?') || $path === $prefix) {
+            $isPublicPath = true;
+            break;
+        }
+    }
+    // The site host refuses anything that is not public; the ops host refuses
+    // the public board pages, which belong on the site address.
+    if (Tenant::isSite() && !$isPublicPath) {
+        abort(404, 'Not found.');
+        exit;
     }
 }
 

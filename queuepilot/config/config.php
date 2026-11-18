@@ -13,6 +13,15 @@ return [
         'env'      => getenv('APP_ENV') ?: 'production',
         'debug'    => (getenv('APP_DEBUG') ?: '0') === '1',
         'url'      => getenv('APP_URL') ?: 'http://localhost:8080',
+        // The parent domain clinics live under. <slug>.DOMAIN is the public
+        // site, <slug><code>.DOMAIN is the staff backend. Empty means "one
+        // host for everything" — the correct behaviour for dev, the test
+        // suite, and a first install before DNS exists.
+        'domain'     => getenv('APP_DOMAIN') ?: '',
+        // Comma-separated platform hosts (queue.lk, admin.queue.lk). A request
+        // arriving on one of these is the platform's own surface and carries
+        // no clinic, even though it may share the parent domain.
+        'root_hosts' => getenv('APP_ROOT_HOSTS') ?: '',
         'key'      => getenv('APP_KEY') ?: 'dev-only-key-change-me-in-env-8f3a1c9d',
         'timezone' => getenv('APP_TIMEZONE') ?: 'Asia/Colombo',
         'locales'  => ['en' => 'English', 'si' => 'සිංහල', 'ta' => 'தமிழ்'],

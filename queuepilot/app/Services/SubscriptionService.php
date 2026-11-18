@@ -126,11 +126,25 @@ final class SubscriptionService
             // leaves whatever suspension is in place alone — the invoice is
             // unpaid again, which is the truth of it.
             if ($status === 'verified') {
+                // Clears grace as well as suspension, and does it on EVERY
+                // verified payment rather than only when the clinic happened to
+                // be suspended. A clinic mid-warning that pays must stop being
+                // warned immediately; leaving the deadline in place means the
+                // dunning job suspends them tomorrow for money already paid.
+                //
+                // The cycle comes from the clinic, so a yearly payer is not
+                // pushed back onto a monthly renewal.
+                $clinicRow = Db::one('SELECT billing_cycle FROM clinics WHERE id = ?', [$clinicId]);
+                $cycle = (string) ($clinicRow['billing_cycle'] ?? 'monthly');
+                $next = $cycle === 'yearly'
+                    ? date('Y-m-d', strtotime(substr($now, 0, 10) . ' +1 year'))
+                    : date('Y-m-d', strtotime(substr($now, 0, 10) . ' +1 month'));
+
                 Db::run(
-                    "UPDATE clinics SET billing_status = 'active', suspended_at = NULL, suspension_reason = NULL,
-                            renews_on = date(?, '+1 month')
-                      WHERE id = ? AND billing_status <> 'active'",
-                    [$now, $clinicId]
+                    "UPDATE clinics SET billing_status = 'active', suspended_at = NULL,
+                            suspension_reason = NULL, grace_until = NULL, renews_on = ?
+                      WHERE id = ?",
+                    [$next, $clinicId]
                 );
             }
         });

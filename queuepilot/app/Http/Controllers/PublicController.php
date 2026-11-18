@@ -69,7 +69,10 @@ final class PublicController
         };
 
         // Full link for the "share/print" affordance, never exposes clinic ids.
-        $fullLink = rtrim((string) Env::get('app.url', ''), '/') . '/t/' . $token;
+        // Built from the clinic's own host: this page is served on the site
+        // subdomain, and a share link that pointed at the platform root would
+        // send the patient to a signup page.
+        $fullLink = clinic_url((int) ($entry['clinic_id'] ?? 0), '/t/' . $token);
 
         // A visit that came from a booking carries the appointment, so the
         // patient can move it from the same link they use to watch the queue.

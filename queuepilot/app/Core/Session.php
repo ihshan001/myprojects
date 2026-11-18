@@ -36,7 +36,20 @@ final class Session
             }
         }
 
-        session_name((string) Env::get('security.session_name', 'qp_session'));
+        // The cookie name carries the tenant. Two clinics on two subdomains of
+        // the same parent domain would otherwise share a cookie: the browser
+        // sends `qp_session` to *.queue.lk, so a session started on serenity's
+        // host is presented to lakeview's. Tenant::bind() would catch it, but
+        // it should never have been sent — and a shared cookie also means
+        // two clinics cannot be signed in at once in one browser, which is
+        // exactly what support does all day.
+        //
+        // Scoped to the exact host where possible: `domain` is left unset, so
+        // the cookie is host-only and never reaches a sibling subdomain.
+        session_name((string) Env::get('security.session_name', 'qp_session')
+            . (\App\Core\Tenant::clinicId() !== null
+                ? '_' . \App\Core\Tenant::clinicId()
+                : ''));
         // SameSite=None lets the session cookie survive cross-origin proxying
         // (e.g. the live preview at https://{port}-{sandboxId}.e2b.app), where
         // Lax would be dropped on the redirect after login. Secure is required

@@ -59,7 +59,7 @@ final class PasswordResetService
             [(int) $user['id'], hash('sha256', $token), $expires, $this->ip(), Db::now()]
         );
 
-        $link = rtrim((string) Env::get('app.url', ''), '/') . '/reset-password/' . $token;
+        $link = clinic_url((int) ($user['clinic_id'] ?? 0), '/reset-password/' . $token, 'ops');
         // Delivery is reported honestly, exactly like invitations: with no
         // transport configured nothing is sent and the caller must say so.
         (new MailService())->send(

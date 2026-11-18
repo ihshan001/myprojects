@@ -76,7 +76,7 @@ final class StaffInviteService
             'You are invited to join QueuePilot',
             "You have been invited to join the clinic team as a {$role}.\n\n"
             . "Set your password here (valid until {$expiresAt}):\n"
-            . rtrim((string) Env::get('app.url', ''), '/') . '/invite/' . $token . "\n\n"
+            . clinic_url((int) ($clinicId ?? 0), '/invite/' . $token, 'ops') . "\n\n"
             . "If you were not expecting this, ignore the message."
         );
 

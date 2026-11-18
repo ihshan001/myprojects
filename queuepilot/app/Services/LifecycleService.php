@@ -71,20 +71,35 @@ final class LifecycleService
             return $this->grantTrial($clinicId, $trialDays, $actorId);
         }
 
+        // Billing is monthly in advance, so the first period starts today and
+        // the renewal date is one cycle out. There is no arrears period for a
+        // clinic that has never used the system.
+        $cycle = (string) ($clinic['billing_cycle'] ?? 'monthly');
+        $renewsOn = $this->cycleEnd(date('Y-m-d'), $cycle);
+
         Db::run(
             "UPDATE clinics SET billing_status = 'active', suspended_at = NULL, suspension_reason = NULL,
                     approved_at = ?, approved_by = ?, declined_at = NULL, decision_reason = NULL,
-                    renews_on = ?, updated_at = ?
+                    grace_until = NULL, renews_on = ?, updated_at = ?
               WHERE id = ?",
-            [Db::now(), $actorId, date('Y-m-d', strtotime('+1 month')), Db::now(), $clinicId]
+            [Db::now(), $actorId, $renewsOn, Db::now(), $clinicId]
+        );
+
+        // Approval without addresses leaves the clinic unusable: the owner has
+        // nothing to open. Minting them here means the email that follows can
+        // contain both URLs, and re-running approval cannot mint a second one.
+        $addresses = (new ProvisionService())->provision(
+            Db::one('SELECT * FROM clinics WHERE id = ?', [$clinicId]) ?? $clinic
         );
 
         (new AuditService())->log($clinicId, 'platform.clinic_approved', 'clinic', $clinicId, [
             'actor' => $actorId,
+            'site_host' => $addresses['site_host'],
+            'ops_host' => $addresses['ops_host'],
         ]);
         Log::info('clinic.approved', ['clinic' => $clinicId, 'actor' => $actorId]);
 
-        return ['ok' => true];
+        return ['ok' => true] + $addresses;
     }
 
     /**
@@ -107,9 +122,15 @@ final class LifecycleService
         Db::run(
             "UPDATE clinics SET billing_status = 'trial', trial_ends_on = ?, approved_at = ?,
                     approved_by = ?, suspended_at = NULL, suspension_reason = NULL,
-                    renews_on = NULL, updated_at = ?
+                    grace_until = NULL, renews_on = NULL, updated_at = ?
               WHERE id = ?",
             [$endsOn, Db::now(), $actorId, Db::now(), $clinicId]
+        );
+
+        // A trial the owner cannot open is not a trial. Same addresses as a
+        // paid clinic; only the billing state differs.
+        $addresses = (new ProvisionService())->provision(
+            Db::one('SELECT * FROM clinics WHERE id = ?', [$clinicId]) ?? $clinic
         );
 
         (new AuditService())->log($clinicId, 'platform.clinic_trial_granted', 'clinic', $clinicId, [
@@ -117,7 +138,7 @@ final class LifecycleService
         ]);
         Log::info('clinic.trial_granted', ['clinic' => $clinicId, 'days' => $days, 'actor' => $actorId]);
 
-        return ['ok' => true, 'trial_ends_on' => $endsOn];
+        return ['ok' => true, 'trial_ends_on' => $endsOn] + $addresses;
     }
 
     /** @return array{ok: bool, error?: string} */
@@ -209,6 +230,125 @@ final class LifecycleService
     }
 
     // ------------------------------------------------------------------
+    // Dunning — the five-day warning before suspension
+    // ------------------------------------------------------------------
+    //
+    // The rule the business actually runs on: a clinic that has not paid is
+    // warned for five days, then suspended until the money arrives. Three
+    // things make this harder than "if overdue, suspend":
+    //
+    //   * The clock must not depend on the cron running. If the nightly job
+    //     misses a day, a clinic should not gain a day of free service, and it
+    //     must not be suspended a day early either. So the deadline is stored
+    //     as a date (`grace_until`), computed once when the invoice falls due.
+    //   * Paying must clear the warning immediately, not at the next run. A
+    //     clinic that transfers money at 6pm and still sees a red banner at
+    //     9pm learns to distrust every other message the system shows them.
+    //   * Suspension is the last step, and it must be reversible by the same
+    //     payment that caused it — which `activate` already does.
+
+    /** Days a clinic keeps working after an invoice falls due. */
+    public const GRACE_DAYS = 5;
+
+    /**
+     * Start the warning clock for a clinic whose invoice has fallen due.
+     *
+     * Only ever moves a clinic *into* grace, never out of it: calling this on a
+     * clinic already in grace must not extend the deadline, or a job that runs
+     * every hour would grant an indefinite warning period.
+     *
+     * @return array{ok:bool, error?:string, grace_until?:string}
+     */
+    public function beginGrace(int $clinicId, ?string $from = null): array
+    {
+        $clinic = Db::one('SELECT * FROM clinics WHERE id = ?', [$clinicId]);
+        if (!$clinic) {
+            return ['ok' => false, 'error' => 'That clinic does not exist.'];
+        }
+        if ($clinic['grace_until'] !== null) {
+            return ['ok' => false, 'error' => 'That clinic is already in its warning period.'];
+        }
+        if ($clinic['billing_status'] !== 'active') {
+            return ['ok' => false, 'error' => 'Only an active clinic can fall into arrears.'];
+        }
+
+        $until = date('Y-m-d', strtotime(($from ?? date('Y-m-d')) . ' +' . self::GRACE_DAYS . ' days'));
+        Db::run('UPDATE clinics SET grace_until = ?, updated_at = ? WHERE id = ?',
+            [$until, Db::now(), $clinicId]);
+
+        (new AuditService())->log($clinicId, 'billing.grace_started', 'clinic', $clinicId, [
+            'until' => $until, 'days' => self::GRACE_DAYS,
+        ]);
+        Log::info('clinic.grace_started', ['clinic' => $clinicId, 'until' => $until]);
+
+        return ['ok' => true, 'grace_until' => $until];
+    }
+
+    /**
+     * Clear the warning clock. Called whenever money lands.
+     *
+     * @return array{ok:bool, was_in_grace:bool}
+     */
+    public function clearGrace(int $clinicId): array
+    {
+        $inGrace = Db::scalar('SELECT grace_until FROM clinics WHERE id = ?', [$clinicId]) !== null;
+        if ($inGrace) {
+            Db::run('UPDATE clinics SET grace_until = NULL, updated_at = ? WHERE id = ?',
+                [Db::now(), $clinicId]);
+            (new AuditService())->log($clinicId, 'billing.grace_cleared', 'clinic', $clinicId);
+        }
+        return ['ok' => true, 'was_in_grace' => $inGrace];
+    }
+
+    /**
+     * Suspend every clinic whose warning period has run out.
+     *
+     * Suspends rather than deletes: data is untouched, the clinic lands on the
+     * billing page, and paying reinstates it. That is the same gate the rest of
+     * the platform already uses, so a dunning suspension behaves exactly like a
+     * manual one — one code path, one set of tests.
+     *
+     * @return list<array{id:int,name:string,grace_until:string}>
+     */
+    public function suspendOverdue(?string $today = null): array
+    {
+        $today = $today ?? date('Y-m-d');
+        $due = Db::all(
+            "SELECT id, name, grace_until FROM clinics
+              WHERE billing_status = 'active'
+                AND grace_until IS NOT NULL
+                AND substr(grace_until, 1, 10) < ?
+                AND closed_at IS NULL",
+            [$today]
+        );
+
+        foreach ($due as $clinic) {
+            $id = (int) $clinic['id'];
+            Db::run(
+                "UPDATE clinics SET billing_status = 'suspended', suspended_at = ?,
+                        suspension_reason = ?, updated_at = ?
+                  WHERE id = ?",
+                [Db::now(), 'Payment overdue. Your account resumes as soon as payment is confirmed.',
+                 Db::now(), $id]
+            );
+            (new AuditService())->log($id, 'billing.suspended_unpaid', 'clinic', $id, [
+                'grace_until' => $clinic['grace_until'],
+            ]);
+            Log::warn('clinic.suspended_unpaid', ['clinic' => $id]);
+        }
+
+        return $due;
+    }
+
+    /** End of a billing cycle starting on $from: one month or twelve. */
+    public function cycleEnd(string $from, string $cycle = 'monthly'): string
+    {
+        return $cycle === 'yearly'
+            ? date('Y-m-d', strtotime($from . ' +1 year'))
+            : date('Y-m-d', strtotime($from . ' +1 month'));
+    }
+
+    // ------------------------------------------------------------------
     // Suspension
     // ------------------------------------------------------------------
 
@@ -258,8 +398,13 @@ final class LifecycleService
             return ['ok' => false, 'error' => 'That clinic is not suspended.'];
         }
 
+        // grace_until must be cleared too. Leaving a stale deadline behind
+        // means the next dunning run suspends the clinic again for an invoice
+        // that has just been paid — the worst possible message to send to
+        // somebody who paid this morning.
         Db::run(
-            "UPDATE clinics SET suspended_at = NULL, suspension_reason = NULL, billing_status = 'active', updated_at = ?
+            "UPDATE clinics SET suspended_at = NULL, suspension_reason = NULL, grace_until = NULL,
+                    billing_status = 'active', updated_at = ?
               WHERE id = ?",
             [Db::now(), $clinicId]
         );

@@ -164,7 +164,7 @@ final class QueueController
             'result' => $result,
             'patient' => $patient,
             'queue' => $queue,
-            'fullLink' => rtrim((string) \App\Core\Env::get('app.url', ''), '/') . $result['track_url'],
+            'fullLink' => clinic_url((int) ($result['clinic_id'] ?? Auth::clinicId() ?? 0), (string) $result['track_url']),
             'position' => (new QueueService())->positionFor($entry, $clinicId),
         ]);
     }
@@ -237,7 +237,7 @@ final class QueueController
             'doctor' => (string) ($entry['doctor_name'] ?? ''),
             'room' => (string) ($entry['room_name'] ?? ''),
             'issued_at' => date('j M Y, g:i A', strtotime((string) $entry['joined_at'])),
-            'url' => rtrim((string) \App\Core\Env::get('app.url', ''), '/') . '/t/' . (string) $entry['track_token'],
+            'url' => clinic_url((int) $entry['clinic_id'], '/t/' . (string) $entry['track_token']),
             'qr_url' => '/queue/' . (int) $entry['id'] . '/qr.png',
         ];
     }
