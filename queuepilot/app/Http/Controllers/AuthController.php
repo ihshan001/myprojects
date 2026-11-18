@@ -249,6 +249,75 @@ final class AuthController
     }
 
     /**
+     * Your own name, phone and language.
+     *
+     * The Starter plan is deliberately one doctor with no "add doctor"
+     * capability, which makes this page the only place a solo owner can put
+     * their own name into the system. Without it the doctor is whoever the
+     * signup form said, for ever.
+     *
+     * Email is not editable here: it is the sign-in identity, and letting
+     * somebody change it from an already-signed-in session would move the
+     * account without ever proving they own the new address.
+     */
+    public function showProfile(): void
+    {
+        view('settings/profile', [
+            'title'   => 'Your details',
+            'user'    => Auth::user(),
+            'locales' => (array) \App\Core\Env::get('app.locales', ['en' => 'English']),
+            'errors'  => Session::takeFlash('profile_errors') ?? [],
+        ]);
+    }
+
+    public function saveProfile(): void
+    {
+        $user = Auth::user();
+        $name = trim((string) Request::input('name', ''));
+        $phone = trim((string) Request::input('phone', ''));
+        $locale = (string) Request::input('locale', 'en');
+
+        $errors = [];
+        if ($name === '') {
+            $errors['name'] = 'Your name cannot be empty — it is what a patient hears when you call them.';
+        } elseif (mb_strlen($name) > 120) {
+            $errors['name'] = 'That is longer than 120 characters.';
+        }
+        $allowed = array_keys((array) \App\Core\Env::get('app.locales', ['en' => 'English']));
+        if (!in_array($locale, $allowed, true)) {
+            $errors['locale'] = 'That is not one of the languages this install offers.';
+        }
+
+        if ($errors !== []) {
+            Session::flash('profile_errors', $errors);
+            redirect('/settings/profile');
+        }
+
+        \App\Core\Db::run(
+            'UPDATE users SET name = ?, phone = ?, locale = ? WHERE id = ?',
+            [$name, $phone !== '' ? $phone : null, $locale, (int) $user['id']]
+        );
+
+        // A doctor's own row on the doctor list is what the queue board reads,
+        // so a name that only changed on the login record would still be read
+        // out wrong to every patient.
+        if (($user['role'] ?? '') === 'doctor' && !empty($user['doctor_id'])) {
+            \App\Core\Db::run('UPDATE doctors SET name = ? WHERE id = ?', [$name, (int) $user['doctor_id']]);
+        }
+
+        (new \App\Services\AuditService())->log(
+            (int) ($user['clinic_id'] ?? 0),
+            'user.profile_updated',
+            'user',
+            (int) $user['id'],
+            ['name' => $name, 'phone_set' => $phone !== '', 'locale' => $locale]
+        );
+
+        flash('success', 'Your details have been saved.');
+        redirect('/settings/profile');
+    }
+
+    /**
      * Change your own password.
      *
      * Reached two ways: voluntarily from the security page, and forcibly on

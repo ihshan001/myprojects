@@ -264,6 +264,25 @@
           </form>
         </details>
       <?php endif; ?>
+
+      <?php /* Only for a clinic that is live and was approved: there is an
+               owner account to send a link to. Re-sending supersedes the old
+               link, which is also how you close off one that has been sitting
+               in a mailbox for weeks. */ ?>
+      <?php if (!$suspended && !$closing
+                && (($c['approved_at'] ?? null) !== null || ($c['trial_ends_on'] ?? null) !== null)): ?>
+        <details class="mt-3">
+          <summary class="cursor-pointer text-[11px] font-medium text-teal-700 hover:underline">
+            Welcome link did not arrive?
+          </summary>
+          <form method="post" action="/admin/clinics/<?= (int) $c['id'] ?>/resend-welcome" class="mt-2"
+                data-confirm-submit="Send <?= e(addslashes((string) $c['name'])) ?>'s owner a new welcome link? The link they have now will stop working."
+                data-confirm-danger>
+            <?= csrf_field() ?>
+            <button class="btn-secondary btn-sm">Resend welcome link</button>
+          </form>
+        </details>
+      <?php endif; ?>
     </div>
   <?php endforeach; ?>
 </div>

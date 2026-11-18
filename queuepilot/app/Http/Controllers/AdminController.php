@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 use App\Core\Auth;
 use App\Core\Db;
 use App\Core\Request;
+use App\Core\Session;
 use App\Services\AuditService;
 use App\Services\FeatureService;
 use App\Services\LifecycleService;
@@ -238,6 +239,49 @@ final class AdminController
      * not delete anything and does not sign staff out, because a billing
      * dispute should not cost a clinic its day's work.
      */
+    /**
+     * Send the owner a fresh welcome link.
+     *
+     * Needed whenever the first one did not arrive: mail was not configured
+     * yet, it landed in spam, or it expired before they got to it. Issuing a
+     * new link supersedes the old one, which is the safe direction — a link
+     * that was sitting in a mailbox for three weeks stops working when a new
+     * one is sent.
+     */
+    public function resendWelcome(string $id): void
+    {
+        $clinicId = (int) $id;
+        $clinic = Db::one('SELECT * FROM clinics WHERE id = ?', [$clinicId]);
+        if ($clinic === null) {
+            abort(404, 'That clinic does not exist.');
+            return;
+        }
+        if (($clinic['approved_at'] ?? null) === null && ($clinic['trial_ends_on'] ?? null) === null) {
+            flash('error', 'That clinic has not been approved yet, so there is no account to set up.');
+            redirect('/admin/clinics');
+        }
+
+        $welcome = new \App\Services\WelcomeService();
+        $issued = $welcome->issue($clinicId, Auth::id());
+        if (!$issued['ok']) {
+            flash('error', $issued['error']);
+            redirect('/admin/clinics');
+        }
+
+        $sent = $welcome->send($clinic, (string) $issued['token'], (string) $issued['email'], (string) $issued['name']);
+        if (!$sent['sent']) {
+            // The token is only ever returned once, so it is shown here rather
+            // than lost. The operator can pass it on by phone.
+            $ops = \App\Core\Tenant::opsUrl($clinic);
+            Session::flash('welcome_link', rtrim($ops, '/') . '/welcome/' . $issued['token']);
+            flash('error', 'Mail is not configured, so nothing was sent. Copy the link below and pass it on.');
+            redirect('/admin/clinics');
+        }
+
+        flash('success', 'A new welcome link has been emailed to ' . $issued['email'] . '. The previous one no longer works.');
+        redirect('/admin/clinics');
+    }
+
     /**
      * Record, or take back, a decision to delete a closed clinic's data.
      *

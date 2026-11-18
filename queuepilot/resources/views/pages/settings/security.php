@@ -78,6 +78,9 @@
     <a href="/settings/password" class="btn-secondary mt-4 w-full">
       <svg class="h-4 w-4"><use href="#i-lock"/></svg>Change password
     </a>
+    <a href="/settings/profile" class="btn-secondary mt-2 w-full">
+      <svg class="h-4 w-4"><use href="#i-user"/></svg>Your name and details
+    </a>
   </div>
 
   <div class="card card-pad">

@@ -96,6 +96,10 @@ Router::get('/invite/{token}', [AuthController::class, 'showInvite'], ['csrf' =>
 Router::post('/invite/{token}', [AuthController::class, 'acceptInvite']);
 // Account security (2FA enrolment) — any signed-in user
 Router::get('/settings/security', [AuthController::class, 'security'], ['auth' => true]);
+// Your own details. The only place a solo owner can put their own name in,
+// since the Starter plan has no "add doctor" flow to do it for them.
+Router::get('/settings/profile', [AuthController::class, 'showProfile'], ['auth' => true]);
+Router::post('/settings/profile', [AuthController::class, 'saveProfile'], ['auth' => true]);
 // Your own password. Also the landing page for a temporary one.
 Router::get('/settings/password', [AuthController::class, 'showChangePassword'], ['auth' => true]);
 Router::post('/settings/password', [AuthController::class, 'changePassword'], ['auth' => true]);
@@ -286,6 +290,8 @@ Router::get('/admin', [AdminController::class, 'index'], ['auth' => true, 'roles
 Router::get('/admin/clinics', [AdminController::class, 'clinics'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/admin/clinics/{id}', [AdminController::class, 'updateClinic'], ['auth' => true, 'roles' => ['super_admin']]);
 // Suspension stops new tokens without deleting anything or signing staff out.
+// Re-send the owner's welcome link when the first did not arrive.
+Router::post('/admin/clinics/{id}/resend-welcome', [AdminController::class, 'resendWelcome'], ['auth' => true, 'roles' => ['super_admin']]);
 // Recording that a closed clinic's data may be deleted. Not the deletion.
 Router::post('/admin/clinics/{id}/purge-approval', [AdminController::class, 'purgeApproval'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/admin/clinics/{id}/suspend', [AdminController::class, 'suspendClinic'], ['auth' => true, 'roles' => ['super_admin']]);

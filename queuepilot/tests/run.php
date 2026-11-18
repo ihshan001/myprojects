@@ -6972,7 +6972,7 @@ Assert::test('a due clinic is reported for contact but is NOT authorised for del
     $closed = \App\Core\Db::insert(
         'INSERT INTO clinics (name, slug, site_host, billing_status, closure_requested_at, purge_after, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        ['Closed For Ages', 'closed-for-ages', 'closed-for-ages.queue.lk', 'closed',
+        ['Closed For Ages', 'closed-ages-' . bin2hex(random_bytes(3)), 'closed-ages.queue.lk', 'closed',
          date('Y-m-d H:i:s', strtotime('-200 days')),
          date('Y-m-d H:i:s', strtotime('-110 days')), now_iso(), now_iso()]
     );
@@ -7010,7 +7010,7 @@ Assert::test('approving deletion requires a note and an actor, and can be revoke
     $clinicId = \App\Core\Db::insert(
         'INSERT INTO clinics (name, slug, billing_status, closure_requested_at, purge_after, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)',
-        ['Purge Candidate', 'purge-candidate', 'closed',
+        ['Purge Candidate', 'purge-cand-' . bin2hex(random_bytes(3)), 'closed',
          date('Y-m-d H:i:s', strtotime('-120 days')),
          date('Y-m-d H:i:s', strtotime('-30 days')), now_iso(), now_iso()]
     );
@@ -7144,7 +7144,7 @@ Assert::test('a welcome link is single-use, expiring, and stored hashed', functi
     $clinicId = \App\Core\Db::insert(
         'INSERT INTO clinics (name, slug, billing_status, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?)',
-        ['Welcome Unit Clinic', 'welcome-unit-clinic', 'active', now_iso(), now_iso()]
+        ['Welcome Unit Clinic', 'welcome-unit-' . bin2hex(random_bytes(3)), 'active', now_iso(), now_iso()]
     );
     $userId = \App\Core\Db::insert(
         'INSERT INTO users (clinic_id, name, email, password_hash, role, is_active, created_at)
@@ -7191,7 +7191,7 @@ Assert::test('an expired welcome link is refused and says why', function (): voi
     $clinicId = \App\Core\Db::insert(
         'INSERT INTO clinics (name, slug, billing_status, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?)',
-        ['Expired Invite Clinic', 'expired-invite-clinic', 'active', now_iso(), now_iso()]
+        ['Expired Invite Clinic', 'expired-invite-' . bin2hex(random_bytes(3)), 'active', now_iso(), now_iso()]
     );
     $userId = \App\Core\Db::insert(
         'INSERT INTO users (clinic_id, name, email, password_hash, role, is_active, created_at)
@@ -7410,6 +7410,76 @@ Assert::test('.env.example documents every operational setting the code reads', 
         (bool) preg_match('/^SECURITY_REQUIRE_2FA_SUPER=true$/m', $example),
         'two-factor is documented as mandatory, matching the code default'
     );
+});
+
+
+Assert::test('a re-sent welcome link supersedes the one before it', function (): void {
+    $service = new \App\Services\WelcomeService();
+    $clinicId = \App\Core\Db::insert(
+        'INSERT INTO clinics (name, slug, billing_status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)',
+        ['Resend Clinic', 'resend-clinic-' . bin2hex(random_bytes(3)), 'active', now_iso(), now_iso()]
+    );
+    $userId = \App\Core\Db::insert(
+        'INSERT INTO users (clinic_id, name, email, password_hash, role, is_active, created_at)
+         VALUES (?, ?, ?, ?, ?, 1, ?)',
+        [(int) $clinicId, 'Resend Owner', 'resend-owner@example.test', password_hash('x', PASSWORD_DEFAULT), 'clinic_admin', now_iso()]
+    );
+
+    $first  = $service->issue((int) $clinicId, (int) $userId);
+    $second = $service->issue((int) $clinicId, (int) $userId);
+    Assert::true($first['ok'] && $second['ok'], 'both links are issued');
+    Assert::true($first['token'] !== $second['token'], 'the second is a different token');
+
+    // Superseding is the safe direction: an old link sitting in a mailbox for
+    // weeks must stop working the moment a new one is sent.
+    $old = $service->redeem((string) $first['token'], 'ShouldNot#Work1');
+    Assert::false($old['ok'], 'the superseded link no longer works');
+
+    $new = $service->redeem((string) $second['token'], 'ThisWorks#2026');
+    Assert::true($new['ok'], 'the newest link does');
+
+    // Resending must not leave a pile of live tokens behind.
+    $live = (int) \App\Core\Db::scalar(
+        'SELECT COUNT(*) FROM staff_invites WHERE clinic_id = ? AND accepted_at IS NULL',
+        [(int) $clinicId]
+    );
+    Assert::same(0, $live, 'no unaccepted links are left dangling');
+
+    \App\Core\Db::run('DELETE FROM staff_invites WHERE clinic_id = ?', [(int) $clinicId]);
+    \App\Core\Db::run('DELETE FROM users WHERE id = ?', [(int) $userId]);
+    \App\Core\Db::run('DELETE FROM clinics WHERE id = ?', [(int) $clinicId]);
+});
+
+Assert::test('a solo owner can set their own name, because nothing else will', function (): void {
+    // Starter is one doctor with no "add doctor" capability, so this page is
+    // the only way the owner's real name ever reaches the queue board. If it
+    // regresses, every Starter clinic calls patients under the name typed
+    // into a signup form by whoever set the account up.
+    $controller = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/AuthController.php');
+    $start = strpos($controller, 'public function saveProfile');
+    Assert::true($start !== false, 'saveProfile exists');
+    $body = substr($controller, $start, 2600);
+
+    Assert::true(str_contains($body, 'UPDATE users SET name = ?'), 'the user record is updated');
+    Assert::true(str_contains($body, 'UPDATE doctors SET name = ?'), 'and a doctor\'s own row, which the board reads');
+    Assert::true(
+        (bool) preg_match('/\$name === \'\'/', $body),
+        'an empty name is refused — it is what a patient hears'
+    );
+
+    // Email is the sign-in identity and must not be editable from here.
+    Assert::true(!str_contains($body, 'email = ?'), 'the sign-in email is not changed on this page');
+
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/profile.php');
+    Assert::true(str_contains($view, 'name="name"'), 'the form has a name field');
+    Assert::true(!str_contains($view, 'name="email"'), 'and no email field');
+
+    // Reachable, not orphaned.
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    Assert::true(str_contains($routes, "'/settings/profile'"), 'the page is routed');
+    $security = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/security.php');
+    Assert::true(str_contains($security, '/settings/profile'), 'and linked from the security page');
 });
 
 
