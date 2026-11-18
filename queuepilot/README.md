@@ -282,6 +282,13 @@ means, the cron lines, what a stalled worker looks like, how to close an
 abandoned day, and the two settings (`APP_KEY`, `SESSION_PATH`) that break
 sign-in if changed carelessly.
 
+**`docs/RUNBOOK.md`** covers the duties that have a person on the other end:
+setting up an uptime monitor against `/api/health`, wiring Google's free SMTP
+tier and its real limits, and the procedure for a clinic that has stopped
+using the system. That last one is a policy, not a timer — nothing is ever
+deleted on a schedule. A human emails, then phones, then decides, and the
+decision is recorded with a note before `tools/purge.php` will act on it.
+
 ## Honest status
 
 `docs/SPEC-AUDIT.md` maps every requirement in the brief to its real status:
