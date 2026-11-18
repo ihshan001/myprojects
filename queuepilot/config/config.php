@@ -8,7 +8,7 @@ declare(strict_types=1);
  */
 return [
     'app' => [
-        'name'     => 'QueuePilot',
+        'name'     => getenv('APP_NAME') ?: 'QueuePilot',
         'tagline'  => 'Live queue management for clinics',
         'env'      => getenv('APP_ENV') ?: 'production',
         'debug'    => (getenv('APP_DEBUG') ?: '0') === '1',
@@ -49,13 +49,16 @@ return [
         // point this at /var/lib/php/sessions; the WASM runtime cannot write
         // outside the project, so storage/sessions is the portable choice.
         'session_path'        => getenv('SESSION_PATH') ?: __DIR__ . '/../storage/sessions',
-        'session_lifetime'    => 60 * 60 * 8,
-        'idle_timeout'        => 60 * 45,
-        'password_min'        => 10,
+        // Read from the environment because the code already honours these and
+        // .env.example tells operators to set them. Hardcoding them here meant
+        // the documented setting did nothing at all.
+        'session_lifetime'    => (int) (getenv('SESSION_LIFETIME') ?: 60 * 60 * 8),
+        'idle_timeout'        => (int) (getenv('IDLE_TIMEOUT') ?: 60 * 45),
+        'password_min'        => (int) (getenv('PASSWORD_MIN') ?: 10),
         'login_max_attempts'  => 6,
         'login_window_min'    => 10,
         'track_token_bytes'   => 24,
-        'track_token_hours'   => 18,
+        'track_token_hours'   => (int) (getenv('TRACK_TOKEN_HOURS') ?: 18),
         // Step-up authentication and invitations
         'totp_max_attempts'   => 5,
         'invite_hours'        => 72,
@@ -100,7 +103,7 @@ return [
     'queue' => [
         // default policy; clinics can override per-workspace
         'call_timeout_minutes' => 5,
-        'max_recalls'          => 3,
+        'max_recalls'          => (int) (getenv('QUEUE_MAX_RECALLS') ?: 3),
         'estimate_min_confidence' => 4,
     ],
 ];

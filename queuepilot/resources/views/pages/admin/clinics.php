@@ -184,11 +184,73 @@
           </form>
         </div>
       <?php elseif ($closing): ?>
+        <?php
+        $due = !empty($c['purge_after']) && strtotime((string) $c['purge_after']) <= time();
+        $approved = !empty($c['purge_approved_at']);
+        ?>
         <div class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
           <p class="text-[11px] font-semibold text-amber-900">
-            Closure requested <?= e(ago($c['closure_requested_at'])) ?>. Data purgeable after
-            <?= e(substr((string) ($c['purge_after'] ?? ''), 0, 10)) ?>.
+            Closed <?= e(ago($c['closure_requested_at'])) ?>.
+            <?php if ($due): ?>
+              Past the retention window since <?= e(substr((string) $c['purge_after'], 0, 10)) ?>.
+            <?php else: ?>
+              Retention window ends <?= e(substr((string) $c['purge_after'], 0, 10)) ?>.
+            <?php endif; ?>
           </p>
+
+          <?php if ($approved): ?>
+            <?php /* The decision exists and is reversible. Deleting is still a
+                     separate command, because it is the one thing here that
+                     cannot be undone from this page. */ ?>
+            <div class="mt-2 rounded-lg border border-rose-300 bg-rose-50 px-2.5 py-2">
+              <p class="text-[11px] font-bold text-rose-900">
+                Marked for deletion <?= e(ago($c['purge_approved_at'])) ?>.
+              </p>
+              <p class="mt-0.5 text-[11px] text-rose-800">
+                Nothing has been deleted yet. An operator runs
+                <code class="rounded bg-white/70 px-1">php tools/purge.php --yes</code> to do it.
+                Until then this can be reversed.
+              </p>
+              <form method="post" action="/admin/clinics/<?= (int) $c['id'] ?>/purge-approval" class="mt-2">
+                <?= csrf_field() ?>
+                <input type="hidden" name="decision" value="revoke">
+                <button class="btn-secondary btn-sm">Keep the data</button>
+              </form>
+            </div>
+          <?php elseif ($due): ?>
+            <div class="mt-2">
+              <p class="text-[11px] leading-relaxed text-amber-800">
+                <strong>Email them, then phone them.</strong> Ask what happened and whether the
+                data is still needed. Only record a decision once they have answered — a clinic
+                closed for renovation is not a clinic to delete.
+              </p>
+              <?php if (!empty($c['phone'])): ?>
+                <p class="mt-1 text-[11px] text-amber-900">
+                  Phone: <a class="underline" href="tel:<?= e((string) $c['phone']) ?>"><?= e((string) $c['phone']) ?></a>
+                </p>
+              <?php endif; ?>
+              <details class="mt-2">
+                <summary class="cursor-pointer text-[11px] font-medium text-rose-600 hover:underline">
+                  They answered — record the decision…
+                </summary>
+                <form method="post" action="/admin/clinics/<?= (int) $c['id'] ?>/purge-approval"
+                      class="mt-2 space-y-2"
+                      data-confirm-submit="Mark <?= e(addslashes((string) $c['name'])) ?> for deletion? Data is destroyed when an operator runs the purge tool."
+                      data-confirm-danger>
+                  <?= csrf_field() ?>
+                  <input type="hidden" name="decision" value="approve">
+                  <textarea class="input text-xs" name="note" rows="2" required minlength="10" maxlength="500"
+                            placeholder="Spoke to Dr Perera 6 Nov: clinic closed permanently, records not needed"></textarea>
+                  <p class="text-[10px] text-slate-500">Required. This becomes the audit trail for deleting the data.</p>
+                  <button class="btn-stop btn-sm">Mark for deletion</button>
+                </form>
+              </details>
+            </div>
+          <?php else: ?>
+            <p class="mt-1 text-[11px] text-amber-800">
+              No action yet. Contact them once the retention window has passed.
+            </p>
+          <?php endif; ?>
         </div>
       <?php else: ?>
         <details class="mt-3">

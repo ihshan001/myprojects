@@ -59,9 +59,18 @@ if (App\Support\Argv::has('--list')) {
         echo "  none\n";
     }
     foreach ($due as $c) {
-        $days = (int) $c['days_closed'];
-        echo "  #{$c['id']}  {$c['name']}  ({$days} days closed)\n";
-        echo "        email {$c['owner_email']}   phone " . ($c['owner_phone'] ?: 'none on file') . "\n";
+        // purgeable() returns the closure dates, not a day count — computing
+        // it here keeps one source of truth for when the window ends.
+        $closedOn = substr((string) ($c['closure_requested_at'] ?? ''), 0, 10);
+        $dueOn    = substr((string) ($c['purge_after'] ?? ''), 0, 10);
+        $days     = $closedOn !== ''
+            ? (int) floor((time() - strtotime($closedOn)) / 86400)
+            : 0;
+
+        echo "  #{$c['id']}  {$c['name']}  (closed {$days} days ago, on {$closedOn})\n";
+        echo "        email " . ($c['email'] ?: 'none on file')
+            . "   phone " . ($c['phone'] ?: 'none on file') . "\n";
+        echo "        retention window ended {$dueOn} — contact them, then decide\n";
     }
     exit(0);
 }

@@ -7368,6 +7368,51 @@ Assert::test('a temporary password cannot be kept', function (): void {
 });
 
 
+Assert::test('.env.example documents every operational setting the code reads', function (): void {
+    // A stale example file is not cosmetic: it is how an install ends up with
+    // mail silently off, or two-factor silently disabled, because the setting
+    // simply was not in the file the operator copied.
+    $example = (string) file_get_contents(QP_ROOT . '/.env.example');
+    $config  = (string) file_get_contents(QP_ROOT . '/config/config.php');
+
+    // The settings that have no safe silent default.
+    foreach (['MAIL_TRANSPORT', 'MAIL_HOST', 'MAIL_USERNAME', 'MAIL_PASSWORD', 'MONITOR_TOKEN', 'SECURITY_REQUIRE_2FA_SUPER'] as $key) {
+        Assert::true(str_contains($example, $key), "{$key} is documented");
+        Assert::true(str_contains($config, "getenv('{$key}')"), "{$key} is actually read by config");
+    }
+
+    // And the reverse: nothing in the example may be invented. A key that is
+    // documented but never read is worse than an undocumented one, because the
+    // operator sets it and believes it took effect.
+    //
+    // "Read" means anywhere, not just config: a few gateways consult
+    // getenv() directly with an Env fallback ahead of it.
+    $code = $config;
+    foreach (['app/Core', 'app/Services', 'app/Http', 'public'] as $dir) {
+        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/' . $dir)) as $file) {
+            if ($file->isFile() && $file->getExtension() === 'php') {
+                $code .= (string) file_get_contents($file->getPathname());
+            }
+        }
+    }
+
+    preg_match_all('/^([A-Z][A-Z0-9_]+)=/m', $example, $m);
+    $ignored = [];
+    foreach (array_unique($m[1]) as $key) {
+        if (!str_contains($code, "getenv('{$key}')")) {
+            $ignored[] = $key;
+        }
+    }
+    Assert::same([], $ignored, 'no documented key is ignored by the code: ' . implode(', ', $ignored));
+
+    // The two settings whose wrong default is a security problem.
+    Assert::true(
+        (bool) preg_match('/^SECURITY_REQUIRE_2FA_SUPER=true$/m', $example),
+        'two-factor is documented as mandatory, matching the code default'
+    );
+});
+
+
 $code = Assert::summary();
 Database::cleanup($dbPath);
 echo "\n";

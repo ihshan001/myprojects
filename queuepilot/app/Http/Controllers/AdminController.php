@@ -238,6 +238,53 @@ final class AdminController
      * not delete anything and does not sign staff out, because a billing
      * dispute should not cost a clinic its day's work.
      */
+    /**
+     * Record, or take back, a decision to delete a closed clinic's data.
+     *
+     * Deliberately a decision and not an action: this writes a flag. The
+     * deletion is a separate command run by an operator, because it cannot be
+     * undone from a web page and the wrong click here destroys a clinic's
+     * entire patient history.
+     */
+    public function purgeApproval(string $id): void
+    {
+        $clinicId = (int) $id;
+        $clinic = Db::one('SELECT * FROM clinics WHERE id = ?', [$clinicId]);
+        if ($clinic === null) {
+            abort(404, 'That clinic does not exist.');
+            return;
+        }
+
+        $lifecycle = new \App\Services\LifecycleService();
+        $decision = (string) Request::input('decision', '');
+
+        if ($decision === 'revoke') {
+            $result = $lifecycle->revokePurgeApproval($clinicId, Auth::id());
+            flash('success', $clinic['name'] . ' is no longer marked for deletion. Nothing was removed.');
+            redirect('/admin/clinics');
+        }
+
+        // The note is the audit trail. Refuse a blank one here rather than
+        // letting the service reject it, so the message appears next to the
+        // field the operator was looking at.
+        $note = trim((string) Request::input('note', ''));
+        if (mb_strlen($note) < 10) {
+            flash('error', 'Record how you contacted them and what they said — at least a sentence. '
+                . 'It is the only record of why this clinic\'s data was deleted.');
+            redirect('/admin/clinics');
+        }
+
+        $result = $lifecycle->approvePurge($clinicId, $note, Auth::id());
+        if (!$result['ok']) {
+            flash('error', $result['error']);
+            redirect('/admin/clinics');
+        }
+
+        flash('success', $clinic['name'] . ' is marked for deletion. Nothing is removed until an operator '
+            . 'runs the purge tool, and it can be reversed until then.');
+        redirect('/admin/clinics');
+    }
+
     public function suspendClinic(string $id): void
     {
         $result = (new LifecycleService())->suspend(

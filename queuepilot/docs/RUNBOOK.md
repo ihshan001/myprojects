@@ -143,10 +143,15 @@ nothing else. See `docs/OPERATIONS.md` for the switch.
 php tools/mail-test.php you@example.com   # sends one message, prints the SMTP conversation
 ```
 
-If `MAIL_TRANSPORT` is unset, mail is written to `storage/mail/` instead of being
-sent. That is the default in development, and it is why the approval flow says
-*"Mail is not configured, so no welcome email was sent — copy the link from the
-clinic page"* rather than pretending to succeed.
+`MAIL_TRANSPORT` has three values, and the difference matters:
+
+- `none` (the default when unset) — nothing is written anywhere. The approval
+  flow says *"Mail is not configured, so no welcome email was sent — copy the
+  link from the clinic page"* rather than pretending to succeed.
+- `log` — the whole message goes to `storage/logs/`, so you can read exactly
+  what a clinic would have received without sending it. Use this to check the
+  welcome link looks right before wiring SMTP.
+- `smtp` — delivered.
 
 ### Shared hosting gotcha
 

@@ -286,6 +286,8 @@ Router::get('/admin', [AdminController::class, 'index'], ['auth' => true, 'roles
 Router::get('/admin/clinics', [AdminController::class, 'clinics'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/admin/clinics/{id}', [AdminController::class, 'updateClinic'], ['auth' => true, 'roles' => ['super_admin']]);
 // Suspension stops new tokens without deleting anything or signing staff out.
+// Recording that a closed clinic's data may be deleted. Not the deletion.
+Router::post('/admin/clinics/{id}/purge-approval', [AdminController::class, 'purgeApproval'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/admin/clinics/{id}/suspend', [AdminController::class, 'suspendClinic'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/admin/clinics/{id}/reinstate', [AdminController::class, 'reinstateClinic'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::get('/admin/plans', [AdminController::class, 'plans'], ['auth' => true, 'roles' => ['super_admin']]);
