@@ -446,69 +446,100 @@ C:\xampp\php\php.exe -v
 If it is older, install a newer XAMPP. The app will not parse on 7.4 — it uses
 `readonly` properties and `match`, both 8.0+.
 
-## B2. Put the app somewhere XAMPP can serve
+## B2. Put the app in htdocs
 
-The trap: XAMPP's document root is `C:\xampp\htdocs`, and everything under it is
-web-reachable, including `.env`.
-
-**The clean way** — mimic the cPanel layout so what you practise locally is what
-you deploy:
+Copy the **whole application folder** into htdocs, unchanged:
 
 ```
-C:\xampp\queuepilot\          ← the application (NOT inside htdocs)
-  app/ database/ resources/ storage/ tools/ config/ public/ .env
-
-C:\xampp\htdocs\queuepilot\   ← the site root
-  index.php                   ← requires ../../queuepilot/public/index.php
-  .htaccess
-  assets/                     ← copy of ../../queuepilot/public/assets
+C:\xampp\htdocs\clinicqueue\
+  index.php          ← shipped in the repository; the front door for this layout
+  .htaccess          ← shipped in the repository; sends routes to index.php
+  public\            ← index.php, .htaccess, assets/  (the production document root)
+  app\ config\ database\ resources\ storage\ routes\ tools\ tests\ docs\
+  .env
 ```
 
-`C:\xampp\htdocs\queuepilot\index.php`:
+Nothing has to be created or copied by hand. You unzip the repository into
+`htdocs`, rename the folder if you like, and set one line in `.env`.
 
-```php
-<?php
-require __DIR__ . '/../../queuepilot/public/index.php';
+**Set `APP_URL` to include the folder name:**
+
+```ini
+APP_URL=http://localhost/clinicqueue
 ```
 
-Copy `public/.htaccess` into `htdocs\queuepilot\.htaccess`, and copy
-`public\assets` to `htdocs\queuepilot\assets`.
+Not `http://localhost`. The path on `APP_URL` is what tells the application it is
+mounted in a subfolder — it is used to strip the prefix from incoming requests and
+to add it to every link, form action, redirect and asset URL. Get it wrong and the
+symptom is unambiguous:
 
-Then browse to **http://localhost/queuepilot/**.
+| `APP_URL` | What you see |
+|---|---|
+| `http://localhost` | Every page 404s. `/clinicqueue/login` is not a route. |
+| `http://localhost/clinicqueue` | Correct. |
 
-> **Not sure whether `mod_rewrite` is on?** In XAMPP it normally is. If deep links
-> 404 but the home page works, uncomment `LoadModule rewrite_module modules/mod_rewrite.so`
-> in `C:\xampp\apache\conf\httpd.conf` and restart Apache.
+Then open **`http://localhost/clinicqueue/`**.
 
-**The quick way** (fine for a throwaway local test, not for anything else): point a
-VirtualHost's `DocumentRoot` at `C:\xampp\queuepilot\public`. Change
+### What the two root files do
+
+`public/index.php` is the real front controller, and on a production host the
+document root points straight at it. In this layout the document root is two
+levels higher, so:
+
+- **`.htaccess`** sends anything that is not a real file to `index.php`.
+- **`index.php`** serves `public/assets/**` itself, then hands every other request
+  to `public/index.php`.
+
+Serving assets in PHP rather than with a rewrite rule is deliberate: a wrong
+rewrite rule looks like a stale stylesheet that nobody reports, whereas a PHP
+function can be unit-tested with traversal attempts and missing files. The
+resolution lives in `app/Support/StaticFiles.php` and is covered by the test suite.
+
+### Check that it worked, in this order
+
+```
+http://localhost/clinicqueue/                     → the public page
+http://localhost/clinicqueue/login                → the staff sign-in form
+http://localhost/clinicqueue/assets/build/app.css → CSS, not a page
+http://localhost/clinicqueue/.env                 → 404, not your password
+```
+
+That last one matters. In this layout `.env`, `storage/` and `database/` sit under
+the document root, so they are only protected by the rules in the root
+`.htaccess`. **If `/.env` downloads instead of 404ing, stop and fix it** — it
+contains the database password and `APP_KEY`. The usual cause is
+`AllowOverride None` on the htdocs directory in `httpd.conf`, which makes Apache
+ignore `.htaccess` files entirely. Change it to `AllowOverride All` and restart.
+
+> This layout is for trying the system on your own machine. It is **not** the
+> production layout — see Part A. On a real host the document root is `public/`
+> and nothing above it is reachable at all, which is why production needs none of
+> these protection rules.
+
+### The production-shaped alternative
+
+If you want your local install to match production exactly, point a VirtualHost
+`DocumentRoot` at `C:\xampp\queuepilot\public` instead. The app then owns the
+domain root, `APP_URL=http://queuepilot.local` has no path, no root `index.php` is
+used, and no file above `public/` is reachable. Add `127.0.0.1 queuepilot.local` to
+`C:\Windows\System32\drivers\etc\hosts`, then in
 `C:\xampp\apache\conf\extra\httpd-vhosts.conf`:
 
 ```apache
 <VirtualHost *:80>
     ServerName queuepilot.local
     DocumentRoot "C:/xampp/queuepilot/public"
-
     <Directory "C:/xampp/queuepilot/public">
-        Options Indexes FollowSymLinks
         AllowOverride All
         Require all granted
     </Directory>
 </VirtualHost>
 ```
 
-With a VirtualHost the app sits at the domain root, so `APP_URL=http://queuepilot.local`
-with no path — and `asset()` emits plain `/assets/...` as it does in production.
-This is the layout the production host uses.
-
-Then add to `C:\Windows\System32\drivers\etc\hosts` (as Administrator):
-
-```
-127.0.0.1   queuepilot.local
-```
-
-Set `APP_URL=http://queuepilot.local` and browse there. This is the closest local
-match to production and avoids the subfolder path entirely.
+> **Not sure whether `mod_rewrite` is on?** In XAMPP it normally is. If the home
+> page works but every deep link 404s, uncomment
+> `LoadModule rewrite_module modules/mod_rewrite.so` in
+> `C:\xampp\apache\conf\httpd.conf` and restart Apache.
 
 ## B3. Start Apache and MySQL
 

@@ -94,7 +94,26 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://' + (req.headers.host || 'localhost'));
 
   try {
-    if (serveStatic(req, res, decodeURIComponent(url.pathname))) return;
+    // Mount prefix, for testing a subdirectory install (htdocs/clinicqueue) or
+    // for serving behind a reverse proxy that strips a path. Apache + XAMPP
+    // produce this naturally; a Node server has to be told.
+    const MOUNT = (process.env.QP_MOUNT || '').replace(/\/+$/, '');
+    if (MOUNT !== '') {
+      const p = decodeURIComponent(url.pathname);
+      if (p === MOUNT) {
+        res.writeHead(301, { Location: MOUNT + '/' });
+        res.end();
+        return;
+      }
+      if (!p.startsWith(MOUNT + '/')) {
+        res.writeHead(404, { 'content-type': 'text/plain' });
+        res.end(`Not mounted here. This server serves under ${MOUNT}/`);
+        return;
+      }
+      // Static files keep their full path for serveStatic; PHP sees the
+      // stripped one, which is what Request::path() has to cope with anyway.
+      if (serveStatic(req, res, p.slice(MOUNT.length))) return;
+    } else if (serveStatic(req, res, decodeURIComponent(url.pathname))) return;
 
     const raw = await readBody(req);
     const contentType = (req.headers['content-type'] || '').split(';')[0].trim();
@@ -127,7 +146,10 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    const mount = (process.env.QP_MOUNT || '').replace(/\/+$/, '');
     const serverVars = {
+      // REQUEST_URI keeps the mount prefix, exactly as Apache gives it. That is
+      // the whole point of this mode: Request::path() has to strip it.
       REQUEST_URI: req.url,
       REQUEST_METHOD: req.method,
       QUERY_STRING: url.search.slice(1),

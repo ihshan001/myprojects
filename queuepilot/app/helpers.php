@@ -60,8 +60,59 @@ if (!function_exists('clinic_url')) {
     }
 }
 
+if (!function_exists('base_path')) {
+    /**
+     * The URL path the application is mounted at, or '' when it owns the root.
+     *
+     * One setting — the path on APP_URL — decides this, so an install at
+     * http://localhost/clinicqueue and one at https://queue.lk behave
+     * identically everywhere else. Everything that emits a URL or a Location
+     * header goes through here, because a subfolder install is a real and
+     * common way to run this (XAMPP, a shared-host subdirectory) and a single
+     * missed prefix means the user is bounced out of the application into
+     * whatever else lives on that host.
+     *
+     * Cached: it is read on every link rendered, and APP_URL cannot change
+     * within one request.
+     */
+    function base_path(): string
+    {
+        // Memoised on the APP_URL it was derived from rather than on nothing:
+        // APP_URL cannot change within a request, but it does change between
+        // them in the test suite and in anything that re-initialises Env, and a
+        // cache that ignored that would answer for the previous install.
+        static $cachedUrl = null;
+        static $cachedBase = '';
+        $appUrl = (string) \App\Core\Env::get('app.url', '');
+        if ($cachedUrl === $appUrl) {
+            return $cachedBase;
+        }
+        $path = parse_url($appUrl, PHP_URL_PATH);
+        $cachedBase = is_string($path) && $path !== '' && $path !== '/'
+            ? rtrim($path, '/')
+            : '';
+        $cachedUrl = $appUrl;
+        return $cachedBase;
+    }
+}
+
 if (!function_exists('url')) {
-    function url(string $path = ''): string { return '/' . ltrim($path, '/'); }
+    /**
+     * A URL inside the application, including the mount prefix.
+     *
+     *   url('/login')  ->  /clinicqueue/login   on a subfolder install
+     *                  ->  /login              at the domain root
+     *
+     * Absolute URLs (http://, https://, //) and anchors are returned untouched,
+     * so this is safe to wrap around anything.
+     */
+    function url(string $path = ''): string
+    {
+        if (preg_match('#^(?:[a-z][a-z0-9+.-]*:|//)#i', $path)) {
+            return $path;
+        }
+        return base_path() . '/' . ltrim($path, '/');
+    }
 }
 
 if (!function_exists('asset')) {
@@ -77,13 +128,7 @@ if (!function_exists('asset')) {
         //
         // Derived from APP_URL when it has a path, so one setting controls it
         // and nothing has to be recomputed per request.
-        $base = '';
-        $appUrl = (string) \App\Core\Env::get('app.url', '');
-        $appPath = parse_url($appUrl, PHP_URL_PATH);
-        if (is_string($appPath) && $appPath !== '' && $appPath !== '/') {
-            $base = rtrim($appPath, '/');
-        }
-        $url = $base . '/assets/' . $path;
+        $url = base_path() . '/assets/' . $path;
         static $hashes = [];
         if (!array_key_exists($path, $hashes)) {
             $file = QP_ROOT . '/public/assets/' . $path;

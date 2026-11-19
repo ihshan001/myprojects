@@ -8495,6 +8495,189 @@ Assert::test('approving twice, or a double-click, cannot bill twice', function (
 });
 
 
+Assert::test('the app works when it is served from a subdirectory', function (): void {
+    // htdocs/clinicqueue with APP_URL=http://localhost/clinicqueue is how most
+    // people first try this, and it was completely broken: every route 404'd,
+    // then every link and redirect pointed outside the folder. None of it
+    // showed up at the domain root, which is what the suite exercised.
+    $config = require QP_ROOT . '/config/config.php';
+    $original = $config['app']['url'];
+
+    $restore = static function () use ($config): void {
+        \App\Core\Env::init($config);
+    };
+
+    // ---- at the domain root nothing changes
+    $config['app']['url'] = 'https://queue.lk';
+    \App\Core\Env::init($config);
+    Assert::same('', base_path(), 'a root install has no prefix');
+    Assert::same('/login', url('/login'), 'url() adds nothing at the root');
+    Assert::same('/login', \App\Core\Response::location('/login'), 'redirects are unprefixed at the root');
+    Assert::same(
+        '<a href="/login">x</a>',
+        \App\Core\View::rebase('<a href="/login">x</a>'),
+        'and rendered links are untouched'
+    );
+
+    // ---- under a subdirectory everything carries the prefix
+    // Exact name the user typed, and the one in the install guide.
+    $config['app']['url'] = 'http://localhost/clinicqueue';
+    \App\Core\Env::init($config);
+
+    Assert::same('/clinicqueue', base_path(), 'the prefix is taken from APP_URL');
+    Assert::same('/clinicqueue/login', url('/login'), 'url() carries it');
+    Assert::same('/clinicqueue/login', url('login'), 'with or without a leading slash');
+    Assert::same('https://elsewhere.example/x', url('https://elsewhere.example/x'), 'absolute URLs pass through');
+    Assert::same('/clinicqueue/login', \App\Core\Response::location('/login'), 'redirects carry it');
+    Assert::same(
+        '/clinicqueue/login',
+        \App\Core\Response::location('/clinicqueue/login'),
+        'and a path that already has it is not doubled'
+    );
+
+    // The 290 href/action attributes in the views, rewritten on the way out.
+    Assert::same(
+        '<a href="/clinicqueue/login">x</a>',
+        \App\Core\View::rebase('<a href="/login">x</a>'),
+        'a link is rebased'
+    );
+    Assert::same(
+        '<form action="/clinicqueue/queue/new">',
+        \App\Core\View::rebase('<form action="/queue/new">'),
+        'a form action is rebased'
+    );
+    Assert::same(
+        '<img src="/clinicqueue/assets/a.png">',
+        \App\Core\View::rebase('<img src="/assets/a.png">'),
+        'an asset is rebased'
+    );
+    Assert::same(
+        '<a href="//cdn.example/x">y</a>',
+        \App\Core\View::rebase('<a href="//cdn.example/x">y</a>'),
+        'a protocol-relative URL is left alone'
+    );
+    Assert::same(
+        '<a href="/clinicqueue/login">y</a>',
+        \App\Core\View::rebase('<a href="/clinicqueue/login">y</a>'),
+        'a link that already has the prefix is not doubled'
+    );
+    // Body text is not an attribute and must not be rewritten.
+    Assert::same(
+        '<p>POST /login to sign in</p>',
+        \App\Core\View::rebase('<p>POST /login to sign in</p>'),
+        'prose that mentions a path is left alone'
+    );
+
+    // ---- the router sees the path without the prefix
+    $originalUri = $_SERVER['REQUEST_URI'] ?? null;
+    $_SERVER['REQUEST_URI'] = '/clinicqueue/login';
+    Assert::same('/login', \App\Core\Request::path(), 'REQUEST_URI is stripped of the prefix');
+    $_SERVER['REQUEST_URI'] = '/clinicqueue';
+    Assert::same('/', \App\Core\Request::path(), 'the bare prefix maps to the home route');
+    $_SERVER['REQUEST_URI'] = '/clinicqueue/';
+    Assert::same('/', \App\Core\Request::path(), 'and so does it with a trailing slash');
+    $_SERVER['REQUEST_URI'] = '/clinicqueue/queue/new?queue=3';
+    Assert::same('/queue/new', \App\Core\Request::path(), 'query strings are ignored');
+    // A path that merely starts with the same characters is NOT part of the app.
+    $_SERVER['REQUEST_URI'] = '/clinicqueue-other/login';
+    Assert::same('/clinicqueue-other/login', \App\Core\Request::path(), 'a sibling folder is not stripped');
+    if ($originalUri !== null) {
+        $_SERVER['REQUEST_URI'] = $originalUri;
+    } else {
+        unset($_SERVER['REQUEST_URI']);
+    }
+
+    // Put the environment back for the rest of the suite.
+    $config['app']['url'] = $original;
+    $restore();
+    Assert::same('', base_path(), 'and the prefix is gone again');
+});
+
+
+Assert::test('static files are found for a subdirectory install, and traversal is refused', function (): void {
+    // `htdocs/clinicqueue` puts the document root two levels above the code, so the
+    // root index.php has to hand out `public/assets/**` itself. The resolution is in
+    // App\Support\StaticFiles so it can be called here directly, with the paths that
+    // a rewrite rule would have hidden from the test suite.
+    $public = QP_ROOT . '/public';
+
+    // ---- a real asset resolves to the file on disk
+    Assert::same(
+        realpath($public . '/assets/build/app.css'),
+        App\Support\StaticFiles::resolve('/assets/build/app.css', $public),
+        'a stylesheet resolves'
+    );
+    Assert::same(
+        realpath($public . '/assets/img/icon.svg'),
+        App\Support\StaticFiles::resolve('/assets/img/icon.svg', $public),
+        'an icon resolves'
+    );
+    Assert::same(
+        realpath($public . '/sw.js'),
+        App\Support\StaticFiles::resolve('/sw.js', $public),
+        'the service worker resolves'
+    );
+
+    // ---- what a browser asks for when a build is stale
+    Assert::same(null, App\Support\StaticFiles::resolve('/assets/build/gone.css', $public), 'a missing asset resolves to nothing');
+    Assert::same(null, App\Support\StaticFiles::resolve('/assets/', $public), 'the directory itself is not a file');
+    Assert::true(App\Support\StaticFiles::isStaticRequest('/assets/gone.css'), 'and it is still treated as a static request, so it 404s as a file');
+
+    // ---- a page is not a static request, so a typo in a route renders a page
+    Assert::true(!App\Support\StaticFiles::isStaticRequest('/queue'), 'a page is not a static request');
+    Assert::true(!App\Support\StaticFiles::isStaticRequest('/'), 'nor is the home page');
+    Assert::true(!App\Support\StaticFiles::isStaticRequest('/index.php'), 'nor is the front controller');
+
+    // ---- traversal out of public/ must resolve to nothing. This is the difference
+    // between a convenience shim and a vulnerability: .env holds the database
+    // password and APP_KEY, and it sits one level above public/.
+    foreach ([
+        '/assets/../.env',
+        '/assets/../../.env',
+        '/assets/../../../etc/passwd',
+        '/assets/..%2f.env',
+        '/assets/build/../../../../.env',
+        '/assets/.env',
+    ] as $attack) {
+        Assert::same(
+            null,
+            App\Support\StaticFiles::resolve($attack, $public),
+            'traversal is refused: ' . $attack
+        );
+    }
+
+    // A file that exists but is outside public/ must also be refused, which is the
+    // check that a naive `is_file()` would pass.
+    Assert::true(file_exists(QP_ROOT . '/.env'), 'the environment file exists to be attacked');
+    // A real file *inside* public/ is legitimately reachable even by a `..` path,
+    // because realpath() resolves it back inside the root. That is correct: the
+    // file is part of the public surface. What must never happen is reaching a file
+    // that resolves *outside* public/, which the cases above cover.
+    Assert::same(
+        realpath($public . '/index.php'),
+        App\Support\StaticFiles::resolve('/assets/../index.php', $public),
+        'a path that resolves back inside public/ is allowed'
+    );
+    Assert::same(
+        null,
+        App\Support\StaticFiles::resolve('/assets/../app/Core/Db.php', $public),
+        'but a real source file outside public/ is refused'
+    );
+
+    // ---- content types and caching, which decide whether a browser runs a file
+    Assert::contains('text/css', App\Support\StaticFiles::type($public . '/assets/build/app.css'), 'CSS is served as CSS');
+    Assert::contains('text/javascript', App\Support\StaticFiles::type($public . '/sw.js'), 'JS is served as JS');
+    Assert::contains('image/svg+xml', App\Support\StaticFiles::type($public . '/assets/img/icon.svg'), 'SVG is served as SVG');
+
+    $build = App\Support\StaticFiles::headers('/assets/build/app.css', $public . '/assets/build/app.css');
+    Assert::same('public, max-age=31536000, immutable', $build['Cache-Control'], 'hashed build assets are immutable');
+    Assert::same('nosniff', $build['X-Content-Type-Options'], 'and are not sniffed');
+
+    $sw = App\Support\StaticFiles::headers('/sw.js', $public . '/sw.js');
+    Assert::same('no-cache', $sw['Cache-Control'], 'the service worker is never cached, so a fix ships');
+});
+
+
 $code = Assert::summary();
 Database::cleanup($dbPath);
 echo "\n";

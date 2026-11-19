@@ -32,9 +32,42 @@ final class Response
     {
         if (!headers_sent()) {
             http_response_code($status);
-            header('Location: ' . $to);
+            header('Location: ' . self::location($to));
         }
         exit;
+    }
+
+    /**
+     * Turn an application path into a Location that resolves on this install.
+     *
+     * There are ~250 `redirect('/somewhere')` calls and every one of them means
+     * "somewhere inside the application". On an install mounted under a path —
+     * http://localhost/clinicqueue — sending `Location: /somewhere` bounces the
+     * user out of the app to whatever else is on that host, and on XAMPP that is
+     * the dashboard. Prefixing here rather than at 250 call sites means a caller
+     * can keep writing the path it means.
+     *
+     * Absolute URLs, protocol-relative URLs and the already-prefixed case are
+     * left alone, so `redirect('https://elsewhere')` and a path computed with
+     * url() both still work.
+     */
+    public static function location(string $to): string
+    {
+        if ($to === '') {
+            return base_path() . '/';
+        }
+        // Anything with a scheme, or starting //, is already absolute.
+        if (preg_match('#^(?:[a-z][a-z0-9+.-]*:|//)#i', $to)) {
+            return $to;
+        }
+        if ($to[0] !== '/') {
+            return base_path() . '/' . $to;
+        }
+        $base = base_path();
+        if ($base !== '' && ($to === $base || str_starts_with($to, $base . '/'))) {
+            return $to;   // already carries the prefix
+        }
+        return $base . $to;
     }
 
     public static function securityHeaders(): void

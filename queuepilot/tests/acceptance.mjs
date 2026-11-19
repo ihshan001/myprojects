@@ -18,6 +18,28 @@
 
 const BASE = process.env.QP_BASE || 'http://127.0.0.1:8080';
 
+/**
+ * The path the app is mounted at, taken from QP_BASE.
+ *
+ * The same suite has to pass at the domain root (production, the VirtualHost
+ * layout) and under a subdirectory (htdocs/clinicqueue, which is how people
+ * actually try this on XAMPP). URLs in the HTML carry that prefix there, so a
+ * regex or an assertion written as "/admin/clinics" has to allow for it —
+ * otherwise the test fails on a correct page.
+ */
+const MOUNT = (() => {
+  try {
+    return new URL(BASE).pathname.replace(/\/+$/, '');
+  } catch {
+    return '';
+  }
+})();
+
+/** A path as it appears in the HTML: with the mount prefix, regex-escaped. */
+function mounted(path) {
+  return (MOUNT + path).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 const PLATFORM_EMAIL = process.env.QP_PLATFORM_EMAIL || 'owner@queuepilot.app';
 const PLATFORM_PASSWORD = process.env.QP_PLATFORM_PASSWORD || 'QueuePilot#2026';
 
@@ -382,7 +404,7 @@ async function main() {
     if (at !== -1) {
       // The verify form sits in the same card as the clinic's name.
       const card = html.slice(at, at + 6000);
-      const action = card.match(/action="\/admin\/clinics\/(\d+)\/verify-email"/);
+      const action = card.match(new RegExp('action="' + mounted('/admin/clinics') + '/(\\d+)/verify-email"'));
       check('an unverified clinic offers a way to confirm it', action !== null);
 
       if (action !== null) {
