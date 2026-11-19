@@ -873,7 +873,13 @@
   /* --------------------------------------------- automatic page refresh */
   // Server-rendered pages that declare data-auto-refresh (seconds) reload
   // themselves, but only while visible, so a lobby TV never goes blank.
-  const autoRefresh = document.body.getAttribute('data-auto-refresh');
+  // `data-position-auto` is the same idea applied to the patient's own page:
+  // "where do I stand?" has to move while they watch it, or the one screen a
+  // patient actually looks at is a snapshot of a queue that has moved on. It is
+  // a separate attribute because that page must stop refreshing once the
+  // patient has been seen — a stale position is worse than none.
+  const autoRefresh = document.body.getAttribute('data-auto-refresh')
+    || document.body.getAttribute('data-position-auto');
   if (autoRefresh) {
     setInterval(() => {
       if (!document.hidden && navigator.onLine) window.location.reload();

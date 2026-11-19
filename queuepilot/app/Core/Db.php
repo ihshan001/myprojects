@@ -20,6 +20,9 @@ final class Db
     private static array $config = [];
     private static int $txDepth = 0;
 
+    // The PRAGMAs below run only when the driver is SQLite, which is why this
+    // file is allowed to mention them.
+    // @dialect-check: dual-dialect-guarded
     public static function init(array $config): void
     {
         self::$config = $config;
@@ -151,6 +154,57 @@ final class Db
             }
             throw $e;
         }
+    }
+
+    /** Which engine is connected: 'mysql' or 'sqlite'. */
+    public static function driver(): string
+    {
+        return (string) (self::$config['driver'] ?? 'sqlite');
+    }
+
+    public static function isMysql(): bool
+    {
+        return self::driver() === 'mysql';
+    }
+
+    /**
+     * Does this table exist?
+     *
+     * Two engines, two catalogues. SQLite keeps its schema in sqlite_master;
+     * MySQL keeps it in information_schema. Asking the wrong one is not a
+     * warning, it is a fatal error, so the question has to go through here
+     * rather than being written inline wherever it is needed.
+     */
+    public static function tableExists(string $table): bool
+    {
+        if (self::isMysql()) {
+            return (int) self::scalar(
+                'SELECT COUNT(*) FROM information_schema.tables
+                  WHERE table_schema = DATABASE() AND table_name = ?',
+                [$table]
+            ) > 0;
+        }
+        return self::one("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", [$table]) !== null;
+    }
+
+    /**
+     * The column names of a table, in definition order.
+     *
+     * @return list<string>
+     */
+    public static function columns(string $table): array
+    {
+        if (self::isMysql()) {
+            $rows = self::all(
+                'SELECT column_name AS name FROM information_schema.columns
+                  WHERE table_schema = DATABASE() AND table_name = ?
+                  ORDER BY ordinal_position',
+                [$table]
+            );
+            return array_map(static fn (array $r): string => (string) $r['name'], $rows);
+        }
+        $rows = self::all('PRAGMA table_info("' . str_replace('"', '""', $table) . '")');
+        return array_map(static fn (array $r): string => (string) $r['name'], $rows);
     }
 
     public static function now(): string

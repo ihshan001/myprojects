@@ -70,7 +70,12 @@ $val = static fn (string $k, string $d = ''): string => (string) ($old[$k] ?? $d
     <div class="auth-card">
       <p class="auth-kicker">
         New clinic?
-        <a href="/register">Start a 14-day free trial</a>
+        <?php /* Not "start a free trial". Signup creates a clinic that an
+                 administrator reviews first, and a trial is granted by the
+                 platform to a named clinic — never by filling in a form. Saying
+                 "14-day free trial" here is a promise the next screen breaks
+                 inside one click. */ ?>
+        <a href="/register">Register your clinic</a>
       </p>
       <h1 class="lp-display auth-title">Sign in to your clinic</h1>
       <p class="auth-sub">Use the account your clinic administrator created.</p>

@@ -7827,16 +7827,31 @@ Assert::test('both migration dialects are checked for copy-paste drift', functio
     Assert::true(is_file($checker), 'tools/dialect-check.php exists');
 
     $source = (string) file_get_contents($checker);
-    // Each rule that corresponds to a substitution actually made in this repo.
+    // Each rule that corresponds to a substitution actually made in this repo,
+    // and the ones that were found in the app's own SQL. Asserting on the rule
+    // text alone is brittle; asserting on the words it must match is not.
     foreach ([
-        "datetime\\s*\\(\\s*'now'",
-        'AUTOINCREMENT',
-        'INSERT\\s+OR\\s+',
-        'AUTO_INCREMENT',
-        'ENGINE\\s*=',
-    ] as $needle) {
-        Assert::true(str_contains($source, $needle), "it rejects {$needle} in the wrong dialect");
+        'datetime'      => 'datetime(\'now\') / datetime("now")',
+        'AUTOINCREMENT' => 'AUTOINCREMENT',
+        'INSERT'        => 'INSERT OR IGNORE/REPLACE',
+        'AUTO_INCREMENT'=> 'AUTO_INCREMENT',
+        'ENGINE'        => 'ENGINE=',
+        'julianday'     => 'julianday()',
+        'strftime'      => 'strftime()',
+    ] as $needle => $what) {
+        Assert::true(
+            stripos($source, $needle) !== false,
+            "it rejects {$what} in the wrong dialect"
+        );
     }
+
+    // And the checker must scan PHP source, not only .sql files. Three
+    // SQLite-only calls lived in application code and passed every other
+    // check, because the suite runs on SQLite and production runs on MySQL.
+    Assert::true(
+        str_contains($source, "'app'") && str_contains($source, '$phpRoots'),
+        'it scans application PHP, not just migration files'
+    );
 
     // Comments are stripped before scanning, because the prose in these files
     // legitimately names the other dialect.
@@ -8289,6 +8304,123 @@ Assert::test('install.sql and seed.php seed the same four plans', function (): v
         str_contains($install, '20'),
         'the 20% yearly discount is stated'
     );
+});
+
+
+Assert::test('the platform can activate a clinic monthly or yearly, and is invoiced for it', function (): void {
+    // The customer journey, in the order it actually happens: apply, get
+    // reviewed, get activated, get an invoice. Every step below was either
+    // missing or silently broken before this test existed.
+    $plans = [
+        ['starter', 'Starter', 3500, 1, 2, 2, 'x', 1],
+        ['professional', 'Professional', 7900, 5, 8, 6, 'x', 2],
+    ];
+    foreach ($plans as [$code, $pname, $price, $d, $st, $q, $ft, $sort]) {
+        if (!Db::scalar('SELECT id FROM plans WHERE code = ?', [$code])) {
+            Db::insert(
+                'INSERT INTO plans (code,name,price_monthly,price_yearly,yearly_discount_pct,currency,
+                                    max_doctors,max_staff,max_queues,features,sort_order,is_active,created_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?)',
+                [$code, $pname, $price, round($price * 12 * 0.8, 2), 20, 'LKR', $d, $st, $q, $ft, $sort, Db::now()]
+            );
+        }
+    }
+
+    $svc = new App\Services\ClinicService();
+    $lc  = new App\Services\LifecycleService();
+    $inv = new App\Services\InvoiceService();
+
+    // ---- monthly
+    $r = $svc->register([
+        'name' => 'Journey Monthly Clinic', 'owner_name' => 'Owner One',
+        'email' => 'journey-monthly@example.test', 'phone' => '0771234567',
+        'city' => 'Negombo', 'district' => 'Western', 'password' => 'Str0ngPassw0rd!',
+    ], 'starter');
+    $monthlyId = (int) $r['clinic_id'];
+    $c = Db::one('SELECT * FROM clinics WHERE id = ?', [$monthlyId]);
+    Assert::same('pending', (string) $c['billing_status'], 'signup does not activate');
+    Assert::true($c['trial_ends_on'] === null, 'and does not grant a trial');
+
+    $res = $lc->approve($monthlyId, null, null, 'monthly');
+    Assert::true($res['ok'], 'approval succeeds');
+    $c = Db::one('SELECT * FROM clinics WHERE id = ?', [$monthlyId]);
+    Assert::same('active', (string) $c['billing_status'], 'clinic is active');
+    Assert::same('monthly', (string) $c['billing_cycle'], 'monthly cycle recorded');
+    Assert::same(0, (int) Db::scalar('SELECT COUNT(*) FROM invoices WHERE clinic_id = ?', [$monthlyId]), 'approval alone raises nothing');
+
+    $first = $inv->raiseFirst($monthlyId);
+    Assert::true($first['ok'], 'first invoice raised at activation');
+    Assert::same(3500.0, (float) $first['amount'], 'monthly invoice is the monthly price');
+    $again = $inv->raiseFirst($monthlyId);
+    Assert::same($first['number'], $again['number'], 'raising twice returns the same invoice');
+    Assert::same(1, (int) Db::scalar('SELECT COUNT(*) FROM invoices WHERE clinic_id = ?', [$monthlyId]), 'and does not double-bill');
+
+    // ---- yearly
+    $r2 = $svc->register([
+        'name' => 'Journey Yearly Clinic', 'owner_name' => 'Owner Two',
+        'email' => 'journey-yearly@example.test', 'phone' => '0771234568',
+        'city' => 'Negombo', 'district' => 'Western', 'password' => 'Str0ngPassw0rd!',
+    ], 'professional');
+    $yearlyId = (int) $r2['clinic_id'];
+    $lc->approve($yearlyId, null, null, 'yearly');
+    $c = Db::one('SELECT * FROM clinics WHERE id = ?', [$yearlyId]);
+    Assert::same('yearly', (string) $c['billing_cycle'], 'yearly cycle recorded');
+    Assert::same(
+        date('Y-m-d', strtotime('+1 year')),
+        (string) $c['renews_on'],
+        'a yearly clinic renews in twelve months, not one'
+    );
+    $yFirst = $inv->raiseFirst($yearlyId);
+    Assert::same(75840.0, (float) $yFirst['amount'], 'yearly invoice is the yearly price, 20% off');
+
+    // ---- a trial is never invoiced
+    $r3 = $svc->register([
+        'name' => 'Journey Trial Clinic', 'owner_name' => 'Owner Three',
+        'email' => 'journey-trial@example.test', 'phone' => '0771234569',
+        'city' => 'Negombo', 'district' => 'Western', 'password' => 'Str0ngPassw0rd!',
+    ], 'starter');
+    $trialId = (int) $r3['clinic_id'];
+    $lc->grantTrial($trialId, 14);
+    $refused = $inv->raiseFirst($trialId);
+    Assert::false($refused['ok'], 'a trial clinic is never invoiced');
+    Assert::same(0, (int) Db::scalar('SELECT COUNT(*) FROM invoices WHERE clinic_id = ?', [$trialId]), 'and no invoice row exists');
+    $c = Db::one('SELECT * FROM clinics WHERE id = ?', [$trialId]);
+    Assert::same(14, (int) round((strtotime((string) $c['trial_ends_on']) - strtotime(date('Y-m-d'))) / 86400), 'trial runs 14 days');
+});
+
+Assert::test('the decision queue works on MySQL, not only SQLite', function (): void {
+    // awaitingDecision() used julianday(), a SQLite-only function, so the screen
+    // the entire approval gate depends on threw a fatal error on the database
+    // this product actually ships on. The suite runs on SQLite, so nothing
+    // caught it. Assert on the SQL text: no SQLite-only function may appear.
+    // Strip comments first: the code explains why julianday() was removed, and
+    // that explanation must not read as a call to it.
+    $src = (string) file_get_contents(QP_ROOT . '/app/Services/LifecycleService.php');
+    $src = preg_replace('#/\*.*?\*/#s', '', $src) ?? $src;
+    $src = preg_replace('#(^|\s)//[^\n]*#', ' ', $src) ?? $src;
+    Assert::false(str_contains($src, 'julianday('), 'LifecycleService has no julianday() call');
+    Assert::false(str_contains($src, "datetime('now')") || str_contains($src, 'datetime("now")'),
+        'and no SQLite datetime() call');
+
+    $queue = (new App\Services\LifecycleService())->awaitingDecision();
+    Assert::true(is_array($queue), 'the decision queue returns rows');
+    foreach ($queue as $row) {
+        Assert::true(array_key_exists('days_waiting', $row), 'every row carries days_waiting');
+        Assert::true(is_int($row['days_waiting']), 'days_waiting is an integer');
+        Assert::true($row['days_waiting'] >= 0, 'days_waiting is never negative');
+    }
+
+    // And the same class of bug elsewhere: no SQLite-only SQL in app code.
+    foreach (['app/Services/ReportService.php', 'app/Services/FeatureService.php',
+              'app/Services/ExportService.php'] as $f) {
+        $code = (string) file_get_contents(QP_ROOT . '/' . $f);
+        // Strip comments: prose about the old bug is not the bug.
+        $code = preg_replace('#/\*.*?\*/#s', '', $code) ?? $code;
+        $code = preg_replace('#(^|\s)//[^\n]*#', ' ', $code) ?? $code;
+        foreach (['julianday(', "datetime('now')", 'datetime("now")', 'PRAGMA ', 'sqlite_master'] as $bad) {
+            Assert::false(str_contains($code, $bad), "{$f} does not use {$bad} in SQL");
+        }
+    }
 });
 
 

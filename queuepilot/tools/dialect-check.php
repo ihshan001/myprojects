@@ -40,12 +40,21 @@ $files = 0;
 
 /** @var array<string, list<string>> dialect => [pattern => explanation] */
 $sqliteOnly = [
-    "/datetime\s*\(\s*'now'\s*\)/i" => "datetime('now') is SQLite; MySQL uses NOW()",
+    // Both quote styles, and the no-argument form. PHP strings make
+    // datetime("now") as easy to write as datetime('now'), and it has the same
+    // effect: a fatal error on MySQL.
+    "/\bdatetime\s*\(\s*['\"]now['\"]\s*\)/i" => "datetime('now') is SQLite; MySQL uses NOW() or CURRENT_TIMESTAMP",
+    '/\bjulianday\s*\(/i' => 'julianday() is SQLite-only; compute the difference in PHP',
+    '/\bunixepoch\s*\(/i' => 'unixepoch() is SQLite-only',
+    '/\bdate\s*\(\s*\?\s*,/i' => "date(x, 'modifier') is SQLite-only syntax",
     '/\bAUTOINCREMENT\b/i' => 'AUTOINCREMENT is SQLite; MySQL uses AUTO_INCREMENT',
     '/\bINSERT\s+OR\s+(IGNORE|REPLACE)\b/i' => 'INSERT OR IGNORE/REPLACE is SQLite; MySQL uses ON DUPLICATE KEY UPDATE',
     '/\bPRAGMA\b/i' => 'PRAGMA is SQLite-only',
     '/\bWITHOUT\s+ROWID\b/i' => 'WITHOUT ROWID is SQLite-only',
-    '/\bGLOB\b/i' => 'GLOB is SQLite-only',
+    // SQL `GLOB` the operator only. PHP's glob() and $GLOBALS are everywhere in
+    // this codebase and are obviously not SQLite syntax, so a bare \bGLOB\b
+    // matches half the tools directory.
+    '/\bGLOB\s+[\w\.\*\?\[]/i' => 'GLOB is a SQLite-only operator',
     '/\bstrftime\s*\(/i' => 'strftime() is SQLite-only',
     '/\bIFNULL\s*\(/i' => 'IFNULL works in both, but prefer COALESCE',
 ];
@@ -104,6 +113,81 @@ foreach (['sqlite', 'mysql'] as $dialect) {
     }
 }
 
+/*
+ * PHP source, not just .sql files.
+ *
+ * The migration files were covered from the start, but the app's own queries
+ * were not — and that is where the worst dialect bug in the project lived.
+ * Three SQLite-only constructs sat in production code:
+ *
+ *   LifecycleService::awaitingDecision()  julianday()  -> the admin decision
+ *                                                     queue threw a fatal
+ *                                                     error on MySQL
+ *   ReportService (x2)                    julianday()  -> the reports page
+ *                                                     threw on MySQL
+ *   FeatureService (x4)               datetime("now")  -> toggling a feature
+ *                                                     threw on MySQL
+ *
+ * All four read perfectly and passed the entire suite, because the suite runs
+ * on SQLite. The product ships on MySQL. So the PHP that talks to the database
+ * is scanned with the MySQL rule set: any SQLite-only function reachable from
+ * application code is a defect, because production is never SQLite.
+ *
+ * Files that legitimately contain both dialects (the migration runner picks its
+ * DDL by driver) opt out with an explicit marker on the line.
+ */
+$phpRoots = ['app', 'tools'];
+$phpFiles = 0;
+foreach ($phpRoots as $root) {
+    $iter = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator(dirname(__DIR__) . '/' . $root, FilesystemIterator::SKIP_DOTS)
+    );
+    /** @var SplFileInfo $file */
+    foreach ($iter as $file) {
+        if ($file->getExtension() !== 'php') {
+            continue;
+        }
+        $path = $file->getPathname();
+        if (str_ends_with($path, 'dialect-check.php')) {
+            continue; // this file defines the patterns
+        }
+        $phpFiles++;
+        $raw = (string) file_get_contents($path);
+
+        // The opt-out marker lives in a comment, so it must be read from the
+        // raw source before the comment stripper removes it.
+        $dualDialect = str_contains($raw, '@dialect-check: dual-dialect-guarded');
+
+        // Strip PHP comments so prose about SQLite does not trip the linter.
+        $code = preg_replace('#/\*.*?\*/#s', '', $raw) ?? $raw;
+        $code = preg_replace('#(^|\s)//[^\n]*#', ' ', $code) ?? $code;
+        $code = preg_replace('/#\s[^\n]*/', ' ', $code) ?? $code;
+
+        $hits = [];
+        foreach ($sqliteOnly as $pattern => $why) {
+            if (preg_match($pattern, $code)) {
+                $hits[] = $why;
+            }
+        }
+        // A file that legitimately carries both dialects — the connection layer
+        // applying SQLite PRAGMAs, the backup tool validating a SQLite scratch
+        // copy — declares it, and its hits are not errors. The marker has to be
+        // explicit per file so nothing opts out by accident.
+        if ($dualDialect) {
+            $hits = [];
+        }
+        // PRAGMA in a PHP string is usually the SQLite bootstrap; flag it too
+        // unless the file declares itself dual-dialect.
+        $rel = str_replace(dirname(__DIR__) . '/', '', $path);
+        foreach ($hits as $why) {
+            if (str_contains($why, 'prefer COALESCE')) {
+                continue; // IFNULL is valid in both; not a defect
+            }
+            $problems[] = "{$rel}: {$why} — this runs on MySQL, not SQLite";
+        }
+    }
+}
+
 $byName = [];
 foreach ($entries as $path) {
     $base = basename($path);
@@ -134,7 +218,8 @@ foreach ($byName as $name => $pair) {
     }
 }
 
-echo "Dialect check — {$files} SQL files (" . count($byName) . " migration pairs + the schema pair)\n";
+echo "Dialect check — {$files} SQL files (" . count($byName) . " migration pairs + the schema pair)"
+    . " and {$phpFiles} PHP files of application SQL\n";
 echo str_repeat('-', 60) . "\n";
 
 if ($problems === []) {

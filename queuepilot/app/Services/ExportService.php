@@ -109,7 +109,7 @@ final class ExportService
             if (!$this->tableExists($table)) {
                 continue;
             }
-            $columns = array_column(Db::all('PRAGMA table_info(' . $table . ')'), 'name');
+            $columns = Db::columns($table);
             if ($columns === []) {
                 continue;
             }
@@ -265,7 +265,7 @@ final class ExportService
         if (!$this->tableExists($table)) {
             return null;
         }
-        $columns = array_column(Db::all('PRAGMA table_info(' . $table . ')'), 'name');
+        $columns = Db::columns($table);
         if ($columns === []) {
             return null;
         }
@@ -327,8 +327,11 @@ final class ExportService
 
     private function tableExists(string $table): bool
     {
-        $row = Db::one("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", [$table]);
-        return $row !== null;
+        // Delegates to Db, which knows whether it is talking to MySQL
+        // (information_schema) or SQLite (sqlite_master). The old version asked
+        // sqlite_master directly, so the whole export page was a fatal error on
+        // the MySQL host this product actually ships on.
+        return Db::tableExists($table);
     }
 
     /** @param array<int, array<string, mixed>> $rows */

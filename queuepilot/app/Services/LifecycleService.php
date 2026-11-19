@@ -55,7 +55,7 @@ final class LifecycleService
     private const DECIDABLE = ['pending'];
 
     /** @return array{ok: bool, error?: string} */
-    public function approve(int $clinicId, ?int $actorId = null, ?int $trialDays = null): array
+    public function approve(int $clinicId, ?int $actorId = null, ?int $trialDays = null, ?string $cycle = null): array
     {
         $clinic = Db::one('SELECT * FROM clinics WHERE id = ?', [$clinicId]);
         if (!$clinic) {
@@ -74,15 +74,26 @@ final class LifecycleService
         // Billing is monthly in advance, so the first period starts today and
         // the renewal date is one cycle out. There is no arrears period for a
         // clinic that has never used the system.
-        $cycle = (string) ($clinic['billing_cycle'] ?? 'monthly');
+        //
+        // The cycle is a platform decision made at activation, and it had no way
+        // to be recorded: billing_cycle was read in four places and written in
+        // none, so every clinic was monthly whether or not they had paid for a
+        // year. The caller can now pass it; anything unrecognised keeps whatever
+        // the clinic already had, which defaults to monthly.
+        $cycle = $cycle !== null && in_array($cycle, ['monthly', 'yearly'], true)
+            ? $cycle
+            : (string) ($clinic['billing_cycle'] ?? 'monthly');
+        if (!in_array($cycle, ['monthly', 'yearly'], true)) {
+            $cycle = 'monthly';
+        }
         $renewsOn = $this->cycleEnd(date('Y-m-d'), $cycle);
 
         Db::run(
             "UPDATE clinics SET billing_status = 'active', suspended_at = NULL, suspension_reason = NULL,
                     approved_at = ?, approved_by = ?, declined_at = NULL, decision_reason = NULL,
-                    grace_until = NULL, renews_on = ?, updated_at = ?
+                    grace_until = NULL, renews_on = ?, billing_cycle = ?, updated_at = ?
               WHERE id = ?",
-            [Db::now(), $actorId, $renewsOn, Db::now(), $clinicId]
+            [Db::now(), $actorId, $renewsOn, $cycle, Db::now(), $clinicId]
         );
 
         // Approval without addresses leaves the clinic unusable: the owner has
@@ -99,7 +110,7 @@ final class LifecycleService
         ]);
         Log::info('clinic.approved', ['clinic' => $clinicId, 'actor' => $actorId]);
 
-        return ['ok' => true] + $addresses;
+        return ['ok' => true, 'billing_cycle' => $cycle] + $addresses;
     }
 
     /**
@@ -180,14 +191,27 @@ final class LifecycleService
      */
     public function awaitingDecision(): array
     {
-        return Db::all(
-            "SELECT c.*, u.name AS owner_name, u.email AS owner_email,
-                    CAST(julianday('now') - julianday(c.created_at) AS INTEGER) AS days_waiting
+        $rows = Db::all(
+            // days_waiting is computed in PHP rather than in SQL. The old
+            // version used julianday(), which is SQLite-only: on MySQL this
+            // page — the decision queue, the screen the whole approval gate
+            // depends on — threw a fatal error. Portability here is worth more
+            // than saving a loop.
+            "SELECT c.*, u.name AS owner_name, u.email AS owner_email
                FROM clinics c
                LEFT JOIN users u ON u.clinic_id = c.id AND u.role = 'clinic_admin'
               WHERE c.billing_status = 'pending'
               ORDER BY c.created_at ASC"
         );
+
+        $now = new \DateTimeImmutable('now');
+        foreach ($rows as $i => $row) {
+            $created = (string) ($row['created_at'] ?? '');
+            $rows[$i]['days_waiting'] = $created === ''
+                ? 0
+                : max(0, (int) $now->diff(new \DateTimeImmutable($created))->days);
+        }
+        return $rows;
     }
 
     /**

@@ -260,7 +260,10 @@ async function main() {
         || /admin\/clinics\/(\d+)"[^\n]*\n[^\n]*name="action" value="approve"/.exec(queuePage.html)?.[1];
       const pt = await platform.csrf('/admin/clinics');
       if (id) {
-        await platform.post(`/admin/clinics/${id}`, { _token: pt, action: 'approve' });
+        // Approve on the monthly cycle, exactly as the picker on that page sends
+        // it. The cycle is the platform's decision and must be recorded, because
+        // billing_cycle drives whether the first invoice is one month or twelve.
+        await platform.post(`/admin/clinics/${id}`, { _token: pt, action: 'approve', billing_cycle: 'monthly' });
       }
       return id;
     }
@@ -269,6 +272,16 @@ async function main() {
     check('the platform can approve it', Boolean(approvedId), 'no approve form was found on the queue page');
     check('and the clinic is live immediately after approval',
       await owner.isSignedIn(), 'GET /app did not answer 200 after approval');
+
+    // A paid activation must produce an invoice, and the owner must be able to
+    // see it. Approval used to raise nothing: the cron only bills clinics whose
+    // renewal date has already passed, and a clinic approved today renews in a
+    // month — so there was nothing to pay at the one moment the customer was
+    // paying attention.
+    const billing = await owner.get('/billing');
+    check('a paid activation raises an invoice the owner can see',
+      billing.status === 200 && /INV-\d{6}-\d{4}/.test(billing.html),
+      'no invoice number appeared on the owner billing page after approval');
   }
 
   /* -------------------------------------------------- 2. configure clinic */

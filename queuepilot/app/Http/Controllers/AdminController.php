@@ -171,13 +171,19 @@ final class AdminController
         if (in_array($action, ['approve', 'trial', 'decline'], true)) {
             $lifecycle = new LifecycleService();
             $result = match ($action) {
-                'approve' => $lifecycle->approve($clinicId, Auth::id()),
+                'approve' => $lifecycle->approve(
+                    $clinicId,
+                    Auth::id(),
+                    null,
+                    Request::string('billing_cycle') !== '' ? Request::string('billing_cycle') : null
+                ),
                 'trial'   => $lifecycle->grantTrial($clinicId, (int) Request::input('trial_days', 14), Auth::id()),
                 'decline' => $lifecycle->decline($clinicId, (string) Request::input('reason', ''), Auth::id()),
             };
             $message = $result['ok']
                 ? match ($action) {
-                    'approve' => $clinic['name'] . ' is approved and live.',
+                    'approve' => $clinic['name'] . ' is approved and live on '
+                        . ($result['billing_cycle'] === 'yearly' ? 'a yearly' : 'a monthly') . ' plan.',
                     'trial'   => $clinic['name'] . ' is on a trial until ' . ($result['trial_ends_on'] ?? '') . '.',
                     'decline' => $clinic['name'] . ' was declined. They can see the reason you gave.',
                 }
@@ -189,6 +195,29 @@ final class AdminController
             // Reported honestly: if mail is not configured the clinic is still
             // approved, and the operator needs to know the email never left so
             // they can pass the link on by hand.
+            // A paid activation owes money from the day it goes live. Raising
+            // the invoice here — and emailing it — is what makes "activate the
+            // monthly package" produce the invoice the customer is meant to pay.
+            // The cron run cannot do it: it only bills clinics whose renewal
+            // date has passed, and a clinic approved today renews in a month. A
+            // trial is deliberately skipped; a trial has no invoice.
+            if ($result['ok'] && $action === 'approve') {
+                try {
+                    $invoice = (new \App\Services\InvoiceService())->raiseFirst($clinicId);
+                    if ($invoice['ok']) {
+                        $message .= ' Invoice ' . $invoice['number'] . ' for '
+                            . money((float) $invoice['amount']) . ' raised and emailed.';
+                    } else {
+                        $message .= ' No invoice raised: ' . $invoice['error'];
+                    }
+                } catch (\Throwable $e) {
+                    \App\Core\Log::warn('billing.activation_invoice_failed', [
+                        'clinic' => $clinicId, 'error' => $e->getMessage(),
+                    ]);
+                    $message .= ' The clinic is live, but the first invoice could not be raised — see the log.';
+                }
+            }
+
             if ($result['ok'] && in_array($action, ['approve', 'trial'], true)) {
                 $welcome = new \App\Services\WelcomeService();
                 $issued = $welcome->issue($clinicId, Auth::id());

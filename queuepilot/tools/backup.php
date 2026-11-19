@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+// SQLite PRAGMAs here validate a SQLite scratch copy of a SQLite database;
+// they are unreachable when the live database is MySQL.
+// @dialect-check: dual-dialect-guarded
+
+
 /**
  * Backup tool — the executable half of docs/BACKUPS.md.
  *

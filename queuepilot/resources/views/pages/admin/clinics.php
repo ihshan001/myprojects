@@ -56,9 +56,18 @@
             </div>
 
             <div class="flex flex-wrap items-start gap-2">
-              <form method="post" action="/admin/clinics/<?= (int) $a['id'] ?>">
+              <form method="post" action="/admin/clinics/<?= (int) $a['id'] ?>" class="flex items-center gap-1.5">
                 <?= csrf_field() ?>
                 <input type="hidden" name="action" value="approve">
+                <!-- The billing cycle is chosen here, at the moment the clinic is
+                     approved, because it is the platform's decision and it cannot
+                     be changed afterwards without changing the next invoice. It
+                     used to be impossible to record at all: every clinic was
+                     monthly whether or not they had paid for a year. -->
+                <select class="select !py-1.5 text-xs" name="billing_cycle" aria-label="Billing cycle for <?= e($a['name']) ?>">
+                  <option value="monthly">Monthly</option>
+                  <option value="yearly">Yearly &middot; 20% off</option>
+                </select>
                 <button class="act-start" data-confirm-submit="Approve <?= e($a['name']) ?>? They will be able to put patients in a queue immediately.">
                   <svg class="h-4 w-4"><use href="#i-check-circle"/></svg>Approve
                 </button>

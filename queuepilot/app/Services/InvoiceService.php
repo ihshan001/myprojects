@@ -179,6 +179,102 @@ final class InvoiceService
     }
 
     /**
+     * Raise the invoice for a clinic that has just been activated on a paid
+     * plan, and email it.
+     *
+     * The cron run only invoices clinics whose renewal date has *passed*, and a
+     * newly approved clinic has a renewal date one cycle in the future. So the
+     * first invoice never existed at the moment the admin clicked Approve — the
+     * clinic went live with nothing to pay, and the operator had to wait for the
+     * next daily run, or generate it by hand, to send the thing the customer is
+     * supposed to pay. A trial is correctly exempt: no invoice at all.
+     *
+     * The period starts on the day the clinic was approved, not a cycle before
+     * it, for the same reason the cron clamps: an invoice must never bill for
+     * service that predates the clinic.
+     *
+     * @return array{ok:bool, invoice_id?:int, number?:string, amount?:float, error?:string}
+     */
+    public function raiseFirst(int $clinicId, ?string $today = null): array
+    {
+        $today = $today ?? Db::today();
+        $c = Db::one(
+            "SELECT c.id, c.name, c.billing_status, c.approved_at, c.renews_on, c.billing_cycle,
+                    c.currency, p.price_monthly, p.price_yearly
+               FROM clinics c LEFT JOIN plans p ON p.id = c.plan_id
+              WHERE c.id = ?",
+            [$clinicId]
+        );
+        if ($c === null) {
+            return ['ok' => false, 'error' => 'That clinic does not exist.'];
+        }
+        if ((string) $c['billing_status'] !== 'active') {
+            // A trial has no invoice; that is the whole point of a trial.
+            return ['ok' => false, 'error' => 'Only an active clinic is invoiced.'];
+        }
+        if ($c['price_monthly'] === null) {
+            return ['ok' => false, 'error' => 'That clinic has no plan, so there is nothing to invoice.'];
+        }
+
+        $yearly = ((string) ($c['billing_cycle'] ?? 'monthly')) === 'yearly';
+        $periodFrom = substr((string) ($c['approved_at'] ?: $today), 0, 10) ?: $today;
+        $periodTo = (string) ($c['renews_on'] ?? '') !== ''
+            ? substr((string) $c['renews_on'], 0, 10)
+            : ($yearly
+                ? date('Y-m-d', strtotime($periodFrom . ' +1 year'))
+                : date('Y-m-d', strtotime($periodFrom . ' +1 month')));
+
+        // Idempotent on the period start, the same key the cron run uses, so a
+        // double-click on Approve cannot bill the clinic twice.
+        $existing = Db::one(
+            'SELECT id, number, amount FROM invoices WHERE clinic_id = ? AND period_from = ?',
+            [$clinicId, $periodFrom]
+        );
+        if ($existing !== null) {
+            return [
+                'ok' => true,
+                'invoice_id' => (int) $existing['id'],
+                'number' => (string) $existing['number'],
+                'amount' => (float) $existing['amount'],
+            ];
+        }
+
+        $amount = $yearly
+            ? (float) ($c['price_yearly'] ?? ((float) $c['price_monthly'] * 12))
+            : (float) $c['price_monthly'];
+        $number = $this->nextNumber($periodFrom);
+
+        Db::insert(
+            'INSERT INTO invoices (clinic_id, number, period_from, period_to, amount, currency, status, created_at)
+             VALUES (?,?,?,?,?,?,?,?)',
+            [$clinicId, $number, $periodFrom, $periodTo, $amount,
+             (string) ($c['currency'] ?: 'LKR'), 'unpaid', Db::now()]
+        );
+        $invoiceId = (int) (Db::scalar(
+            'SELECT id FROM invoices WHERE clinic_id = ? AND number = ?',
+            [$clinicId, $number]
+        ) ?: 0);
+
+        (new AuditService())->log($clinicId, 'billing.invoice_raised_on_activation', 'invoice', $invoiceId ?: null, [
+            'number' => $number, 'amount' => $amount, 'period_from' => $periodFrom,
+        ]);
+
+        // The email is a courtesy; the invoice is the record. A mail failure must
+        // not undo the activation the admin just performed.
+        if ($invoiceId > 0) {
+            try {
+                (new InvoiceMailer())->issued($clinicId, $invoiceId);
+            } catch (\Throwable $e) {
+                Log::warn('billing.activation_invoice_email_failed', [
+                    'clinic' => $clinicId, 'invoice' => $invoiceId, 'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return ['ok' => true, 'invoice_id' => $invoiceId, 'number' => $number, 'amount' => $amount];
+    }
+
+    /**
      * Next invoice number for a period.
      *
      * Readable and sortable: INV-202611-0007. Sequential per month, derived

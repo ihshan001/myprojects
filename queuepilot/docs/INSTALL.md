@@ -329,17 +329,23 @@ this project has ever been executed against MySQL** — there is no MySQL server
 CI. Run `php tools/migrate.php` (or import this file) on the target host and
 watch it finish; that is the only proof, and it takes a minute.
 
-## A6. Create the plans, and your platform admin
+## A6. Create your platform admin
+
+The four subscription plans are created for you: `php tools/migrate.php` seeds them
+itself and prints `Seeded 4 subscription plan(s); 4 now available.` There is nothing
+else to run for plans, on either install path — `database/install.sql` already
+contains them.
+
+If you ever need to re-seed them, or you imported the schema by hand:
 
 ```bash
 cd ~/queuepilot
 php tools/seed.php --plans-only
 ```
 
-`--plans-only` is the production-safe seeder: it creates the four subscription plans
-and **no demo data**. Do not run `php tools/seed.php` without that flag on a live
-install — the full seeder creates five fake clinics, fake patients and a suspended
-billing case.
+`--plans-only` is the production-safe seeder: the four plans and **no demo data**.
+Do not run `php tools/seed.php` without that flag on a live install — the full
+seeder creates five fake clinics, fake patients and a suspended billing case.
 
 Then create the account you will actually sign in with:
 
