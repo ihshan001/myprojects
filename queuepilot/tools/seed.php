@@ -21,6 +21,30 @@ $today = Db::today();
 // `migrate.php && seed.php --plans-only`; nobody runs the demo on real data.
 $plansOnly = in_array('--plans-only', $_SERVER['argv'] ?? [], true);
 
+/*
+ * Fail with the instruction, not with a PDO stack trace.
+ *
+ * Seeding before importing the schema is the single easiest step to do in the
+ * wrong order: both are commands in the same install guide, one line apart, and
+ * the raw result is "SQLSTATE[HY000]: no such table: plans" from four frames
+ * deep in Db::insert. That reads like a broken build rather than a step that
+ * has not been run yet.
+ */
+try {
+    Db::scalar('SELECT COUNT(*) FROM plans');
+} catch (Throwable $e) {
+    echo PHP_EOL;
+    echo "  The database has no schema yet — the `plans` table does not exist.", PHP_EOL;
+    echo PHP_EOL;
+    echo "  Run the schema import first, then this command:", PHP_EOL;
+    echo "      php tools/migrate.php", PHP_EOL;
+    echo "  (or import database/install.sql in phpMyAdmin, which does the same thing)", PHP_EOL;
+    echo PHP_EOL;
+    echo "  Then: php tools/seed.php --plans-only", PHP_EOL;
+    echo PHP_EOL;
+    exit(1);
+}
+
 /* ---------------------------------------------------------------- plans */
 $plans = [
     ['starter', 'Starter', 3500, 1, 2, 2, 10, 'Single doctor, one queue, live tracking links', 1],

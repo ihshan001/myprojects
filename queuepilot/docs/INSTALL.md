@@ -268,7 +268,7 @@ Use the consolidated file. **One import, not thirty-one.**
 
 1. cPanel → **phpMyAdmin** → select your database.
 2. **Import** tab → **Choose File** → `database/install.sql` → **Go**.
-3. Wait for "Import has been successfully finished". It runs 149 statements
+3. Wait for "Import has been successfully finished". It runs 148 statements
    (155 counting the session settings at the top and bottom).
 
 `database/install.sql` is generated to do exactly what `php tools/migrate.php`
@@ -322,12 +322,28 @@ migration added without rebuilding cannot ship.
 replays the file against a model of the database: it checks that every `ALTER`
 targets a table that exists, every `FOREIGN KEY` names a created table and
 column, and that no `CREATE TABLE` is missing its guard. It currently reports
-**no problems** across all 149 statements and 52 tables.
+**no problems** across all 148 statements and 52 tables.
 
-It cannot tell you whether a real MySQL will accept a construct. **No part of
-this project has ever been executed against MySQL** — there is no MySQL server in
-CI. Run `php tools/migrate.php` (or import this file) on the target host and
-watch it finish; that is the only proof, and it takes a minute.
+Four things are proven without a MySQL server, and each covers a different way
+this file has failed before:
+
+- **It is complete.** The 52 table names it creates are exactly the set the
+  migration runner builds, so it cannot be missing a table the code queries.
+- **It is consistent.** `tools/build-install-sql.php --check` regenerates it from
+  the schema and migrations and reports `OK` only when the file on disk matches.
+  Hand-editing it therefore cannot silently drift.
+- **It is the right dialect.** `tools/dialect-check.php` fails the build if any
+  migration or PHP file uses a construct that works on SQLite and not MySQL.
+  Six such queries were found and fixed this way — `ON CONFLICT … DO UPDATE`
+  upserts, which MySQL rejects outright.
+- **It is non-destructive.** Every `DROP`/`DELETE` in the file is the `ON DELETE
+  CASCADE` half of a foreign key. There is no data-losing statement in it.
+
+What none of that can tell you is whether a real server accepts every construct
+on the day you run it. **No part of this project has ever been executed against MySQL**
+— there is no MySQL server in CI. Run `php tools/migrate.php` (or import this file)
+on the target host and watch it finish; that is the only proof, and it takes a
+minute.
 
 ## A6. Create your platform admin
 
@@ -708,6 +724,32 @@ Read the failure text rather than trying to silence it.
 - **Port 80 in use.** Skype, IIS and some VPN clients grab it. Change Apache's port
   in `httpd.conf` and update `APP_URL`.
 - **Do not commit `.env`.** It is git-ignored. Keep it that way.
+- **A demo login stops working after you test the password screen.** Changing
+  `reception@serenity.lk`'s password is a one-click way to try that feature and a
+  five-minute way to lose an afternoon. Print a replacement and paste it in:
+
+  ```cmd
+  C:\xampp\php\php.exe tools\hash-password.php --password "Reception#2026"
+  ```
+
+  ```sql
+  UPDATE users SET password_hash = '$2y$10$...', must_change_password = 0
+   WHERE email = 'reception@serenity.lk';
+  ```
+
+  The space after `--password` matters: `--password=value` prints nothing, because
+  the flag reader takes the next argument as the value. `must_change_password = 0`
+  matters for accounts made by `make-admin.php`, which sets it to 1 on purpose.
+- **Three limits can refuse a correct password.** Six failed sign-ins per address
+  per 10 minutes (`login_attempts`), a verify-email resend cap, and ten support
+  tickets per clinic per hour (`rate_limits`). `storage/logs/app.log` says
+  `auth.rate_limited` when it is the first one. On a development database,
+  `DELETE FROM login_attempts WHERE successful = 0;` and `DELETE FROM rate_limits;`
+  clear them. Neither is safe to run on a real host.
+- **The platform admin cannot reach `/admin` until it enrols 2FA.** That is by
+  design and enforced in `public/index.php`. If you only want to click around
+  locally, `SECURITY_REQUIRE_2FA_SUPER=false` lifts the redirect — do not carry
+  that line to production.
 
 ---
 

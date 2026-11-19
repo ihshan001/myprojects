@@ -8139,6 +8139,70 @@ Assert::test('the install guide matches the migrations that actually exist', fun
     );
 });
 
+Assert::test('the XAMPP quickstart quotes the real counts and the real recovery commands', function (): void {
+    // The quickstart is the guide people actually follow — it is the one with
+    // the phpMyAdmin screenshots in their head. The INSTALL.md guard above
+    // covers the long-form guide only, so every number and command here can rot
+    // silently. A wrong table count sends an operator to drop a database that
+    // imported perfectly.
+    $path = QP_ROOT . '/docs/XAMPP-QUICKSTART.md';
+    Assert::true(is_file($path), 'docs/XAMPP-QUICKSTART.md exists');
+    $text = (string) file_get_contents($path);
+
+    // The counts it tells you to check in phpMyAdmin must be the real ones.
+    $install = (string) file_get_contents(QP_ROOT . '/database/install.sql');
+
+    $tables = preg_match_all('/^CREATE TABLE (?:IF NOT EXISTS )?`?[a-z_]+`?/m', $install);
+    Assert::true($tables > 0, 'install.sql creates tables');
+    Assert::true(
+        str_contains($text, '-- must be ' . $tables),
+        "the quickstart quotes the real table count ({$tables})"
+    );
+
+    $migrationRows = preg_match_all("/\\('(?:0000_schema|[0-9][a-z0-9_]*\\.mysql)',/", $install);
+    Assert::true(
+        str_contains($text, '-- must be ' . $migrationRows),
+        "and the real schema_migrations count ({$migrationRows})"
+    );
+
+    // The statement count, computed the way a reader would sanity-check it.
+    $clean = preg_replace('~/\\*.*?\\*/~s', '', $install) ?? $install;
+    $clean = preg_replace('~^\\s*--.*$~m', '', $clean) ?? $clean;
+    $statements = count(array_filter(
+        array_map('trim', explode(';', $clean)),
+        static fn (string $x): bool => $x !== ''
+    ));
+    Assert::true(
+        str_contains($text, 'runs ' . $statements . ' statements'),
+        "and the real statement count ({$statements})"
+    );
+
+    // The recovery commands have to be commands that exist. --password=value
+    // returns nothing because the flag reader takes the next argument; a guide
+    // that prints the '=' form sends people to an empty terminal.
+    Assert::true(str_contains($text, '--password "'), 'the hash helper is shown space-separated');
+    Assert::false(
+        preg_match('~hash-password\\.php\\s+--password=~', $text) === 1,
+        'the --password=value form, which prints nothing, is not recommended'
+    );
+    Assert::true(is_file(QP_ROOT . '/tools/hash-password.php'), 'and that helper exists');
+    Assert::true(
+        str_contains($text, 'make-admin.php --email=you@example.com --reset')
+            || str_contains($text, 'make-admin.php --email=you@example.com --reset'),
+        'the platform-admin recovery command is documented'
+    );
+
+    // The one instruction that matters most, and the trap that follows it.
+    Assert::true(
+        str_contains($text, '/.env') && str_contains($text, '404'),
+        'it tells you that /.env must return 404'
+    );
+    Assert::true(
+        str_contains($text, 'AllowOverride'),
+        'and names the Apache directive that causes it to be served'
+    );
+});
+
 Assert::test('asset() follows the app when it is mounted below the domain root', function (): void {
     // A root-relative /assets/ is right in production and wrong on the XAMPP
     // layout this repository's install guide recommends (htdocs/queuepilot).

@@ -104,13 +104,24 @@ phpMyAdmin → `queuepilot` → **SQL** tab:
 
 ```sql
 SELECT COUNT(*) FROM information_schema.tables
- WHERE table_schema = DATABASE();   -- must be 52
+ WHERE table_schema = DATABASE();        -- must be 52
 SELECT COUNT(*) FROM plans;              -- must be 4
 SELECT COUNT(*) FROM schema_migrations;  -- must be 31
 ```
 
 If `schema_migrations` is 0 or missing, the import was partial — drop the database,
 recreate it, and import again.
+
+There is a second way to confirm it, and it is the one to use if you prefer the
+command line:
+
+```cmd
+C:\xampp\php\php.exe tools\healthcheck.php
+```
+
+It prints the driver, the plan count and the number of checks it ran, and says
+`All good.` or names the missing table. Eighteen checks, no writes, safe to run
+any time.
 
 ---
 
@@ -165,6 +176,19 @@ C:\xampp\php\php.exe -r "echo 'APP_KEY=' . bin2hex(random_bytes(32)) . PHP_EOL;"
 Paste the whole output as its own line in `.env`. It encrypts two-factor secrets.
 Changing it later invalidates every 2FA enrolment.
 
+### The 2FA line, and why you might turn it off on your own laptop
+
+`SECURITY_REQUIRE_2FA_SUPER=true` is the default and it is enforced in
+`public/index.php`, not per route — a platform admin who has not enrolled
+two-factor is redirected to `/settings/security?2fa=required` and cannot reach
+`/admin` until they do. `/settings/security`, `/logout`, `/locale` and
+`/api/health` stay reachable so the enrolment page can be used at all.
+
+If you are setting this up on your own laptop purely to look around, enrolling
+your phone every time you recreate the database gets old. Setting it to `false`
+lifts the redirect. Do not carry that line to a real host: the platform admin can
+read every clinic's data.
+
 ### Why `MAIL_TRANSPORT=log`
 
 Every email is written to `storage\logs\mail.log` instead of being sent. That lets
@@ -190,6 +214,10 @@ C:\xampp\php\php.exe tools\make-admin.php --email=you@example.com --name="Your N
 
 The plans already came in with `install.sql`; running `--plans-only` is harmless and
 confirms it.
+
+> **Run these after the import, not before.** `seed.php` on a database with no
+> schema stops with *"the database has no schema yet — the `plans` table does not
+> exist"* and tells you to run the import. If you see that, go back to step 3.
 
 > **Note:** `tools\migrate.php` is the equivalent of the phpMyAdmin import. If you
 > prefer the CLI end-to-end, skip step 3's import and instead run:
@@ -218,7 +246,74 @@ That creates three demo clinics and prints these logins:
 | Second clinic | `admin@lakeview.lk` | `Lakeview#2026` |
 | Suspended clinic | `admin@coastal.lk` | `Coastal#2026` |
 
+The suspended one is deliberate: signing in lands on `/billing?suspended=1` and the
+queue screens are refused. It exists so you can see what a lapsed subscription does
+to a clinic without having to expire one yourself.
+
 ---
+
+### Locked out of a demo account?
+
+Changing `reception@serenity.lk`'s password to see the change-password screen is
+easy to do and easy to forget.
+
+**If it is the platform admin**, do not go near the database — there is a command:
+
+```cmd
+C:\xampp\php\php.exe tools\make-admin.php --email=you@example.com --reset
+```
+
+It prints a fresh one-time password, clears `must_change_password`'s cause and
+clears two-factor, so the next sign-in starts the whole first-run flow again.
+`tools\make-admin.php --list` shows every platform admin and whether it has
+enrolled 2FA yet.
+
+**For any other account**, there is no such command. Print the hash and paste it:
+
+**Step 1** — print a fresh hash for the password you want:
+
+```cmd
+C:\xampp\php\php.exe tools\hash-password.php --password "Reception#2026"
+```
+
+It prints one line starting `$2y$10$`. Note the **space** between `--password` and
+the value: the flag reader looks at the next argument, so `--password=value` prints
+nothing at all. Copy the whole line including the `$` characters.
+
+**Step 2** — paste it into phpMyAdmin against the right account:
+
+```sql
+UPDATE users
+   SET password_hash = '$2y$10$paste-the-whole-line-here',
+       must_change_password = 0
+ WHERE email = 'reception@serenity.lk';
+```
+
+`must_change_password = 0` matters for accounts created by `make-admin.php`: leave
+it at 1 and you are sent straight back to the change-password screen. Swap the
+address to repair any other account — `amara@serenity.lk`, `admin@lakeview.lk`, and
+so on.
+
+### If a login suddenly stops working
+
+Three limits will refuse you, and all three are working security, not breakage:
+
+| Limit | Default | Where it is counted |
+|---|---|---|
+| Failed sign-ins | 6 per address per 10 minutes | `login_attempts` |
+| Verify-email resend | a small per-IP and per-account cap | `rate_limits` |
+| Support tickets | 10 per clinic per hour | `rate_limits` |
+
+If you are certain the password is right and sign-in still fails, look at
+`storage\logs\app.log` for `auth.rate_limited`. Clear the counter and try again:
+
+```sql
+DELETE FROM login_attempts WHERE successful = 0;
+DELETE FROM rate_limits;
+```
+
+Both are safe to run on a development database. Neither is safe on a real one —
+clearing `rate_limits` there removes a brute-force guard.
 
 ## 6. Verify it works
 
@@ -244,9 +339,43 @@ C:\xampp\php\php.exe tools\healthcheck.php
 C:\xampp\php\php.exe tools\host-drill.php
 ```
 
+`healthcheck.php` is the one to watch: 18 checks, and it names any table that is
+missing rather than failing quietly.
+
 `host-drill.php` will report failures locally, and that is **correct** — it checks
 production hardening (`APP_DEBUG=false`, non-world-readable sessions). Read the
 failure text; do not try to make it green on a development machine.
+
+### Proving the whole thing actually writes to the database
+
+Two scripts are for developers rather than installers, and they need the bundled
+Node dev server instead of Apache. If you have Node 18+ and want more than "the
+pages load":
+
+```bash
+node tools/serve.mjs             # terminal 1 — same code, no Apache needed
+node tools/sql-coverage.mjs      # terminal 2 — 204 routes, reports failed SQL
+node tools/write-coverage.mjs    # submits every create form, reads the row back
+```
+
+`sql-coverage.mjs` sweeps every route and reports any statement that threw, which
+catches the failures controllers deliberately swallow. `write-coverage.mjs` goes
+further: it submits each create form with valid data and then reads the row out of
+the database, because a redirect back to the form page looks identical whether the
+insert happened or validation refused it. It changes the receptionist's password to
+test that path and puts it back afterwards, and it fails if it cannot.
+
+Neither is part of a normal XAMPP install — you do not need Node to run QueuePilot.
+They exist to answer "is this genuinely wired up?" with evidence.
+
+**Neither works against your MySQL database as written.** Both assume the SQLite
+file the dev server uses: `write-coverage.mjs` reads rows with Python's `sqlite3`,
+and `sql-coverage.mjs` reads `storage/logs/app.log`, which the app writes whatever
+the driver. So on XAMPP you get the log-based half for free and would have to
+retarget the row reads at MySQL — `mysql -u root queuepilot -e "..."` in place of
+the `sqlite3` calls — to get the other. That is the honest state of it: against
+SQLite the write paths are proven, against MySQL the `healthcheck` and your own
+click-through are the evidence.
 
 ---
 
@@ -310,6 +439,13 @@ This is the daily loop, in order, because the system enforces it:
 | **MySQL 8 "caching_sha2_password"** | You are using `root` locally, so this should not appear. If it does, use a `mysql_native_password` user. |
 | **Port 80 taken** | Skype/IIS/VPN. Change Apache's port and update `APP_URL`. |
 | **Cannot log in as platform admin** | `php tools\make-admin.php --list`; `--reset` if 2FA is lost. |
+| **Correct password refused, repeatedly** | Rate limit. `auth.rate_limited` in `app.log`; see the counter table above. |
+| **Signed in but sent straight back to change-password** | `must_change_password` is still 1. The guide's repair SQL sets it to 0. |
+| **`/admin` bounces to `/settings/security?2fa=required`** | Working as designed. Enrol 2FA, or set `SECURITY_REQUIRE_2FA_SUPER=false` locally. |
+| **`hash-password.php` prints nothing** | You used `--password=value`. Use `--password value` with a space. |
+| **Calls refused: "session has not been started"** | Press **Start session** on that doctor first. Not a bug — see the daily loop below. |
+| **"That entry changed on another device"** | Two people pressed Call at once. Exactly one wins by design. Reload the board. |
+| **Support form saved but no ticket appeared** | Ten tickets per clinic per hour. Check `rate_limits` for a `support:` row. |
 
 ---
 
@@ -318,12 +454,22 @@ This is the daily loop, in order, because the system enforces it:
 Being straight with you, because it matters more than a green checklist:
 
 - **`install.sql` has never been executed against a real MySQL server.** There is no
-  MySQL in the environment it was built in. It is validated statically — every
-  statement parses as MySQL, every `ALTER` targets an existing table, every foreign
-  key points at a real table and column, both SQL dialects describe the same 52
-  tables — but only a real server proves the server accepts every construct.
-  **Your import in step 3 is that proof.** If it fails, the error message from
-  phpMyAdmin is the thing to send back.
+  MySQL in the environment it was built in. What has been proven is that it is
+  *complete*: the 52 table names it creates are byte-for-byte the same set the
+  migration runner builds, and it is generated from the same source of truth those
+  migrations are, so it cannot drift from them. It is also validated statically —
+  every statement parses as MySQL, every `ALTER` targets a real table, every
+  foreign key points at a real table and column, and 148 statements produce the
+  52 tables, 4 plans and 31 migration rows step 3 checks for. What static checking
+  cannot prove is that MariaDB accepts every construct on the day you run it.
+  **Your import in step 3 is that proof.** If it fails, the phpMyAdmin error
+  message is the thing to send back.
+- **No route has ever run against MySQL here either.** Every route and every write
+  path was exercised against SQLite — 204 routes with no failed statement, and 15
+  create paths verified by reading the row back. The one class of bug that hides
+  from that is a query that is valid in SQLite and invalid in MySQL; six of those
+  were found and fixed, and `tools/dialect-check.php` now fails the build if
+  another appears. It is a spelling check, not a behaviour check.
 - **The `.htaccess` rewrite has not been executed under Apache** either, for the same
   reason. Step 6's four checks are the test.
 - **Bank details are blank** on invoices by design. Until you set `COMPANY_BANK`,
