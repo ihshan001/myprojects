@@ -184,8 +184,16 @@ check(
     'SECURITY_REQUIRE_2FA_SUPER is false in production — this is break-glass, not a setting to leave off'
 );
 
+// An empty token closes /api/health to everybody but a signed-in super admin,
+// which is the documented and safe default — .env.example ships it empty. It is
+// only a fault on a host that is meant to be watched, so it is scored the same
+// way as the 2FA check above rather than failing every local install.
 $monitor = (string) Env::get('monitor.token', '');
-check('an uptime monitor can authenticate', $monitor !== '', 'MONITOR_TOKEN is empty, so /api/health answers 404 and no monitor can see the app');
+check(
+    'an uptime monitor can authenticate, or the endpoint is deliberately closed',
+    $monitor !== '' || !$isProduction,
+    'MONITOR_TOKEN is empty in production, so /api/health answers 404 and no monitor can see the app'
+);
 
 /* --------------------------------------- 7. the app fails closed, not open */
 

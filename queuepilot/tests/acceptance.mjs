@@ -109,6 +109,11 @@ class Browser {
     return {
       status: response.status,
       location: response.headers.get('location'),
+      // With redirect: 'follow' this is the page actually rendered after the
+      // redirect, not the POST body. That matters for anything shown once —
+      // an invitation link is rendered on the page the invite POST lands on and
+      // is gone on any later GET, so a test that re-fetches the page can never
+      // see it.
       html: await response.text(),
     };
   }
@@ -277,9 +282,15 @@ async function main() {
       const queuePage = await platform.get('/admin/clinics');
       check('the application appears in the platform decision queue',
         queuePage.html.includes(clinicName), 'the clinic was not listed as awaiting a decision');
-      const id = /action="\/admin\/clinics\/(\d+)"[^>]*>\s*<input[^>]*name="action" value="approve"/s
-        .exec(queuePage.html)?.[1]
-        || /admin\/clinics\/(\d+)"[^\n]*\n[^\n]*name="action" value="approve"/.exec(queuePage.html)?.[1];
+      // Find the approve form belonging to *this* clinic, not the first one on
+      // the page. The page lists every pending application, so a database with a
+      // leftover application from an earlier run made this approve the wrong
+      // row — the suite then failed later on a clinic it had never activated.
+      // The clinic name carries a random suffix, so it is a unique anchor.
+      const cardAt = queuePage.html.indexOf(clinicName);
+      const card = cardAt === -1 ? '' : queuePage.html.slice(cardAt, cardAt + 8000);
+      const id = /action="\/admin\/clinics\/(\d+)"[\s\S]{0,600}?name="action" value="approve"/
+        .exec(card)?.[1];
       const pt = await platform.csrf('/admin/clinics');
       if (id) {
         // Approve on the monthly cycle, exactly as the picker on that page sends
@@ -375,9 +386,13 @@ async function main() {
     // Invitations live on the Team tab now that settings is split into
     // sections, so the walkthrough has to ask for that tab rather than
     // assuming one long page.
+    // The link is rendered once, on the page this POST redirects to; a later GET
+    // of the team tab lists the invitation but not its link, by design.
+    const landedOn = res.html || '';
     const { html } = await owner.get('/settings?tab=team');
     check('the invitation is listed as pending', html.includes(`reception-${suffix}@acceptance.test`));
-    const link = html.match(/\/invite\/([A-Za-z0-9_-]{16,})/);
+    const link = landedOn.match(/\/invite\/([A-Za-z0-9_-]{16,})/)
+      || html.match(/\/invite\/([A-Za-z0-9_-]{16,})/);
     inviteLink = link ? link[1] : null;
     check('an invitation link exists', inviteLink !== null);
   }

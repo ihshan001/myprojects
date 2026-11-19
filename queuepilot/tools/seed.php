@@ -98,7 +98,12 @@ function addUser(int $clinicId, string $role, string $name, string $email, strin
     );
 }
 
-Db::transaction(function () use ($planIds, $today) {
+// Whether the full seeder had to create the platform admin, or found one the
+// operator had already made with make-admin.php. Set inside the transaction and
+// read by the credentials summary printed below it.
+$seedAdminCreated = false;
+
+Db::transaction(function () use ($planIds, $today, &$seedAdminCreated) {
     if (Db::scalar("SELECT id FROM users WHERE email = 'admin@serenity.lk'")) {
         echo "Demo data already present — skipping tenants.\n";
         return;
@@ -290,11 +295,24 @@ Db::transaction(function () use ($planIds, $today) {
     addUser($c3, 'clinic_admin', 'Dr. Suresh Mendis', 'admin@coastal.lk', 'Coastal#2026');
 
     /* ---------- platform super admin ---------- */
-    Db::insert(
-        'INSERT INTO users (clinic_id, role, name, email, password_hash, locale, is_active, created_at)
-         VALUES (NULL, ?, ?, ?, ?, ?, 1, ?)',
-        ['super_admin', 'Platform Admin', 'owner@queuepilot.app', password_hash('QueuePilot#2026', PASSWORD_DEFAULT), 'en', Db::now()]
-    );
+    // Only when there is no platform admin yet. The documented install order is
+    // `seed.php --plans-only`, then `make-admin.php`, and only then the full
+    // seeder for demo data — so by the time this runs the operator very often
+    // already has an admin, and inserting another one with this email aborts the
+    // whole transaction (MySQL: duplicate key; SQLite: UNIQUE users.email) and
+    // takes the demo clinics down with it. Skipping is correct, and the password
+    // printed at the end is qualified below so nobody is told to use one that
+    // was never set.
+    $seedAdmin = 'owner@queuepilot.app';
+    $alreadyHasAdmin = (bool) Db::scalar('SELECT id FROM users WHERE email = ?', [$seedAdmin]);
+    $seedAdminCreated = !$alreadyHasAdmin;
+    if (!$alreadyHasAdmin) {
+        Db::insert(
+            'INSERT INTO users (clinic_id, role, name, email, password_hash, locale, is_active, created_at)
+             VALUES (NULL, ?, ?, ?, ?, ?, 1, ?)',
+            ['super_admin', 'Platform Admin', $seedAdmin, password_hash('QueuePilot#2026', PASSWORD_DEFAULT), 'en', Db::now()]
+        );
+    }
 
     /* ---------- invoices ---------- */
     foreach ([[$c1, 'INV-2026-0001', 7900, 'paid'], [$c2, 'INV-2026-0002', 3500, 'unpaid'], [$c3, 'INV-2026-0003', 3500, 'unpaid']] as [$cid, $no, $amt, $st]) {
@@ -546,7 +564,8 @@ echo "\n────────────────────────
 echo " QueuePilot demo data ready\n";
 echo "──────────────────────────────────────────────────────────\n";
 printf(" %-22s %-26s %s\n", 'ROLE', 'EMAIL', 'PASSWORD');
-printf(" %-22s %-26s %s\n", 'Platform owner', 'owner@queuepilot.app', 'QueuePilot#2026');
+printf(" %-22s %-26s %s\n", 'Platform owner', 'owner@queuepilot.app',
+    $seedAdminCreated ? 'QueuePilot#2026' : '(kept the account you already had)');
 printf(" %-22s %-26s %s\n", 'Clinic admin', 'admin@serenity.lk', 'Serenity#2026');
 printf(" %-22s %-26s %s\n", 'Receptionist', 'reception@serenity.lk', 'Reception#2026');
 printf(" %-22s %-26s %s\n", 'Doctor', 'amara@serenity.lk', 'Doctor#2026');
