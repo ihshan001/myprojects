@@ -8806,6 +8806,32 @@ Assert::test('a cancellation made in error can be undone, and is recorded', func
     Db::run('DELETE FROM queue_entries WHERE id = ?', [$entryId]);
 });
 
+Assert::test('arrival messages use a unit a person would say', function (): void {
+    // A receptionist checking in an appointment booked three weeks out was
+    // told "Checked in 27126 min early". Minutes are right for a queue and
+    // wrong for anything past a couple of hours.
+    Assert::same('45 min', human_minutes(45));
+    Assert::same('2 hr', human_minutes(120));
+    Assert::same('2 hr 30 min', human_minutes(150));
+    Assert::same('32 days 2 hr', human_minutes(46230));
+    Assert::same('1 day', human_minutes(1440));
+    Assert::same('45 min', human_minutes(-45), 'the unit does not depend on the sign');
+
+    $svc = new \App\Services\AppointmentService();
+    $base = ['clinic_id' => 1, 'doctor_id' => 2, 'scheduled_for' => '2026-12-08 11:30:00'];
+
+    $early = $svc->arrivalPolicy($base, null, '2026-11-06 09:00:00');
+    Assert::same('early', $early['status']);
+    Assert::contains('32 days', $early['message'], 'a far-off arrival is described in days, not minutes');
+    Assert::false(str_contains($early['message'], '46230'), 'and never as a raw minute count');
+
+    $late = $svc->arrivalPolicy($base, null, '2026-12-08 14:00:00');
+    Assert::same('late', $late['status']);
+    Assert::contains('2 hr 30 min', $late['message']);
+    Assert::same(3, $late['weight'], 'a late arrival still joins behind the people who came on time');
+});
+
+
 $code = Assert::summary();
 Database::cleanup($dbPath);
 echo "\n";

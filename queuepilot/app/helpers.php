@@ -232,6 +232,31 @@ if (!function_exists('ago')) {
     }
 }
 
+if (!function_exists('human_minutes')) {
+    /**
+     * Minutes as something a person would say out loud.
+     *
+     * A receptionist checking in an appointment booked three weeks out was
+     * told "Checked in 27126 min early". Minutes are the right unit for a
+     * queue and the wrong one for anything longer than a couple of hours.
+     */
+    function human_minutes(int $minutes): string
+    {
+        $m = abs($minutes);
+        if ($m < 60) {
+            return $m . ' min';
+        }
+        if ($m < 60 * 24) {
+            $h = intdiv($m, 60);
+            $rest = $m % 60;
+            return $h . ' hr' . ($rest ? ' ' . $rest . ' min' : '');
+        }
+        $d = intdiv($m, 60 * 24);
+        $h = intdiv($m % (60 * 24), 60);
+        return $d . ' day' . ($d === 1 ? '' : 's') . ($h ? ' ' . $h . ' hr' : '');
+    }
+}
+
 if (!function_exists('in_time')) {
     /**
      * How long until a moment in the future, phrased forwards.

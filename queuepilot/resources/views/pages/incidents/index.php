@@ -7,7 +7,12 @@
       post-mortem cannot quietly rewrite itself.
     </p>
   </div>
-  <a class="btn-secondary btn-sm" href="/admin/monitor">Platform health</a>
+  <?php /* Platform health is super-admin only. Offering it to a clinic owner
+           produced a button that 403s — the sidebar already hides this link by
+           role, and the page has to agree with the sidebar. */ ?>
+  <?php if ((current_user()['role'] ?? '') === 'super_admin'): ?>
+    <a class="btn-secondary btn-sm" href="/admin/monitor">Platform health</a>
+  <?php endif; ?>
 </div>
 
 <?php if (!empty($errors)): ?>

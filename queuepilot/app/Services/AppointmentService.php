@@ -331,7 +331,7 @@ final class AppointmentService
         if ($delayMinutes <= -1) {
             return [
                 'status' => 'early', 'minutes' => abs($delayMinutes), 'weight' => 1,
-                'message' => 'Checked in ' . abs($delayMinutes) . ' min early — keeps the booked order.',
+                'message' => 'Checked in ' . human_minutes($delayMinutes) . ' early — keeps the booked order.',
             ];
         }
 
@@ -345,8 +345,8 @@ final class AppointmentService
         return [
             'status' => 'late', 'minutes' => $delayMinutes, 'weight' => 3,
             'message' => sprintf(
-                'Arrived %d min late (grace is %d min) — added as a walk-in, behind patients who arrived on time.',
-                $delayMinutes,
+                'Arrived %s late (grace is %d min) — added as a walk-in, behind patients who arrived on time.',
+                human_minutes($delayMinutes),
                 $grace
             ),
         ];
