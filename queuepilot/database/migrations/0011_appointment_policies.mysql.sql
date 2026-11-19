@@ -22,25 +22,29 @@
 -- =====================================================================
 
 CREATE TABLE IF NOT EXISTS appointment_policies (
-  id                INTEGER PRIMARY KEY AUTO_INCREMENT,
-  clinic_id         INTEGER NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
-  kind              TEXT NOT NULL,
-  doctor_id         INTEGER REFERENCES doctors(id) ON DELETE CASCADE,
-  late_grace_minutes INTEGER,
-  horizon_days      INTEGER,
-  allow_walkins     INTEGER,   -- NULL inherits from the kind row
-  is_active         INTEGER NOT NULL DEFAULT 1,
-  created_at        TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
-  updated_at        TEXT,
+  id                 INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  clinic_id          INT UNSIGNED NOT NULL,
+  kind               VARCHAR(16) NOT NULL,
+  doctor_id          INT UNSIGNED NULL,
+  late_grace_minutes SMALLINT UNSIGNED NULL,
+  horizon_days       SMALLINT UNSIGNED NULL,
+  allow_walkins      TINYINT(1) NULL,   -- NULL inherits from the kind row
+  is_active          TINYINT(1) NOT NULL DEFAULT 1,
+  created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at         DATETIME NULL,
+  -- One policy per doctor per kind, and one kind-wide row per kind. The two
+  -- guards used to be partial unique indexes (`... WHERE doctor_id IS NOT
+  -- NULL`), which MySQL does not have. MySQL treats NULLs as distinct in a
+  -- UNIQUE key, so (clinic_id, kind, doctor_id) already allows any number of
+  -- kind-wide rows — and the second guard is what stops that. The generated
+  -- column collapses "doctor_id is NULL" to a constant so the key can cover it.
+  kindwide_key       TINYINT
+                     GENERATED ALWAYS AS (IF(doctor_id IS NULL, 1, NULL)) STORED,
+  UNIQUE KEY ux_policy_doctor (clinic_id, kind, doctor_id),
+  UNIQUE KEY ux_policy_kindwide (clinic_id, kind, kindwide_key),
   CONSTRAINT ck_policy_kind CHECK (kind IN ('consultation','lab','pharmacy','general')),
   CONSTRAINT ck_policy_grace CHECK (late_grace_minutes IS NULL OR late_grace_minutes BETWEEN 0 AND 240),
-  CONSTRAINT ck_policy_horizon CHECK (horizon_days IS NULL OR horizon_days BETWEEN 1 AND 365)
-);
-
--- One policy per clinic per kind per doctor. A NULL doctor_id is the
--- kind-wide row; SQLite treats NULLs as distinct in a unique index, so the
--- kind-wide row is protected by a partial index instead.
-CREATE UNIQUE INDEX IF NOT EXISTS ux_policy_doctor
-  ON appointment_policies (clinic_id, kind, doctor_id) WHERE doctor_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS ux_policy_kindwide
-  ON appointment_policies (clinic_id, kind) WHERE doctor_id IS NULL;
+  CONSTRAINT ck_policy_horizon CHECK (horizon_days IS NULL OR horizon_days BETWEEN 1 AND 365),
+  CONSTRAINT fk_policy_clinic FOREIGN KEY (clinic_id) REFERENCES clinics (id) ON DELETE CASCADE,
+  CONSTRAINT fk_policy_doctor FOREIGN KEY (doctor_id) REFERENCES doctors (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

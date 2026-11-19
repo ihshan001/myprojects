@@ -8647,8 +8647,10 @@ Assert::test('static files are found for a subdirectory install, and traversal i
     }
 
     // A file that exists but is outside public/ must also be refused, which is the
-    // check that a naive `is_file()` would pass.
-    Assert::true(file_exists(QP_ROOT . '/.env'), 'the environment file exists to be attacked');
+    // check that a naive `is_file()` would pass. Asserted against a source file
+    // rather than .env: a fresh clone has no .env (it is git-ignored), and a test
+    // that needs one is a test that only passes on a developer's machine.
+    Assert::true(file_exists(QP_ROOT . '/app/Core/Db.php'), 'a source file exists to be attacked');
     // A real file *inside* public/ is legitimately reachable even by a `..` path,
     // because realpath() resolves it back inside the root. That is correct: the
     // file is part of the public surface. What must never happen is reaching a file

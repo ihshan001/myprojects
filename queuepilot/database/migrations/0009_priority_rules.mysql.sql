@@ -20,34 +20,40 @@
 -- =====================================================================
 
 CREATE TABLE IF NOT EXISTS priority_rules (
-  id            INTEGER PRIMARY KEY AUTO_INCREMENT,
-  clinic_id     INTEGER NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
-  queue_id      INTEGER REFERENCES queues(id) ON DELETE CASCADE,
-  name          TEXT NOT NULL,
+  id            INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  clinic_id     INT UNSIGNED NOT NULL,
+  queue_id      INT UNSIGNED NULL,
+  name          VARCHAR(120) NOT NULL,
   -- Match conditions. NULL means "any".
-  source        TEXT,            -- appointment | walkin
-  kind          TEXT,            -- consultation | lab | pharmacy | general
-  doctor_id     INTEGER REFERENCES doctors(id) ON DELETE CASCADE,
-  min_age       INTEGER,         -- inclusive
-  max_age       INTEGER,         -- inclusive
-  from_hour     INTEGER,         -- inclusive, 0-23 clinic-local
-  to_hour       INTEGER,         -- exclusive, 1-24
+  source        VARCHAR(16) NULL,          -- appointment | walkin
+  kind          VARCHAR(16) NULL,          -- consultation | lab | pharmacy | general
+  doctor_id     INT UNSIGNED NULL,
+  min_age       SMALLINT UNSIGNED NULL,    -- inclusive
+  max_age       SMALLINT UNSIGNED NULL,    -- inclusive
+  from_hour     TINYINT UNSIGNED NULL,     -- inclusive, 0-23 clinic-local
+  to_hour       TINYINT UNSIGNED NULL,     -- exclusive, 1-24
   -- Effect. `priority` is the value written on the entry.
-  effect        INTEGER NOT NULL DEFAULT 1,
-  reason        TEXT NOT NULL,
-  is_active     INTEGER NOT NULL DEFAULT 1,
-  created_by    INTEGER,
-  created_at    TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+  effect        TINYINT NOT NULL DEFAULT 1,
+  reason        VARCHAR(255) NOT NULL,
+  is_active     TINYINT(1) NOT NULL DEFAULT 1,
+  created_by    INT UNSIGNED NULL,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_rule_clinic_active (clinic_id, is_active),
   CONSTRAINT ck_rule_effect CHECK (effect BETWEEN -5 AND 9 AND effect <> 0),
   CONSTRAINT ck_rule_from CHECK (from_hour IS NULL OR from_hour BETWEEN 0 AND 23),
   CONSTRAINT ck_rule_to CHECK (to_hour IS NULL OR to_hour BETWEEN 1 AND 24),
   CONSTRAINT ck_rule_span CHECK (from_hour IS NULL OR to_hour IS NULL OR from_hour < to_hour),
   CONSTRAINT ck_rule_age CHECK (min_age IS NULL OR max_age IS NULL OR min_age <= max_age),
   CONSTRAINT ck_rule_source CHECK (source IS NULL OR source IN ('appointment','walkin')),
-  CONSTRAINT ck_rule_kind CHECK (kind IS NULL OR kind IN ('consultation','lab','pharmacy','general'))
-);
+  CONSTRAINT ck_rule_kind CHECK (kind IS NULL OR kind IN ('consultation','lab','pharmacy','general')),
+  CONSTRAINT fk_rule_clinic FOREIGN KEY (clinic_id) REFERENCES clinics (id) ON DELETE CASCADE,
+  CONSTRAINT fk_rule_queue FOREIGN KEY (queue_id) REFERENCES queues (id) ON DELETE CASCADE,
+  CONSTRAINT fk_rule_doctor FOREIGN KEY (doctor_id) REFERENCES doctors (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE INDEX IF NOT EXISTS idx_rule_clinic_active ON priority_rules (clinic_id, is_active);
+-- The index is declared on the table above rather than as a separate statement:
+-- MySQL has no `CREATE INDEX IF NOT EXISTS`, and this file is applied by
+-- tools/migrate.php to databases that may already carry the index.
 
 -- What a rule did, on the entry it did it to. A priority the patient did not
 -- ask for and no member of staff typed has to be explainable afterwards, so

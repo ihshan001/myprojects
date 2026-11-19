@@ -378,6 +378,45 @@ def check_idempotence(sql: str, model: Model) -> None:
         # the mechanism that actually exists on a cPanel shared host.
         # Demanding IF NOT EXISTS here would push the codebase towards syntax
         # that MariaDB and older MySQL reject.
+        #
+        # The reverse is a real defect and was shipped eight times: the rule above
+        # was written in this comment but nothing enforced it, and four migrations
+        # used `CREATE INDEX IF NOT EXISTS` anyway. MariaDB accepts it; MySQL
+        # rejects it with a 1064 syntax error in every version through 8.4, so an
+        # import stopped part-way and left a half-built schema. The comment stated
+        # the convention; this check is what makes it true.
+        if re.search(r"CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS", stmt, re.I):
+            model.fail(line, "PORTABILITY",
+                       "CREATE INDEX IF NOT EXISTS is MariaDB-only and a syntax error on MySQL; "
+                       "declare the key on the CREATE TABLE instead")
+
+
+def check_mysql_only_constructs(sql: str, model: Model) -> None:
+    """Constructs that parse as MySQL but do not mean what the file intends.
+
+    These are the leftovers of porting a SQLite schema by hand. Each one either
+    fails at execution or, worse, succeeds while doing something else — which is
+    why they are checked here rather than left to a real server that the
+    development environment does not have.
+    """
+    for line, stmt in split_statements(sql):
+        # SQLite writes `col TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)`. MySQL
+        # rejects a parenthesised literal default on TEXT, and TEXT cannot carry
+        # a DEFAULT at all before 8.0.13.
+        if re.search(r"\bTEXT\b[^,\n]*\bDEFAULT\s*\(", stmt, re.I):
+            model.fail(line, "PORTABILITY",
+                       "TEXT with a parenthesised DEFAULT is SQLite syntax; use DATETIME "
+                       "NOT NULL DEFAULT CURRENT_TIMESTAMP")
+
+        # SQLite writes `col INTEGER NOT NULL REFERENCES other(id)`. MySQL 8 parses
+        # this and silently stores no foreign key, so the column looks constrained
+        # and is not.
+        if re.search(r"^\s*`?\w+`?\s+INTEGER\s+(?:NOT\s+)?NULL\s+REFERENCES", stmt, re.I | re.M) \
+           or re.search(r"ADD\s+COLUMN\s+`?\w+`?\s+INTEGER\s+REFERENCES", stmt, re.I):
+            model.fail(line, "PORTABILITY",
+                       "inline `INTEGER ... REFERENCES` is SQLite syntax; MySQL ignores it and "
+                       "creates no foreign key — use a named CONSTRAINT")
+
 
 
 
@@ -410,6 +449,7 @@ def main() -> int:
         model.apply(line, stmt)
 
     check_idempotence(sql, model)
+    check_mysql_only_constructs(sql, model)
 
     print(f"  CREATE:            {model.creates}")
     print(f"  ALTER:             {model.alters}")

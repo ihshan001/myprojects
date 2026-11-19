@@ -819,34 +819,40 @@ CREATE TABLE IF NOT EXISTS scheduled_breaks (
 -- =====================================================================
 
 CREATE TABLE IF NOT EXISTS priority_rules (
-  id            INTEGER PRIMARY KEY AUTO_INCREMENT,
-  clinic_id     INTEGER NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
-  queue_id      INTEGER REFERENCES queues(id) ON DELETE CASCADE,
-  name          TEXT NOT NULL,
+  id            INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  clinic_id     INT UNSIGNED NOT NULL,
+  queue_id      INT UNSIGNED NULL,
+  name          VARCHAR(120) NOT NULL,
   -- Match conditions. NULL means "any".
-  source        TEXT,            -- appointment | walkin
-  kind          TEXT,            -- consultation | lab | pharmacy | general
-  doctor_id     INTEGER REFERENCES doctors(id) ON DELETE CASCADE,
-  min_age       INTEGER,         -- inclusive
-  max_age       INTEGER,         -- inclusive
-  from_hour     INTEGER,         -- inclusive, 0-23 clinic-local
-  to_hour       INTEGER,         -- exclusive, 1-24
+  source        VARCHAR(16) NULL,          -- appointment | walkin
+  kind          VARCHAR(16) NULL,          -- consultation | lab | pharmacy | general
+  doctor_id     INT UNSIGNED NULL,
+  min_age       SMALLINT UNSIGNED NULL,    -- inclusive
+  max_age       SMALLINT UNSIGNED NULL,    -- inclusive
+  from_hour     TINYINT UNSIGNED NULL,     -- inclusive, 0-23 clinic-local
+  to_hour       TINYINT UNSIGNED NULL,     -- exclusive, 1-24
   -- Effect. `priority` is the value written on the entry.
-  effect        INTEGER NOT NULL DEFAULT 1,
-  reason        TEXT NOT NULL,
-  is_active     INTEGER NOT NULL DEFAULT 1,
-  created_by    INTEGER,
-  created_at    TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+  effect        TINYINT NOT NULL DEFAULT 1,
+  reason        VARCHAR(255) NOT NULL,
+  is_active     TINYINT(1) NOT NULL DEFAULT 1,
+  created_by    INT UNSIGNED NULL,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_rule_clinic_active (clinic_id, is_active),
   CONSTRAINT ck_rule_effect CHECK (effect BETWEEN -5 AND 9 AND effect <> 0),
   CONSTRAINT ck_rule_from CHECK (from_hour IS NULL OR from_hour BETWEEN 0 AND 23),
   CONSTRAINT ck_rule_to CHECK (to_hour IS NULL OR to_hour BETWEEN 1 AND 24),
   CONSTRAINT ck_rule_span CHECK (from_hour IS NULL OR to_hour IS NULL OR from_hour < to_hour),
   CONSTRAINT ck_rule_age CHECK (min_age IS NULL OR max_age IS NULL OR min_age <= max_age),
   CONSTRAINT ck_rule_source CHECK (source IS NULL OR source IN ('appointment','walkin')),
-  CONSTRAINT ck_rule_kind CHECK (kind IS NULL OR kind IN ('consultation','lab','pharmacy','general'))
-);
+  CONSTRAINT ck_rule_kind CHECK (kind IS NULL OR kind IN ('consultation','lab','pharmacy','general')),
+  CONSTRAINT fk_rule_clinic FOREIGN KEY (clinic_id) REFERENCES clinics (id) ON DELETE CASCADE,
+  CONSTRAINT fk_rule_queue FOREIGN KEY (queue_id) REFERENCES queues (id) ON DELETE CASCADE,
+  CONSTRAINT fk_rule_doctor FOREIGN KEY (doctor_id) REFERENCES doctors (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE INDEX IF NOT EXISTS idx_rule_clinic_active ON priority_rules (clinic_id, is_active);
+-- The index is declared on the table above rather than as a separate statement:
+-- MySQL has no `CREATE INDEX IF NOT EXISTS`, and this file is applied by
+-- tools/migrate.php to databases that may already carry the index.
 
 -- What a rule did, on the entry it did it to. A priority the patient did not
 -- ask for and no member of staff typed has to be explainable afterwards, so
@@ -881,31 +887,36 @@ ALTER TABLE queue_entries ADD COLUMN priority_rule_id INTEGER;
 -- =====================================================================
 
 CREATE TABLE IF NOT EXISTS workflow_steps (
-  id           INTEGER PRIMARY KEY AUTO_INCREMENT,
-  clinic_id    INTEGER NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
-  queue_id     INTEGER REFERENCES queues(id) ON DELETE CASCADE,
-  kind         TEXT,
-  name         TEXT NOT NULL,
-  position     INTEGER NOT NULL DEFAULT 1,
-  is_required  INTEGER NOT NULL DEFAULT 1,
-  is_active    INTEGER NOT NULL DEFAULT 1,
-  created_at   TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+  id           INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  clinic_id    INT UNSIGNED NOT NULL,
+  queue_id     INT UNSIGNED NULL,
+  kind         VARCHAR(16) NULL,
+  name         VARCHAR(120) NOT NULL,
+  position     TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  is_required  TINYINT(1) NOT NULL DEFAULT 1,
+  is_active    TINYINT(1) NOT NULL DEFAULT 1,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_wstep_clinic (clinic_id, kind, is_active),
   CONSTRAINT ck_wstep_kind CHECK (kind IS NULL OR kind IN ('consultation','lab','pharmacy','general')),
-  CONSTRAINT ck_wstep_position CHECK (position BETWEEN 1 AND 20)
-);
-CREATE INDEX IF NOT EXISTS idx_wstep_clinic ON workflow_steps (clinic_id, kind, is_active);
+  CONSTRAINT ck_wstep_position CHECK (position BETWEEN 1 AND 20),
+  CONSTRAINT fk_wstep_clinic FOREIGN KEY (clinic_id) REFERENCES clinics (id) ON DELETE CASCADE,
+  CONSTRAINT fk_wstep_queue FOREIGN KEY (queue_id) REFERENCES queues (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Which steps an individual visit has actually passed, and who said so.
 CREATE TABLE IF NOT EXISTS entry_step_done (
-  id          INTEGER PRIMARY KEY AUTO_INCREMENT,
-  clinic_id   INTEGER NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
-  entry_id    INTEGER NOT NULL REFERENCES queue_entries(id) ON DELETE CASCADE,
-  step_id     INTEGER NOT NULL REFERENCES workflow_steps(id) ON DELETE CASCADE,
-  done_by     INTEGER,
-  done_at     TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
-  UNIQUE (entry_id, step_id)
-);
-CREATE INDEX IF NOT EXISTS idx_stepdone_entry ON entry_step_done (entry_id);
+  id          INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  clinic_id   INT UNSIGNED NOT NULL,
+  entry_id    INT UNSIGNED NOT NULL,
+  step_id     INT UNSIGNED NOT NULL,
+  done_by     INT UNSIGNED NULL,
+  done_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY ux_stepdone (entry_id, step_id),
+  KEY idx_stepdone_entry (entry_id),
+  CONSTRAINT fk_stepdone_clinic FOREIGN KEY (clinic_id) REFERENCES clinics (id) ON DELETE CASCADE,
+  CONSTRAINT fk_stepdone_entry FOREIGN KEY (entry_id) REFERENCES queue_entries (id) ON DELETE CASCADE,
+  CONSTRAINT fk_stepdone_step FOREIGN KEY (step_id) REFERENCES workflow_steps (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ==========================================================================
 --  1_0011_appointment_policies.mysql
@@ -935,28 +946,32 @@ CREATE INDEX IF NOT EXISTS idx_stepdone_entry ON entry_step_done (entry_id);
 -- =====================================================================
 
 CREATE TABLE IF NOT EXISTS appointment_policies (
-  id                INTEGER PRIMARY KEY AUTO_INCREMENT,
-  clinic_id         INTEGER NOT NULL REFERENCES clinics(id) ON DELETE CASCADE,
-  kind              TEXT NOT NULL,
-  doctor_id         INTEGER REFERENCES doctors(id) ON DELETE CASCADE,
-  late_grace_minutes INTEGER,
-  horizon_days      INTEGER,
-  allow_walkins     INTEGER,   -- NULL inherits from the kind row
-  is_active         INTEGER NOT NULL DEFAULT 1,
-  created_at        TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
-  updated_at        TEXT,
+  id                 INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  clinic_id          INT UNSIGNED NOT NULL,
+  kind               VARCHAR(16) NOT NULL,
+  doctor_id          INT UNSIGNED NULL,
+  late_grace_minutes SMALLINT UNSIGNED NULL,
+  horizon_days       SMALLINT UNSIGNED NULL,
+  allow_walkins      TINYINT(1) NULL,   -- NULL inherits from the kind row
+  is_active          TINYINT(1) NOT NULL DEFAULT 1,
+  created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at         DATETIME NULL,
+  -- One policy per doctor per kind, and one kind-wide row per kind. The two
+  -- guards used to be partial unique indexes (`... WHERE doctor_id IS NOT
+  -- NULL`), which MySQL does not have. MySQL treats NULLs as distinct in a
+  -- UNIQUE key, so (clinic_id, kind, doctor_id) already allows any number of
+  -- kind-wide rows — and the second guard is what stops that. The generated
+  -- column collapses "doctor_id is NULL" to a constant so the key can cover it.
+  kindwide_key       TINYINT
+                     GENERATED ALWAYS AS (IF(doctor_id IS NULL, 1, NULL)) STORED,
+  UNIQUE KEY ux_policy_doctor (clinic_id, kind, doctor_id),
+  UNIQUE KEY ux_policy_kindwide (clinic_id, kind, kindwide_key),
   CONSTRAINT ck_policy_kind CHECK (kind IN ('consultation','lab','pharmacy','general')),
   CONSTRAINT ck_policy_grace CHECK (late_grace_minutes IS NULL OR late_grace_minutes BETWEEN 0 AND 240),
-  CONSTRAINT ck_policy_horizon CHECK (horizon_days IS NULL OR horizon_days BETWEEN 1 AND 365)
-);
-
--- One policy per clinic per kind per doctor. A NULL doctor_id is the
--- kind-wide row; SQLite treats NULLs as distinct in a unique index, so the
--- kind-wide row is protected by a partial index instead.
-CREATE UNIQUE INDEX IF NOT EXISTS ux_policy_doctor
-  ON appointment_policies (clinic_id, kind, doctor_id) WHERE doctor_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS ux_policy_kindwide
-  ON appointment_policies (clinic_id, kind) WHERE doctor_id IS NULL;
+  CONSTRAINT ck_policy_horizon CHECK (horizon_days IS NULL OR horizon_days BETWEEN 1 AND 365),
+  CONSTRAINT fk_policy_clinic FOREIGN KEY (clinic_id) REFERENCES clinics (id) ON DELETE CASCADE,
+  CONSTRAINT fk_policy_doctor FOREIGN KEY (doctor_id) REFERENCES doctors (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ==========================================================================
 --  1_0012_incidents.mysql
@@ -986,38 +1001,42 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_policy_kindwide
 -- =====================================================================
 
 CREATE TABLE IF NOT EXISTS incidents (
-  id           INTEGER PRIMARY KEY AUTO_INCREMENT,
-  clinic_id    INTEGER REFERENCES clinics(id) ON DELETE CASCADE,  -- NULL = platform-wide
-  reference    TEXT NOT NULL,
-  title        TEXT NOT NULL,
-  severity     TEXT NOT NULL DEFAULT 'minor',
-  status       TEXT NOT NULL DEFAULT 'open',
-  summary      TEXT,
-  detected_at  TEXT NOT NULL,
-  acknowledged_at TEXT,
-  resolved_at  TEXT,
-  created_by   INTEGER,
-  created_at   TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+  id              INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  clinic_id       INT UNSIGNED NULL,   -- NULL = platform-wide
+  reference       VARCHAR(40) NOT NULL,
+  title           VARCHAR(200) NOT NULL,
+  severity        VARCHAR(12) NOT NULL DEFAULT 'minor',
+  status          VARCHAR(12) NOT NULL DEFAULT 'open',
+  summary         TEXT NULL,
+  detected_at     DATETIME NOT NULL,
+  acknowledged_at DATETIME NULL,
+  resolved_at     DATETIME NULL,
+  created_by      INT UNSIGNED NULL,
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY ux_incident_reference (reference),
+  KEY idx_incident_status (status, detected_at),
   CONSTRAINT ck_inc_severity CHECK (severity IN ('minor','major','critical')),
-  CONSTRAINT ck_inc_status CHECK (status IN ('open','mitigated','resolved'))
-);
-CREATE UNIQUE INDEX IF NOT EXISTS ux_incident_reference ON incidents (reference);
-CREATE INDEX IF NOT EXISTS idx_incident_status ON incidents (status, detected_at);
+  CONSTRAINT ck_inc_status CHECK (status IN ('open','mitigated','resolved')),
+  CONSTRAINT fk_incident_clinic FOREIGN KEY (clinic_id) REFERENCES clinics (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS incident_entries (
-  id          INTEGER PRIMARY KEY AUTO_INCREMENT,
-  incident_id INTEGER NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
-  kind        TEXT NOT NULL DEFAULT 'note',
+  id          INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  incident_id INT UNSIGNED NOT NULL,
+  kind        VARCHAR(12) NOT NULL DEFAULT 'note',
   body        TEXT NOT NULL,
-  actor_id    INTEGER,
-  created_at  TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
-  CONSTRAINT ck_inc_kind CHECK (kind IN ('note','action','decision','cause','link'))
-);
-CREATE INDEX IF NOT EXISTS idx_incident_entries ON incident_entries (incident_id, created_at);
+  actor_id    INT UNSIGNED NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_incident_entries (incident_id, created_at),
+  CONSTRAINT ck_inc_kind CHECK (kind IN ('note','action','decision','cause','link')),
+  CONSTRAINT fk_incentry_incident FOREIGN KEY (incident_id) REFERENCES incidents (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Which infrastructure alert belongs to which incident, so the timeline can
--- say what the platform was complaining about at the time.
-ALTER TABLE system_alerts ADD COLUMN incident_id INTEGER REFERENCES incidents(id) ON DELETE SET NULL;
+-- `INTEGER REFERENCES ...` on an ALTERed column is SQLite-only: MySQL stores no
+-- reference from it and silently ignores the clause, which would have left this
+-- column with no foreign key at all while the schema looked correct.
+ALTER TABLE system_alerts ADD COLUMN incident_id INT UNSIGNED NULL,
+    ADD CONSTRAINT fk_alert_incident FOREIGN KEY (incident_id) REFERENCES incidents (id) ON DELETE SET NULL;
 
 -- ==========================================================================
 --  1_0013_branch_grants.mysql

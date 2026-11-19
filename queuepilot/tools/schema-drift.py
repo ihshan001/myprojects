@@ -60,13 +60,25 @@ def columns_by_table(dialect: str, generated: set):
             sql, re.S | re.I):
         name, body = m.group(1).lower(), m.group(2)
         tables.setdefault(name, set())
+        # A generated column can be written across two lines (`col TYPE` then
+        # `GENERATED ALWAYS AS (...)`), and splitting on newlines then reads
+        # "generated" as a column name. Collapse the wrap first.
+        body = re.sub(r'\n\s+(GENERATED\s+ALWAYS)', r' \1', body, flags=re.I)
         for line in body.split('\n'):
             line = line.strip().rstrip(',')
             if not line or CONSTRAINT_CLAUSE.match(line):
                 continue
             col = re.match(r'[`"]?(\w+)[`"]?\s+[A-Za-z]', line)
             if col:
-                tables[name].add(col.group(1).lower())
+                word = col.group(1).lower()
+                tables[name].add(word)
+                # Generated columns are dialect machinery, not missing schema.
+                # This check has to live here as well as in the ALTER path: a
+                # generated column declared inside CREATE TABLE was previously
+                # reported as drift even though the identical column added by
+                # ALTER was correctly ignored.
+                if GENERATED.search(line):
+                    generated.add((name, word))
 
     # SQLite cannot alter a CHECK constraint, so a migration rebuilds the table
     # as `<name>_new` and renames it over the original. The columns therefore
