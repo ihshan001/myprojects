@@ -632,7 +632,7 @@ final class ClinicController
         }
 
         if ($result['delivered']) {
-            flash('success', 'Invitation emailed to ' . $result['email'] . '. It expires ' . ago($result['expires_at']) . ' from now.');
+            flash('success', 'Invitation emailed to ' . $result['email'] . '. The link expires ' . in_time($result['expires_at']) . '.');
         } else {
             // No transport configured: say so, and hand over the link. This is
             // the honest version of "we sent an email".

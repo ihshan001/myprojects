@@ -16,6 +16,8 @@
  * Exits 0 on a pass, 1 on any failure.
  */
 
+import { readFileSync } from 'node:fs';
+
 const BASE = process.env.QP_BASE || 'http://127.0.0.1:8080';
 
 /**
@@ -391,8 +393,27 @@ async function main() {
     const landedOn = res.html || '';
     const { html } = await owner.get('/settings?tab=team');
     check('the invitation is listed as pending', html.includes(`reception-${suffix}@acceptance.test`));
-    const link = landedOn.match(/\/invite\/([A-Za-z0-9_-]{16,})/)
+    let link = landedOn.match(/\/invite\/([A-Za-z0-9_-]{16,})/)
       || html.match(/\/invite\/([A-Za-z0-9_-]{16,})/);
+
+    // Which of the two paths applies depends on the mail transport, not on the
+    // app: with a real transport the link is only ever in the email (the page
+    // shows the pending invitation, never its secret), and with MAIL_TRANSPORT
+    // = log or none the page has to hand it over because nothing was sent.
+    // Read the log before falling back, so the step is not a coin flip on how
+    // the server happens to be configured.
+    if (!link) {
+      // MAIL_TRANSPORT=log counts as delivered, so the page shows only the
+      // pending invitation. The email itself is on disk; read it there rather
+      // than over HTTP, where the log is not (and should not be) served.
+      try {
+        const logText = readFileSync(new URL('../storage/logs/mail.log', import.meta.url), 'utf8');
+        const all = logText.match(/\/invite\/([A-Za-z0-9_-]{16,})/g);
+        if (all && all.length) {
+          link = all[all.length - 1].match(/\/invite\/([A-Za-z0-9_-]{16,})/);
+        }
+      } catch { /* no log transport — fall through to the honest failure */ }
+    }
     inviteLink = link ? link[1] : null;
     check('an invitation link exists', inviteLink !== null);
   }

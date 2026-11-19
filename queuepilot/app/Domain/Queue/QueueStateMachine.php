@@ -69,7 +69,19 @@ final class QueueStateMachine
             self::WAITING, self::CANCELLED,
         ],
         self::COMPLETED => [],
-        self::CANCELLED => [],
+        // Back to waiting, so a cancellation made in error can be undone.
+        //
+        // This was the one dead end a receptionist could not get out of: a
+        // mis-click cancelled the wrong token and the patient had to be
+        // registered again from scratch, losing the visit that already
+        // existed. Cancelling is still a deliberate act — the caller must give
+        // a reason, and the reversal is written to the audit log and the queue
+        // event history, so "who un-cancelled this and why" is answerable.
+        // It is not a route back into `called`: an uncancelled patient rejoins
+        // the line at the end, exactly like a re-queued no-show.
+        self::CANCELLED => [
+            self::WAITING,
+        ],
         self::TRANSFERRED => [
             self::WAITING, // re-queue back into this column
         ],
@@ -127,6 +139,11 @@ final class QueueStateMachine
             // one deliberate action. It is the *only* way the engine calls
             // somebody without a separate press — completing alone never does.
             self::IN_CONSULTATION => ['complete', 'complete_next', 'transfer', 'cancel'],
+            // A cancelled token keeps a `requeue` button so a mis-click can be
+            // undone from the history view instead of re-registering the
+            // patient. Cancelling is still refused from `completed`: the visit
+            // happened, and re-opening it would rewrite a clinical record.
+            self::CANCELLED => ['requeue'],
             self::SKIPPED => ['requeue', 'cancel'],
             self::NO_SHOW => ['requeue', 'cancel'],
             self::TRANSFERRED => ['requeue'],

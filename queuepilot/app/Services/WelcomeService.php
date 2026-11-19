@@ -145,16 +145,50 @@ final class WelcomeService
         // printing an address that 404s.
         $boardUrl = $this->boardUrl($clinic);
 
+        // Say what actually happened. A clinic granted a trial has not been
+        // "approved" in the sense a reader understands — nobody is being billed
+        // yet — and the earlier wording told trial customers they had been.
+        $status = (string) ($clinic['billing_status'] ?? 'active');
+        $opening = $status === 'trial'
+            ? "Your clinic {$clinic['name']} is on a free trial until "
+                . ($clinic['trial_ends_on'] ?? 'the date shown in Billing')
+                . ". Nothing is billed during the trial, and you can start seeing patients now."
+            : "Your clinic {$clinic['name']} is approved and ready.";
+
+        /* Two addresses, but only print the second when it is genuinely a second
+         * one.
+         *
+         * A single-host install (no APP_DOMAIN, which is every XAMPP trial run and
+         * any first deployment before DNS exists) has no per-clinic subdomains to
+         * mint, so siteUrl() and opsUrl() both fall back to APP_URL. Printing
+         * "Your clinic's public page: http://host" and "Staff sign-in: http://host"
+         * as if they were different addresses is at best noise, and the sentence
+         * that follows — keep that one private, it is hard to guess — is then
+         * simply untrue about a URL the reader already knows. Say one address
+         * once, and keep the warning only where it holds.
+         */
+        $hasSeparateOps = $opsUrl !== '' && rtrim($opsUrl, '/') !== rtrim($siteUrl, '/');
+
+        $addresses = $hasSeparateOps
+            ? "  The queue your patients watch — put this on the waiting-room TV\n"
+                . "  or print it on a card:\n    {$boardUrl}\n\n"
+                . ($siteUrl !== $boardUrl ? "  Your clinic's public page:\n    {$siteUrl}\n\n" : '')
+                . "  Staff sign-in and everything you manage:\n    {$opsUrl}\n\n"
+                . "Keep that last address private. It is deliberately hard to guess, so\n"
+                . "it will not be found by somebody trying clinic names — do not publish\n"
+                . "it. The queue link above it is meant to be shared: put it on the TV.\n\n"
+            : "  The queue your patients watch — put this on the waiting-room TV\n"
+                . "  or print it on a card:\n    {$boardUrl}\n\n"
+                . "  Staff sign-in and everything you manage:\n    {$opsUrl}\n\n"
+                . "Both are on this one address, because your clinic has no separate\n"
+                . "subdomain yet. The queue link above is the one to share; staff sign\n"
+                . "in at the address you already know and land on the dashboard. When\n"
+                . "your own address is set up, we will send it to you.\n\n";
+
         $body = "Hello {$name},\n\n"
-            . "Your clinic {$clinic['name']} has been approved and is ready.\n\n"
+            . $opening . "\n\n"
             . "Two addresses, and they do different jobs:\n\n"
-            . "  The queue your patients watch — put this on the waiting-room TV\n"
-            . "  or print it on a card:\n    {$boardUrl}\n\n"
-            . ($siteUrl !== $boardUrl ? "  Your clinic's public page:\n    {$siteUrl}\n\n" : '')
-            . "  Staff sign-in and everything you manage:\n    {$opsUrl}\n\n"
-            . "Keep that last address private. It is deliberately hard to guess, so\n"
-            . "it will not be found by somebody trying clinic names — do not publish\n"
-            . "it. The queue link above it is meant to be shared: put it on the TV.\n\n"
+            . $addresses
             . "Set your password here, and you are ready to see your first patient:\n\n"
             . "  {$link}\n\n"
             . "That link works once and expires in " . self::LINK_TTL_DAYS . " days. If it\n"

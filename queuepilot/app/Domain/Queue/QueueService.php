@@ -334,16 +334,40 @@ final class QueueService
                 // someone already in consultation must always be able to finish.
                 // `complete_next` also calls, so it is gated with the others.
                 if (in_array($action, ['call', 'start', 'complete_next'], true)) {
-                    $sessionStarted = Db::scalar(
-                        'SELECT started_at FROM queues WHERE id = ? AND clinic_id = ?',
+                    $queueState = Db::one(
+                        'SELECT started_at, status, break_started_at FROM queues WHERE id = ? AND clinic_id = ?',
                         [(int) $entry['queue_id'], $clinicId]
                     );
-                    if ($sessionStarted === null) {
+                    if (($queueState['started_at'] ?? null) === null) {
                         return [
                             'ok' => false,
                             'status' => (string) $entry['status'],
                             'message' => 'That session has not been started yet. '
                                 . 'Press "Start session" when the doctor is ready — patients are still queued.',
+                        ];
+                    }
+
+                    /* A paused queue must not call the next patient.
+                     *
+                     * Pausing already stopped new tokens being issued, so a
+                     * doctor stepping out does not come back to a longer line.
+                     * It did not stop the doctor calling somebody in, which is
+                     * the other half of the same promise: a patient called while
+                     * the doctor is away walks to a closed door and is then
+                     * marked absent for not being there. Ending a break is one
+                     * click, and the message says so.
+                     *
+                     * `start` is gated too — it means "the patient has entered
+                     * the room" — but `complete` deliberately is not: somebody
+                     * mid-consultation when the break starts must still be able
+                     * to finish.
+                     */
+                    if (($queueState['status'] ?? '') === 'paused' || !empty($queueState['break_started_at'])) {
+                        return [
+                            'ok' => false,
+                            'status' => (string) $entry['status'],
+                            'message' => 'This queue is paused. End the break before calling the next patient '
+                                . '— nobody should be called to a room with no doctor in it.',
                         ];
                     }
                 }

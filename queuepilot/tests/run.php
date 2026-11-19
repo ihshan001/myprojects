@@ -115,10 +115,28 @@ Assert::test('the happy path is legal', function (): void {
     Assert::true(QueueStateMachine::can(QueueStateMachine::IN_CONSULTATION, QueueStateMachine::COMPLETED));
 });
 
-Assert::test('completed and cancelled are terminal', function (): void {
+Assert::test('completed is terminal, and a cancelled visit can only rejoin the line', function (): void {
+    // Completed stays a dead end: the visit happened, and reopening it would
+    // rewrite a clinical record. Cancelled is different — a mis-click has to be
+    // recoverable, or the patient is registered a second time and the first
+    // visit is orphaned. The one way back is to the waiting list; a cancelled
+    // entry must never be able to jump the queue by becoming callable.
     foreach (QueueStateMachine::ACTIVE_STATUSES as $target) {
         Assert::false(QueueStateMachine::can(QueueStateMachine::COMPLETED, $target), "completed → {$target}");
-        Assert::false(QueueStateMachine::can(QueueStateMachine::CANCELLED, $target), "cancelled → {$target}");
+    }
+    Assert::true(
+        QueueStateMachine::can(QueueStateMachine::CANCELLED, QueueStateMachine::WAITING),
+        'cancelled → waiting, so a cancellation made in error can be undone'
+    );
+    foreach ([
+        QueueStateMachine::CALLED,
+        QueueStateMachine::IN_CONSULTATION,
+        QueueStateMachine::ON_HOLD,
+    ] as $target) {
+        Assert::false(
+            QueueStateMachine::can(QueueStateMachine::CANCELLED, $target),
+            "cancelled → {$target} must stay refused: an undone cancellation rejoins the line, it does not skip it"
+        );
     }
 });
 
@@ -8679,6 +8697,114 @@ Assert::test('static files are found for a subdirectory install, and traversal i
     Assert::same('no-cache', $sw['Cache-Control'], 'the service worker is never cached, so a fix ships');
 });
 
+
+/**
+ * Creates a throwaway patient in the first clinic, so a test can put an entry
+ * into a queue without touching real seed data. A queue allows only one live
+ * entry per patient, hence a fresh patient each time rather than a shared one.
+ */
+$freshPatient = function (int $clinicId, string $label): int {
+    Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, gender, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?)',
+        [$clinicId, 'T' . random_int(100000, 999999), $label,
+         '0770' . random_int(1000000, 9999999), 'male', Db::now(), Db::now()]
+    );
+    return (int) Db::scalar('SELECT id FROM patients WHERE clinic_id = ? ORDER BY id DESC LIMIT 1', [$clinicId]);
+};
+
+Assert::test('a paused queue does not call the next patient', function () use ($freshPatient): void {
+    // Scenario 13: a doctor takes a break and must not be able to call anyone
+    // in. Issuing was already blocked by the pause, so the queue grew no
+    // longer — but calling still worked, which meant a patient was summoned to
+    // a room with no doctor in it, and was then marked absent for not being
+    // there. Both halves of the promise have to hold.
+    $clinicId = (int) Db::scalar('SELECT id FROM clinics ORDER BY id LIMIT 1');
+    $queueId  = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = ? ORDER BY id LIMIT 1', [$clinicId]);
+    Assert::true($clinicId > 0 && $queueId > 0, 'a clinic and queue exist to test with');
+
+    // A started session, so the pause is the only thing under test.
+    Db::run('UPDATE queues SET started_at = ?, status = ? WHERE id = ?', [Db::now(), 'open', $queueId]);
+
+    $makeEntry = function (string $status, ?string $startedAt, int $tokenNo) use ($clinicId, $queueId, $freshPatient): int {
+        $patientId = $freshPatient($clinicId, 'Pause Probe ' . $tokenNo);
+        return (int) Db::insert(
+            'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status,
+                                        priority, sort_weight, joined_at, started_at, track_token, version)
+             VALUES (?,?,?,?,?,?,0,0,?,?,?,0)',
+            [$clinicId, $queueId, $patientId, $tokenNo, 'P' . $tokenNo, $status,
+             Db::now(), $startedAt, bin2hex(random_bytes(16))]
+        );
+    };
+
+    $entryId = $makeEntry('waiting', null, 9101);
+    $service = new \App\Domain\Queue\QueueService();
+
+    // Calling works while the queue is open…
+    $open = $service->apply($clinicId, $entryId, 'call', []);
+    Assert::true($open['ok'], 'a call succeeds while the queue is open');
+
+    // …and is refused the moment it is paused.
+    Db::run("UPDATE queues SET status = 'paused', break_started_at = ?, break_kind = ? WHERE id = ?",
+        [Db::now(), 'lunch', $queueId]);
+    Db::run("UPDATE queue_entries SET status = 'waiting', called_at = NULL, version = version + 1 WHERE id = ?", [$entryId]);
+
+    $paused = $service->apply($clinicId, $entryId, 'call', []);
+    Assert::false($paused['ok'], 'a call is refused while the queue is paused');
+    $msg = mb_strtolower((string) ($paused['message'] ?? ''));
+    Assert::contains('paused', $msg, 'and says why');
+    Assert::contains('break', $msg, 'and what to do about it');
+
+    // Finishing a consultation that was already under way must still work —
+    // a break is not a reason to strand a patient in the room.
+    $inRoomId = $makeEntry('in_consultation', Db::now(), 9102);
+    $finish = $service->apply($clinicId, $inRoomId, 'complete', []);
+    Assert::true($finish['ok'], 'a consultation already in progress can still be completed during a break');
+
+    // Put the queue back, so the rest of the suite is unaffected.
+    Db::run("UPDATE queues SET status = 'open', break_started_at = NULL, break_kind = NULL WHERE id = ?", [$queueId]);
+    Db::run('DELETE FROM queue_entries WHERE id IN (?, ?)', [$entryId, $inRoomId]);
+});
+
+Assert::test('a cancellation made in error can be undone, and is recorded', function () use ($freshPatient): void {
+    // Scenario 17: a receptionist cancels the wrong token. Before this, the
+    // only recovery was to register the patient again, which lost the visit
+    // that already existed and left the cancelled one orphaned.
+    $clinicId = (int) Db::scalar('SELECT id FROM clinics ORDER BY id LIMIT 1');
+    $queueId  = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = ? ORDER BY id LIMIT 1', [$clinicId]);
+    Assert::true($clinicId > 0 && $queueId > 0, 'a clinic and queue exist to test with');
+
+    Db::run('UPDATE queues SET started_at = ?, status = ? WHERE id = ?', [Db::now(), 'open', $queueId]);
+
+    $patientId = $freshPatient($clinicId, 'Undo Probe');
+    $entryId = (int) Db::insert(
+        'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status,
+                                    priority, sort_weight, joined_at, track_token, version)
+         VALUES (?,?,?,?,?,?,0,0,?,?,0)',
+        [$clinicId, $queueId, $patientId, 9103, 'P9103', 'waiting', Db::now(), bin2hex(random_bytes(16))]
+    );
+
+    $service = new \App\Domain\Queue\QueueService();
+    $cancel = $service->apply($clinicId, $entryId, 'cancel', ['reason' => 'wrong patient clicked']);
+    Assert::true($cancel['ok'], 'the wrong token can be cancelled');
+
+    $undo = $service->apply($clinicId, $entryId, 'requeue', []);
+    Assert::true($undo['ok'], 'and the cancellation can be undone');
+    Assert::same('waiting', (string) Db::scalar('SELECT status FROM queue_entries WHERE id = ?', [$entryId]),
+        'the patient is back in the waiting list');
+
+    // The reversal has to be answerable: who undid it, and what it came back from.
+    $event = Db::one(
+        "SELECT from_status, to_status, actor_id FROM queue_events
+          WHERE entry_id = ? AND action LIKE '%requeue' ORDER BY id DESC LIMIT 1",
+        [$entryId]
+    );
+    Assert::true($event !== null, 'the reversal is written to the queue event history');
+    Assert::same('cancelled', (string) ($event['from_status'] ?? ''), 'and records what it came back from');
+    Assert::same('waiting', (string) ($event['to_status'] ?? ''), 'and where it went');
+
+    Db::run('DELETE FROM queue_entries WHERE id = ?', [$entryId]);
+});
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

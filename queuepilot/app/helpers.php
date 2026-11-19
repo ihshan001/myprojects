@@ -232,6 +232,30 @@ if (!function_exists('ago')) {
     }
 }
 
+if (!function_exists('in_time')) {
+    /**
+     * How long until a moment in the future, phrased forwards.
+     *
+     * `ago()` counts backwards — it is right for "created 5 min ago" and wrong
+     * for an invitation that expires next week, which came out as "expires just
+     * now from now". Kept separate rather than bolting a direction onto `ago()`
+     * so every existing caller keeps its past-tense meaning.
+     */
+    function in_time(?string $dt): string
+    {
+        if (!$dt) return '—';
+        $then = strtotime($dt);
+        if ($then === false) return '—';
+        $m = (int) round(($then - time()) / 60);
+        if ($m <= 0) return 'already passed';
+        if ($m < 60) return 'in ' . $m . ' min';
+        $h = intdiv($m, 60);
+        if ($h < 24) return 'in ' . $h . ' hr' . ($m % 60 ? ' ' . ($m % 60) . ' min' : '');
+        $d = intdiv($h, 24);
+        return 'in ' . $d . ' day' . ($d === 1 ? '' : 's');
+    }
+}
+
 if (!function_exists('old')) {
     function old(string $key, string $default = ''): string
     {
