@@ -117,11 +117,7 @@ final class PasswordResetService
         // A reset means the old password may be in someone else's hands.
         // Session records are file-based per session id, so the durable signal
         // that forces re-authentication is a marker the Auth layer checks.
-        Db::run(
-            'INSERT INTO settings (scope, owner_id, key_name, value) VALUES (?,?,?,?)
-             ON CONFLICT (scope, owner_id, key_name) DO UPDATE SET value = excluded.value',
-            ['user', (int) $row['user_id'], 'sessions_valid_after', Db::now()]
-        );
+        Settings::put('user', (int) $row['user_id'], 'sessions_valid_after', Db::now());
 
         (new AuditService())->log(null, 'auth.password_reset', 'user', (int) $row['user_id'], ['ip' => $this->ip()]);
         Log::warn('auth.password_reset', ['user' => (int) $row['user_id']]);

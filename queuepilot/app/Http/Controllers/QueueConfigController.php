@@ -226,10 +226,6 @@ final class QueueConfigController
 
     private function put(int $clinicId, string $key, string $value): void
     {
-        Db::run(
-            "INSERT INTO settings (scope, owner_id, key_name, value) VALUES ('clinic', ?, ?, ?)
-             ON CONFLICT (scope, owner_id, key_name) DO UPDATE SET value = excluded.value",
-            [$clinicId, $key, $value]
-        );
+        \App\Services\Settings::putClinic($clinicId, $key, $value);
     }
 }

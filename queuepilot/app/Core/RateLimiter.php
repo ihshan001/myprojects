@@ -37,6 +37,8 @@ final class RateLimiter
 
         // Atomic upsert. Both drivers support this form; the duplicate branch
         // increments in place so two racing requests cannot both read 0.
+        // @dialect-check: dual-dialect-guarded — the two engines need different
+        // upsert syntax, so the branch below is the guard.
         $driver = Env::get('db.driver');
         if ($driver === 'mysql') {
             Db::run(

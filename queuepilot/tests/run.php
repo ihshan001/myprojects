@@ -14,6 +14,7 @@ use App\Core\Csrf;
 use App\Core\Db;
 use App\Domain\Queue\InvalidTransition;
 use App\Domain\Queue\QueueStateMachine;
+use App\Services\Settings;
 use Tests\Assert;
 use Tests\Database;
 
@@ -8829,6 +8830,73 @@ Assert::test('arrival messages use a unit a person would say', function (): void
     Assert::same('late', $late['status']);
     Assert::contains('2 hr 30 min', $late['message']);
     Assert::same(3, $late['weight'], 'a late arrival still joins behind the people who came on time');
+});
+
+
+Assert::test('a setting can be written twice without duplicating', function (): void {
+    // Four call sites wrote settings with SQLite's `ON CONFLICT (..) DO UPDATE`,
+    // which MySQL rejects outright — so on the clinic's host, saving opening
+    // hours, a department display key, queue settings and slot settings would
+    // each have thrown SQLSTATE[42000]. The suite runs SQLite and could not see
+    // it. Everything now goes through App\Services\Settings, which picks the
+    // dialect, and this pins the behaviour of that class on the engine the test
+    // suite can actually run.
+    $key = 'test.upsert.' . bin2hex(random_bytes(4));
+
+    Settings::putClinic(1, $key, 'first');
+    Assert::same('first', Settings::getClinic(1, $key), 'a new setting reads back');
+
+    Settings::putClinic(1, $key, 'second');
+    Assert::same('second', Settings::getClinic(1, $key), 'writing again replaces the value');
+    Assert::same(1, (int) Db::scalar(
+        'SELECT COUNT(*) FROM settings WHERE scope = ? AND owner_id = ? AND key_name = ?',
+        ['clinic', 1, $key]
+    ), 'and leaves exactly one row — not a second one that a SELECT might return instead');
+
+    // owner_id NULL is the platform-wide form. NULL is never equal to NULL in a
+    // unique index, so an upsert silently inserts a duplicate here; the class
+    // takes an explicit read-then-write path for this case.
+    $pkey = 'test.platform.' . bin2hex(random_bytes(4));
+    Settings::put('platform', null, $pkey, 'x');
+    Settings::put('platform', null, $pkey, 'y');
+    Assert::same('y', Settings::get('platform', null, $pkey), 'a platform setting updates in place');
+    Assert::same(1, (int) Db::scalar(
+        'SELECT COUNT(*) FROM settings WHERE scope = ? AND owner_id IS NULL AND key_name = ?',
+        ['platform', $pkey]
+    ), 'and does not duplicate, even though NULL never matches a unique key');
+
+    Settings::forget('clinic', 1, $key);
+    Assert::true(Settings::getClinic(1, $key) === null, 'forget removes it');
+    Db::run('DELETE FROM settings WHERE key_name = ?', [$pkey]);
+});
+
+Assert::test('no application code writes an upsert MySQL cannot parse', function (): void {
+    // Enforced rather than trusted: tools/dialect-check.php scans app/ for
+    // SQLite-only SQL. It has a rule for ON CONFLICT specifically because that
+    // was the bug. This asserts the scan is wired into the suite, so the rule
+    // cannot be quietly dropped.
+    $tool = QP_ROOT . '/tools/dialect-check.php';
+    Assert::true(is_file($tool), 'the dialect checker exists');
+
+    $source = (string) file_get_contents($tool);
+    Assert::contains('ON CONFLICT', $source,
+        'and it still checks for ON CONFLICT, not just the constructs it knew before');
+
+    foreach (glob(QP_ROOT . '/app/*/*.php') ?: [] as $file) {
+        $raw = (string) file_get_contents($file);
+        // Prose legitimately names the construct it is avoiding ("SQLite wants
+        // ON CONFLICT, MySQL wants ON DUPLICATE KEY"), so scan code only. The
+        // checker strips comments the same way for the same reason.
+        $code = preg_replace('#/\*.*?\*/#s', '', $raw) ?? $raw;
+        $code = preg_replace('#(^|\s)//[^\n]*#', ' ', $code) ?? $code;
+        if (!str_contains($code, 'ON CONFLICT')) {
+            continue;
+        }
+        // The marker lives in a comment, so it has to be read from the raw
+        // source — the same order the checker uses.
+        Assert::contains('dual-dialect-guarded', $raw,
+            basename($file) . ': uses ON CONFLICT, so it must pick the dialect and say so');
+    }
 });
 
 

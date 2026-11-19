@@ -229,11 +229,7 @@ final class SlotService
                 );
                 continue;
             }
-            Db::run(
-                "INSERT INTO settings (scope, owner_id, key_name, value) VALUES ('clinic', ?, ?, ?)
-                 ON CONFLICT (scope, owner_id, key_name) DO UPDATE SET value = excluded.value",
-                [$clinicId, 'hours.' . $dow, (string) $spec]
-            );
+            Settings::putClinic($clinicId, 'hours.' . $dow, (string) $spec);
         }
     }
 

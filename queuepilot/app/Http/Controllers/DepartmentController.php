@@ -180,11 +180,7 @@ final class DepartmentController
         $keyName = 'display.department.' . (int) $id;
         $token = \App\Core\Str::urlToken(20);
 
-        Db::run(
-            "INSERT INTO settings (scope, owner_id, key_name, value) VALUES ('clinic', ?, ?, ?)
-             ON CONFLICT (scope, owner_id, key_name) DO UPDATE SET value = excluded.value",
-            [$clinicId, $keyName, $token]
-        );
+        \App\Services\Settings::putClinic($clinicId, $keyName, $token);
 
         (new \App\Services\AuditService())->log($clinicId, 'department.display_key_issued', 'department', (int) $id);
         \App\Core\Session::flash('department_display_key', [

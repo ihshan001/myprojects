@@ -61,6 +61,15 @@ $sqliteOnly = [
     '/\bGLOB\s+[\w\.\*\?\[]/i' => 'GLOB is a SQLite-only operator',
     '/\bstrftime\s*\(/i' => 'strftime() is SQLite-only',
     '/\bIFNULL\s*\(/i' => 'IFNULL works in both, but prefer COALESCE',
+    // `INSERT ... ON CONFLICT (...) DO UPDATE` is SQLite's upsert. MySQL does
+    // not have it — it is a syntax error there, not a silent no-op — and
+    // sqlglot, the parser behind sql-validate.py, accepts it under the MySQL
+    // dialect anyway. That leniency is why nothing caught it: five call sites
+    // wrote settings this way, so saving opening hours, generating a department
+    // display key, saving queue settings, saving slot settings and completing a
+    // password reset would each have thrown SQLSTATE[42000] on the host.
+    // Route these through App\Services\Settings, which picks the dialect.
+    '/\bON\s+CONFLICT\s*\(/i' => 'ON CONFLICT is SQLite upsert syntax; MySQL needs ON DUPLICATE KEY UPDATE (see App\\Services\\Settings)',
 ];
 
 $mysqlOnly = [

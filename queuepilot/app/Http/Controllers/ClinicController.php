@@ -271,11 +271,7 @@ final class ClinicController
         (new \App\Services\SlotService())->saveHours($clinicId, $week);
 
         $horizon = max(1, min(180, Request::int('horizon_days', 30)));
-        Db::run(
-            "INSERT INTO settings (scope, owner_id, key_name, value) VALUES ('clinic', ?, 'booking.horizon_days', ?)
-             ON CONFLICT (scope, owner_id, key_name) DO UPDATE SET value = excluded.value",
-            [$clinicId, (string) $horizon]
-        );
+        \App\Services\Settings::putClinic($clinicId, 'booking.horizon_days', (string) $horizon);
 
         (new AuditService())->log($clinicId, 'clinic.hours_updated', 'clinic', $clinicId, ['week' => $week]);
         flash('success', 'Opening hours saved. The booking page now uses them.');
