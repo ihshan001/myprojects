@@ -276,6 +276,13 @@ Both end the same way: `/login` answers, and you have an account that can approv
 a clinic. The guide's migration list is checked against the files on disk by a
 test — a configuration document nobody compiles is where a missing file hides.
 
+**`docs/XAMPP-QUICKSTART.md`** is the same local install condensed into the order
+it is actually performed: drop the folder in `htdocs`, import `install.sql` in
+phpMyAdmin, write `.env`, create an admin, verify four URLs. It exists because the
+two failures that account for most broken installs — `APP_URL` without the
+subfolder path, and `AllowOverride None` letting `/.env` download — each deserve a
+heading of their own rather than a footnote three sections down.
+
 ## When things go wrong
 
 Two operational documents, written to be followed under pressure rather than
