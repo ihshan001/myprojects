@@ -1,7 +1,7 @@
 -- Subscriptions and payments as first-class records.
 -- See 0020_subscription_payments.sqlite.sql for why each needs its own table.
 
-CREATE TABLE payments (
+CREATE TABLE IF NOT EXISTS payments (
     id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     clinic_id     BIGINT UNSIGNED NOT NULL,
     invoice_id    BIGINT UNSIGNED NOT NULL,
@@ -22,7 +22,7 @@ CREATE TABLE payments (
     INDEX ix_payment_invoice (invoice_id, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE subscriptions (
+CREATE TABLE IF NOT EXISTS subscriptions (
     id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     clinic_id     BIGINT UNSIGNED NOT NULL,
     plan_id       BIGINT UNSIGNED NULL,

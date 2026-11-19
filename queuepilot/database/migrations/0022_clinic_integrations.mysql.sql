@@ -19,7 +19,7 @@
 -- already configured does not mean retyping its settings.
 -- =====================================================================
 
-CREATE TABLE integrations (
+CREATE TABLE IF NOT EXISTS integrations (
     id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     clinic_id    BIGINT UNSIGNED NOT NULL,
     -- Stable machine name from the catalog in IntegrationService, not a

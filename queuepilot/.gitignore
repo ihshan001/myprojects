@@ -24,3 +24,7 @@ node_modules
 # Never let a session or cache file inside the web root be committed.
 # /storage/sessions/sess_<id> answered 200 over HTTP once; see Session.php.
 public/storage/
+
+# Python bytecode from tools/sql-validate.py
+__pycache__/
+*.pyc

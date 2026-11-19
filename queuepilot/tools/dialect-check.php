@@ -82,6 +82,28 @@ function scan(string $path, array $rules, string $dialect): array
 $entries = glob($dir . '/*.sql') ?: [];
 sort($entries);
 
+// The base schema pair is checked too. It was not, and that is where the
+// largest block of SQL lives: database/schema/{sqlite,mysql}.sql creates the
+// first sixteen tables, and a SQLite-ism there breaks every install rather
+// than one upgrade.
+foreach (['sqlite', 'mysql'] as $dialect) {
+    $schemaPath = dirname(__DIR__) . '/database/schema/' . $dialect . '.sql';
+    if (!is_file($schemaPath)) {
+        $problems[] = "database/schema/{$dialect}.sql is missing";
+        continue;
+    }
+    $files++;
+    if ($verbose) {
+        echo "  checking database/schema/{$dialect}.sql\n";
+    }
+    $hits = $dialect === 'mysql'
+        ? scan($schemaPath, $sqliteOnly, 'mysql')
+        : scan($schemaPath, $mysqlOnly, 'sqlite');
+    foreach ($hits as $why) {
+        $problems[] = "schema/{$dialect}.sql: " . $why;
+    }
+}
+
 $byName = [];
 foreach ($entries as $path) {
     $base = basename($path);
@@ -112,7 +134,7 @@ foreach ($byName as $name => $pair) {
     }
 }
 
-echo "Dialect check — {$files} migration files, " . count($byName) . " migrations\n";
+echo "Dialect check — {$files} SQL files (" . count($byName) . " migration pairs + the schema pair)\n";
 echo str_repeat('-', 60) . "\n";
 
 if ($problems === []) {

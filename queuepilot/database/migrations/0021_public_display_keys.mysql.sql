@@ -1,7 +1,7 @@
 -- Public display keys. See 0021_public_display_keys.sqlite.sql for why one
 -- shared, unnamed, in-place-rotated key is not enough.
 
-CREATE TABLE public_display_keys (
+CREATE TABLE IF NOT EXISTS public_display_keys (
     id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     clinic_id     BIGINT UNSIGNED NOT NULL,
     department_id BIGINT UNSIGNED NULL,

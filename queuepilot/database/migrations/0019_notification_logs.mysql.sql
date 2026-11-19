@@ -2,7 +2,7 @@
 -- See 0019_notification_logs.sqlite.sql for why this is a separate,
 -- append-only table rather than more columns on `notifications`.
 
-CREATE TABLE notification_logs (
+CREATE TABLE IF NOT EXISTS notification_logs (
     id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
     clinic_id       BIGINT UNSIGNED NOT NULL,
     notification_id BIGINT UNSIGNED NOT NULL,

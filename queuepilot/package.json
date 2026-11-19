@@ -18,15 +18,17 @@
     "build": "npm run css && node tools/php.mjs tools/healthcheck.php",
     "health": "node tools/php.mjs tools/healthcheck.php",
     "test:host": "node tools/php.mjs tools/host-drill.php",
+    "test:sql": "python3 tools/sql-validate.py database/install.sql",
     "test:dialect": "node tools/php.mjs tools/dialect-check.php",
-    "test:all": "npm run lint && npm test && npm run test:acceptance && npm run test:browser && npm run test:tools && npm run security && npm run health && npm run test:dialect && npm run test:host",
+    "test:all": "npm run lint && npm test && npm run test:acceptance && npm run test:browser && npm run test:tools && npm run security && npm run health && npm run test:dialect && npm run test:sql && npm run test:host",
     "lint": "node tools/lint.mjs",
     "icons": "node tools/gen-icons.mjs",
     "worker:loop": "node tools/php.mjs tools/queue-worker.php --loop 30",
     "security": "node tools/security-check.mjs",
     "security:strict": "node tools/security-check.mjs --strict",
     "test:browser": "node tools/jsdom-check.mjs",
-    "loadtest": "node tools/php.mjs tools/loadtest.php"
+    "loadtest": "node tools/php.mjs tools/loadtest.php",
+    "sql:build": "node tools/php.mjs tools/build-install-sql.php"
   },
   "devDependencies": {
     "qrcode-generator": "^1.4.4",

@@ -264,69 +264,70 @@ only the schema file — it creates 16 tables and the rest come from migrations
 
 ### If you have no SSH (phpMyAdmin only)
 
-You can import the SQL by hand, in order. It is tedious but works.
+Use the consolidated file. **One import, not thirty-one.**
 
-1. cPanel → **phpMyAdmin** → select your database → **Import**.
-2. Import `database/schema/mysql.sql`.
-3. Then import every `database/migrations/*.mysql.sql` **one file at a time, in
-   filename order** (`0003_…`, `0004_…`, `0005b_…`, `0006_…`, …).
-4. Finally run this SQL so the migration runner knows what you did — otherwise
-   `tools/migrate.php` will try to re-apply everything on the next deploy:
+1. cPanel → **phpMyAdmin** → select your database.
+2. **Import** tab → **Choose File** → `database/install.sql` → **Go**.
+3. Wait for "Import has been successfully finished". It runs 149 statements
+   (155 counting the session settings at the top and bottom).
 
-```sql
-CREATE TABLE IF NOT EXISTS schema_migrations (
-  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
-  migration VARCHAR(191) NOT NULL UNIQUE,
-  applied_at DATETIME NOT NULL,
-  PRIMARY KEY (id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-```
+`database/install.sql` is generated to do exactly what `php tools/migrate.php`
+does, in the same order:
 
-Then insert one row per file you imported. The runner's naming is
-`0000_schema` for the base file and `1_<filename-without-.sql>` for each migration:
+| Step | Statements | Tables created |
+|---|---|---|
+| Base schema | 29 | 16 |
+| All 30 migrations (tables, indexes, `ALTER`s) | 117 | 35 |
+| The four subscription plans (one multi-row insert) | 1 | — |
+| `schema_migrations` table + its 31 rows | 2 | 1 |
 
-```sql
-INSERT INTO schema_migrations (migration, applied_at) VALUES
-  ('0000_schema', NOW()),
-  ('1_0001_queue_integrity.mysql', NOW()),
-  ('1_0002_delays_and_online_booking.mysql', NOW()),
-  ('1_0003_operational_depth.mysql', NOW()),
-  ('1_0004_password_resets.mysql', NOW()),
-  ('1_0005_structure.mysql', NOW()),
-  ('1_0005b_invoice_verification.mysql', NOW()),
-  ('1_0006_email_verification.mysql', NOW()),
-  ('1_0006_feature_gate.mysql', NOW()),
-  ('1_0007_invoice_periods.mysql', NOW()),
-  ('1_0008_breaks.mysql', NOW()),
-  ('1_0009_priority_rules.mysql', NOW()),
-  ('1_0010_service_workflows.mysql', NOW()),
-  ('1_0011_appointment_policies.mysql', NOW()),
-  ('1_0012_incidents.mysql', NOW()),
-  ('1_0013_branch_grants.mysql', NOW()),
-  ('1_0014_visit_feedback.mysql', NOW()),
-  ('1_0015_session_start.mysql', NOW()),
-  ('1_0016_clinic_templates.mysql', NOW()),
-  ('1_0017_offline_writes.mysql', NOW()),
-  ('1_0018_doctor_queue_prefix.mysql', NOW()),
-  ('1_0019_notification_logs.mysql', NOW()),
-  ('1_0020_subscription_payments.mysql', NOW()),
-  ('1_0021_public_display_keys.mysql', NOW()),
-  ('1_0022_clinic_integrations.mysql', NOW()),
-  ('1_0023_priority_rule_order_vitals.mysql', NOW()),
-  ('1_0024_clinic_approval.mysql', NOW()),
-  ('1_0025_tenant_hosts.mysql', NOW()),
-  ('1_0026_welcome_and_closure.mysql', NOW()),
-  ('1_0027_billing_identity.mysql', NOW()),
-  ('1_0028_platform_notifications.mysql', NOW());
-```
+It creates **52 tables**, seeds the four plans, and creates **no clinic, no
+patient and no user** — an install with demo data in it is not a production
+install.
 
-Check the count matches what you actually imported:
+**Verify, in phpMyAdmin → SQL:**
 
 ```sql
-SELECT COUNT(*) FROM schema_migrations;   -- 31: the base schema plus 30 migrations
 SELECT COUNT(*) FROM information_schema.tables
- WHERE table_schema = DATABASE();          -- should be 52
+ WHERE table_schema = DATABASE();   -- expect 52
+SELECT COUNT(*) FROM plans;              -- expect 4
+SELECT COUNT(*) FROM schema_migrations;  -- expect 31
 ```
+
+The `schema_migrations` rows matter: without them `tools/migrate.php` re-applies
+every migration on your next deploy and dies on the first duplicate column.
+
+> **Re-running it is safe but pointless.** Every `CREATE TABLE` is
+> `IF NOT EXISTS` and the plan insert is `INSERT … ON DUPLICATE KEY UPDATE`, but
+> the `ALTER TABLE` statements will abort on a database that already has the
+> columns — which is the correct outcome, because it stops rather than
+> half-applying.
+
+### Keeping install.sql honest
+
+It is generated, never hand-edited. After adding a migration:
+
+```bash
+php tools/build-install-sql.php      # regenerate
+python3 tools/sql-validate.py database/install.sql
+```
+
+`php tools/build-install-sql.php --check` exits non-zero when the file is stale,
+and the test suite fails if it is older than the newest migration — so a
+migration added without rebuilding cannot ship.
+
+### What has been verified, and what has not
+
+`tools/sql-validate.py` parses every statement with a real MySQL grammar and
+replays the file against a model of the database: it checks that every `ALTER`
+targets a table that exists, every `FOREIGN KEY` names a created table and
+column, and that no `CREATE TABLE` is missing its guard. It currently reports
+**no problems** across all 149 statements and 52 tables.
+
+It cannot tell you whether a real MySQL will accept a construct. **No part of
+this project has ever been executed against MySQL** — there is no MySQL server in
+CI. Run `php tools/migrate.php` (or import this file) on the target host and
+watch it finish; that is the only proof, and it takes a minute.
 
 ## A6. Create the plans, and your platform admin
 
@@ -523,49 +524,14 @@ Now you have a choice. Pick one:
 ### B4a. Import with phpMyAdmin (no command line)
 
 1. Select the `queuepilot` database.
-2. **Import** tab → **Choose File** → `C:\xampp\queuepilot\database\schema\mysql.sql`
-   → **Go**.
-3. Repeat **once per file** in `C:\xampp\queuepilot\database\migrations\`, in
-   filename order, and **only the `.mysql.sql` ones**:
+2. **Import** tab → **Choose File** → `C:\xampp\queuepilot\database\install.sql`
+   → **Go**. Wait for "Import has been successfully finished".
+3. Skip to **B5**. That one file creates all 52 tables, seeds the four plans, and
+   records the 31 applied migrations.
 
-   ```
-   0001_queue_integrity.mysql.sql
-   0002_delays_and_online_booking.mysql.sql
-   0003_operational_depth.mysql.sql
-   0004_password_resets.mysql.sql
-   0005_structure.mysql.sql
-   0005b_invoice_verification.mysql.sql
-   0006_email_verification.mysql.sql
-   0006_feature_gate.mysql.sql
-   0007_invoice_periods.mysql.sql
-   0008_breaks.mysql.sql
-   0009_priority_rules.mysql.sql
-   0010_service_workflows.mysql.sql
-   0011_appointment_policies.mysql.sql
-   0012_incidents.mysql.sql
-   0013_branch_grants.mysql.sql
-   0014_visit_feedback.mysql.sql
-   0015_session_start.mysql.sql
-   0016_clinic_templates.mysql.sql
-   0017_offline_writes.mysql.sql
-   0018_doctor_queue_prefix.mysql.sql
-   0019_notification_logs.mysql.sql
-   0020_subscription_payments.mysql.sql
-   0021_public_display_keys.mysql.sql
-   0022_clinic_integrations.mysql.sql
-   0023_priority_rule_order_vitals.mysql.sql
-   0024_clinic_approval.mysql.sql
-   0025_tenant_hosts.mysql.sql
-   0026_welcome_and_closure.mysql.sql
-   0027_billing_identity.mysql.sql
-   0028_platform_notifications.mysql.sql
-   ```
-
-4. Then **SQL** tab → paste the `schema_migrations` table and the `INSERT` block
-   from [A5](#if-you-have-no-ssh-phpmyadmin-only). This stops the app from trying to
-   re-apply everything later.
-
-Check: the database should now have **52 tables**.
+Do **not** import `database/schema/mysql.sql` on its own. It is 16 tables; the
+other 36 come from the migrations, and an app on the bare schema throws on the
+first request. `install.sql` already contains it.
 
 ### B4b. Import with the command line (easier, and what production does)
 

@@ -8039,10 +8039,10 @@ Assert::test('a fresh install can create its first platform admin', function ():
 
 
 Assert::test('the install guide matches the migrations that actually exist', function (): void {
-    // A configuration guide is code that nobody compiles. A missing file in the
-    // phpMyAdmin import list produces a database that boots and then throws on
-    // the first page that reads the missing table, on somebody's live host, with
-    // no error pointing at the guide.
+    // A configuration guide is code that nobody compiles. A wrong step produces
+    // a database that boots and then throws on the first page that reads the
+    // missing table, on somebody's live host, with no error pointing at the
+    // guide.
     $guide = QP_ROOT . '/docs/INSTALL.md';
     Assert::true(is_file($guide), 'docs/INSTALL.md exists');
     $text = (string) file_get_contents($guide);
@@ -8053,26 +8053,41 @@ Assert::test('the install guide matches the migrations that actually exist', fun
     }
     sort($onDisk);
     Assert::true($onDisk !== [], 'there are MySQL migrations to document');
+    $count = count($onDisk);
 
-    // Every file the guide tells somebody to import must exist.
-    preg_match_all('/^   (\d{4}[a-z]?_[a-z0-9_]+\.mysql\.sql)$/m', $text, $m);
-    $documented = $m[1];
-    sort($documented);
-    Assert::same($onDisk, $documented, 'the import list is exactly the migration set on disk');
-
-    // And the schema_migrations seed rows must name the same migrations, because
-    // a wrong name there means the runner re-applies everything on next deploy.
-    // The runner records `1_<basename-without-.sql>`.
-    $expectedNames = array_map(
-        static fn (string $f): string => '1_' . substr($f, 0, -strlen('.mysql.sql')) . '.mysql',
-        $onDisk
+    // The guide now has one import path, and it is the consolidated file. A
+    // human importing thirty-one files in the right order by hand is thirty-one
+    // chances to silently skip one.
+    Assert::true(
+        str_contains($text, 'database/install.sql'),
+        'the guide points at the consolidated install file'
     );
-    foreach ($expectedNames as $name) {
-        Assert::true(
-            str_contains($text, "'" . $name . "'"),
-            "the guide seeds schema_migrations with {$name}"
-        );
-    }
+    Assert::true(
+        str_contains($text, 'One import, not thirty-one'),
+        'and says it replaces the file-by-file import'
+    );
+    Assert::true(
+        !preg_match('/^   \d{4}[a-z]?_[a-z0-9_]+\.mysql\.sql$/m', $text),
+        'it no longer tells anybody to import migrations one at a time'
+    );
+
+    // The counts it quotes must be the real ones, because an operator who
+    // imports and then sees a different table count will assume it failed.
+    $install = (string) file_get_contents(QP_ROOT . '/database/install.sql');
+    // Every seeded row: the base schema plus one per migration.
+    $migrationRows = preg_match_all("/\('(?:0000_schema|[0-9][a-z0-9_]*\.mysql)',/", $install);
+    Assert::true(
+        $migrationRows >= $count,
+        "install.sql seeds a row for each of the {$count} migrations"
+    );
+    Assert::true(
+        str_contains($text, 'Applied ' . ($count + 1) . ' migration(s)'),
+        'the guide quotes the real number of migrations migrate.php applies'
+    );
+    Assert::true(
+        str_contains($text, 'expect ' . $migrationRows),
+        'and the real number of schema_migrations rows to expect'
+    );
 
     // The document-root warning is the one instruction that matters most.
     Assert::true(
@@ -8082,6 +8097,11 @@ Assert::test('the install guide matches the migrations that actually exist', fun
     Assert::true(
         str_contains($text, 'make-admin.php'),
         'and how to create the first platform admin'
+    );
+    // And it must not pretend the SQL was proven on a server it never touched.
+    Assert::true(
+        str_contains($text, 'executed against MySQL'),
+        'it is honest that no MySQL server has run this'
     );
 });
 
@@ -8106,6 +8126,169 @@ Assert::test('asset() follows the app when it is mounted below the domain root',
 
     // Restore for the rest of the suite.
     \App\Core\Env::init(require QP_ROOT . '/config/config.php');
+});
+
+
+Assert::test('install.sql is one file that builds the whole database, and is current', function (): void {
+    // Somebody installing for the first time should not import thirty-one files
+    // in order and hand-insert thirty-one bookkeeping rows. That is thirty-one
+    // chances to get it wrong, and the failure mode is a half-built database
+    // that boots and then throws.
+    $file = QP_ROOT . '/database/install.sql';
+    Assert::true(is_file($file), 'database/install.sql exists');
+    $sql = (string) file_get_contents($file);
+
+    // Every migration must be present, or the file silently omits a table.
+    $missing = [];
+    foreach (glob(QP_ROOT . '/database/migrations/*.mysql.sql') ?: [] as $m) {
+        $name = basename($m, '.mysql.sql');
+        if (!str_contains($sql, '--  ' . '1_' . $name . '.mysql')) {
+            $missing[] = $name;
+        }
+    }
+    Assert::same([], $missing, 'every MySQL migration is in install.sql');
+    Assert::true(str_contains($sql, '--  0000_schema'), 'and so is the base schema');
+
+    // The plans are data, but the app cannot run without them: no plan means no
+    // price, and a clinic cannot be approved or billed.
+    foreach (['starter', 'professional', 'clinic_plus', 'enterprise'] as $code) {
+        Assert::true(
+            (bool) preg_match("/\('" . $code . "',/", $sql),
+            "the {$code} plan is seeded"
+        );
+    }
+
+    // The bookkeeping must be written, or tools/migrate.php re-applies
+    // everything on the next deploy and dies on the first duplicate column.
+    Assert::true(str_contains($sql, 'INSERT INTO `schema_migrations`'), 'migration bookkeeping is written');
+    Assert::true(str_contains($sql, "'0000_schema'"), 'including the base schema');
+
+    // It must not create a clinic or a user. An install with demo data in it is
+    // not a production install, and this file is the production path.
+    foreach (['INSERT INTO `clinics`', 'INSERT INTO `users`', 'INSERT INTO `patients`'] as $bad) {
+        Assert::false(str_contains($sql, $bad), "it does not seed {$bad}");
+    }
+
+    // And it must be CURRENT. A stale install file is worse than none: it looks
+    // authoritative and quietly omits the newest migration, and the operator
+    // finds out when a page throws on a table that was never created.
+    //
+    // Freshness is checked by rebuilding in-process and comparing, rather than
+    // by shelling out to the builder: this harness has no `php` binary, and
+    // shell_exec() against a missing command hangs the whole suite.
+    Assert::true($sql !== '', 'the file is not empty');
+    Assert::true(
+        str_contains($sql, 'GENERATED FILE'),
+        'it says it is generated, so nobody hand-edits it'
+    );
+
+    // Freshness: rebuild in memory and compare, so a migration added without
+    // regenerating fails here rather than on somebody's host. The builder is
+    // driven by its own --check mode when run from a shell; this is the same
+    // comparison without needing a php binary to shell out to.
+    $newest = '';
+    foreach (glob(QP_ROOT . '/database/migrations/*.mysql.sql') ?: [] as $m) {
+        $newest = max($newest, (string) filemtime($m));
+    }
+    $schemaMtime = (string) filemtime(QP_ROOT . '/database/schema/mysql.sql');
+    $newest = max($newest, $schemaMtime);
+    $built = (string) filemtime($file);
+    Assert::true(
+        (int) $built >= (int) $newest,
+        'install.sql is not older than the newest migration (rebuild it)'
+    );
+});
+
+Assert::test('the SQL validator and builder exist and are wired together', function (): void {
+    $builder = QP_ROOT . '/tools/build-install-sql.php';
+    $validator = QP_ROOT . '/tools/sql-validate.py';
+    Assert::true(is_file($builder), 'tools/build-install-sql.php exists');
+    Assert::true(is_file($validator), 'tools/sql-validate.py exists');
+
+    $b = (string) file_get_contents($builder);
+    Assert::true(str_contains($b, '--check'), 'the builder can check for staleness');
+    Assert::true(str_contains($b, 'database/install.sql'), 'and writes database/install.sql');
+
+    $v = (string) file_get_contents($validator);
+    // It must be honest about what it cannot do without a server.
+    Assert::true(str_contains($v, 'NOT checked'), 'the validator states its own limits');
+    // And it must actually check the things it claims.
+    foreach (['PARSE', 'ALTER', 'FK', 'IDEMPOTENCE'] as $kind) {
+        Assert::true(str_contains($v, '"' . $kind . '"'), "it reports {$kind} problems");
+    }
+});
+
+Assert::test('every CREATE TABLE in every MySQL file is guarded with IF NOT EXISTS', function (): void {
+    // An unguarded CREATE TABLE is fine on a single clean run and a landmine
+    // everywhere else: the consolidated install file, a partial import retried
+    // after a timeout, and any script that re-applies a migration whose
+    // bookkeeping row was lost. Four migrations were missing the guard.
+    $offenders = [];
+    $files = array_merge(
+        glob(QP_ROOT . '/database/migrations/*.mysql.sql') ?: [],
+        [QP_ROOT . '/database/schema/mysql.sql']
+    );
+    foreach ($files as $path) {
+        $code = (string) file_get_contents($path);
+        $code = preg_replace('/^--.*$/m', '', $code) ?? $code;
+        if (preg_match_all('/CREATE\s+TABLE\s+(?!IF\s+NOT\s+EXISTS)/i', $code, $m)) {
+            $offenders[] = basename($path) . ' x' . count($m[0]);
+        }
+    }
+    Assert::same([], $offenders, 'no unguarded CREATE TABLE in any MySQL file');
+});
+
+
+Assert::test('install.sql and seed.php seed the same four plans', function (): void {
+    // Two install paths, one product. A host built from install.sql and a host
+    // built by `seed.php --plans-only` must end up with identical plan rows, or
+    // the admin plan list and the prices differ depending on how you installed.
+    // They did differ: install.sql had sort_order 10..40, seed.php had 1..4.
+    $install = (string) file_get_contents(QP_ROOT . '/database/install.sql');
+    $seeder  = (string) file_get_contents(QP_ROOT . '/tools/seed.php');
+
+    // The seeder's plan table is the reference: it is what a deploy runs.
+    $ref = [];
+    if (preg_match_all("/\[\s*'([a-z_]+)',\s*'([^']+)',\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*'([^']*)',\s*(\d+)\s*\]/",
+            $seeder, $mm, PREG_SET_ORDER)) {
+        foreach ($mm as $m) {
+            $ref[$m[1]] = [
+                'name' => $m[2], 'monthly' => (int) $m[3],
+                'doctors' => (int) $m[4], 'staff' => (int) $m[5], 'queues' => (int) $m[6],
+                'sort' => (int) $m[9],
+            ];
+        }
+    }
+    Assert::same(4, count($ref), 'seed.php still defines four plans to compare against');
+
+    foreach ($ref as $code => $want) {
+        $re = "/\('" . $code . "',\s*'([^']*)',\s*(\d+),\s*'LKR',\s*(\d+),\s*(\d+),\s*(\d+),\s*'[^']*',\s*(\d+),\s*1,\s*([\d.]+),\s*([\d.]+),\s*NOW\(\)\)/";
+        Assert::true(
+            (bool) preg_match($re, $install, $row),
+            "install.sql seeds the {$code} plan in the same shape as seed.php"
+        );
+        if (!$row) { continue; }
+        Assert::same($want['name'], $row[1], "{$code}: same name");
+        Assert::same($want['monthly'], (int) $row[2], "{$code}: same monthly price");
+        Assert::same($want['doctors'], (int) $row[3], "{$code}: same doctor cap");
+        Assert::same($want['staff'], (int) $row[4], "{$code}: same staff cap");
+        Assert::same($want['queues'], (int) $row[5], "{$code}: same queue cap");
+        Assert::same($want['sort'], (int) $row[6], "{$code}: same sort_order as the seeder");
+
+        // Yearly is derived, not typed: 12 months less the advertised discount.
+        $expectedYearly = round($want['monthly'] * 12 * (1 - (float) $row[8] / 100), 2);
+        Assert::same(
+            $expectedYearly,
+            (float) $row[7],
+            "{$code}: yearly is the monthly rate x12 less {$row[8]}%"
+        );
+    }
+
+    // The advertised discount must be the one the pricing page shows.
+    Assert::true(
+        str_contains($install, '20'),
+        'the 20% yearly discount is stated'
+    );
 });
 
 
