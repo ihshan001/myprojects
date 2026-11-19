@@ -259,6 +259,23 @@ so it never touches demo data.
 This is enforced by `QueueService` and the router, not by hiding buttons: a
 receptionist with `curl` and a receptionist with a mouse hit the same wall.
 
+## Installing it
+
+**`docs/INSTALL.md`** is the step-by-step configuration guide, in two halves:
+
+* **Part A — cPanel.** The document root must be `public/`, so the app lives
+  beside `public_html` and the site root holds only a front door. Covers the
+  database with its account prefix, `.env`, `APP_KEY`, migrations (by CLI, or by
+  phpMyAdmin when there is no SSH), creating the first platform admin, cron, and
+  the places cPanel silently breaks this app.
+* **Part B — XAMPP on your own PC.** MySQL, phpMyAdmin, an import order that
+  actually produces the 52 tables, and `MAIL_TRANSPORT=log` so you can read every
+  email the app sends without an SMTP account.
+
+Both end the same way: `/login` answers, and you have an account that can approve
+a clinic. The guide's migration list is checked against the files on disk by a
+test — a configuration document nobody compiles is where a missing file hides.
+
 ## When things go wrong
 
 Two operational documents, written to be followed under pressure rather than

@@ -7999,6 +7999,116 @@ Assert::test('the welcome email carries the board URL, not just a bare host', fu
 });
 
 
+Assert::test('a fresh install can create its first platform admin', function (): void {
+    // The only thing that has ever created a super_admin is tools/seed.php,
+    // which also creates five demo clinics. Telling an operator to run the
+    // seeder on production to get a login means shipping demo patient data
+    // into a live database -- and `seed.php --plans-only` creates no users at
+    // all, so a clean install had plans, tables, and nobody who could sign in.
+    $tool = QP_ROOT . '/tools/make-admin.php';
+    Assert::true(is_file($tool), 'tools/make-admin.php exists');
+
+    $src = (string) file_get_contents($tool);
+    Assert::true(str_contains($src, "'super_admin'"), 'it creates a super_admin');
+    Assert::true(str_contains($src, 'clinic_id'), 'and keeps the account clinic-less, as platform admins must be');
+    // It must never be able to overwrite a clinic owner by accident.
+    Assert::true(
+        str_contains($src, "Refusing") && str_contains($src, "not a platform admin"),
+        'it refuses to reset a clinic account'
+    );
+    // A reset has to clear the second factor, or a lost phone locks the
+    // platform out of itself.
+    Assert::true(str_contains($src, 'totp_secret = NULL'), '--reset clears the TOTP enrolment');
+    Assert::true(str_contains($src, 'must_change_password'), 'a generated password must be changed on first use');
+    // First-run credentials are generated, not typed, so they never land in
+    // shell history on a shared host.
+    Assert::true(str_contains($src, 'generatePassword'), 'it can generate the password itself');
+
+    // And it reads both flag forms: `--email=x` is what people type, and
+    // Argv::value() only understands `--email x`.
+    Assert::true(str_contains($src, "str_starts_with(\$arg, \$flag . '=')"), 'both --flag=value and --flag value work');
+
+    // An empty install must say so as a failure, not print an empty table: a
+    // platform with no admin cannot approve anything, and "0 rows" reads as
+    // "nobody has signed up yet" rather than "this install is unusable".
+    // Asserted on the source — the wasm harness has no `php` binary, and
+    // shell_exec() against a missing command hangs the whole suite.
+    Assert::true(str_contains($src, 'NONE. Nobody can approve a clinic'), 'an empty install says so plainly');
+    Assert::true(str_contains($src, 'exit(1)'), 'and exits non-zero, so a deploy script notices');
+});
+
+
+Assert::test('the install guide matches the migrations that actually exist', function (): void {
+    // A configuration guide is code that nobody compiles. A missing file in the
+    // phpMyAdmin import list produces a database that boots and then throws on
+    // the first page that reads the missing table, on somebody's live host, with
+    // no error pointing at the guide.
+    $guide = QP_ROOT . '/docs/INSTALL.md';
+    Assert::true(is_file($guide), 'docs/INSTALL.md exists');
+    $text = (string) file_get_contents($guide);
+
+    $onDisk = [];
+    foreach (glob(QP_ROOT . '/database/migrations/*.mysql.sql') ?: [] as $f) {
+        $onDisk[] = basename($f);
+    }
+    sort($onDisk);
+    Assert::true($onDisk !== [], 'there are MySQL migrations to document');
+
+    // Every file the guide tells somebody to import must exist.
+    preg_match_all('/^   (\d{4}[a-z]?_[a-z0-9_]+\.mysql\.sql)$/m', $text, $m);
+    $documented = $m[1];
+    sort($documented);
+    Assert::same($onDisk, $documented, 'the import list is exactly the migration set on disk');
+
+    // And the schema_migrations seed rows must name the same migrations, because
+    // a wrong name there means the runner re-applies everything on next deploy.
+    // The runner records `1_<basename-without-.sql>`.
+    $expectedNames = array_map(
+        static fn (string $f): string => '1_' . substr($f, 0, -strlen('.mysql.sql')) . '.mysql',
+        $onDisk
+    );
+    foreach ($expectedNames as $name) {
+        Assert::true(
+            str_contains($text, "'" . $name . "'"),
+            "the guide seeds schema_migrations with {$name}"
+        );
+    }
+
+    // The document-root warning is the one instruction that matters most.
+    Assert::true(
+        str_contains($text, 'GET /.env') && str_contains($text, '404'),
+        'it tells you to check that /.env is not served'
+    );
+    Assert::true(
+        str_contains($text, 'make-admin.php'),
+        'and how to create the first platform admin'
+    );
+});
+
+Assert::test('asset() follows the app when it is mounted below the domain root', function (): void {
+    // A root-relative /assets/ is right in production and wrong on the XAMPP
+    // layout this repository's install guide recommends (htdocs/queuepilot).
+    // There it resolves to the XAMPP dashboard, every page renders unstyled, and
+    // the failure looks like a broken app rather than a wrong URL.
+    $config = require QP_ROOT . '/config/config.php';
+
+    $config['app']['url'] = 'https://queue.lk';
+    \App\Core\Env::init($config);
+    Assert::same('/assets/x.css', strtok(asset('x.css'), '?'), 'a root install emits /assets/');
+
+    $config['app']['url'] = 'http://localhost/queuepilot';
+    \App\Core\Env::init($config);
+    Assert::same('/queuepilot/assets/x.css', strtok(asset('x.css'), '?'), 'a subfolder install carries the prefix');
+
+    $config['app']['url'] = 'http://localhost/queuepilot/';
+    \App\Core\Env::init($config);
+    Assert::same('/queuepilot/assets/x.css', strtok(asset('x.css'), '?'), 'a trailing slash does not double up');
+
+    // Restore for the rest of the suite.
+    \App\Core\Env::init(require QP_ROOT . '/config/config.php');
+});
+
+
 $code = Assert::summary();
 Database::cleanup($dbPath);
 echo "\n";

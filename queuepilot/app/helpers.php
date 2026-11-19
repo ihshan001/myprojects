@@ -68,7 +68,22 @@ if (!function_exists('asset')) {
     function asset(string $path): string
     {
         $path = ltrim($path, '/');
-        $url = '/assets/' . $path;
+        // Honest about where the app is mounted. On production the document root
+        // is `public/`, so the prefix is empty and this is `/assets/...`. On a
+        // local XAMPP install served from htdocs/queuepilot it is
+        // `/queuepilot/assets/...`, because a root-relative `/assets/` there
+        // points at the XAMPP dashboard and every page renders unstyled — which
+        // looks like a broken application rather than a wrong URL.
+        //
+        // Derived from APP_URL when it has a path, so one setting controls it
+        // and nothing has to be recomputed per request.
+        $base = '';
+        $appUrl = (string) \App\Core\Env::get('app.url', '');
+        $appPath = parse_url($appUrl, PHP_URL_PATH);
+        if (is_string($appPath) && $appPath !== '' && $appPath !== '/') {
+            $base = rtrim($appPath, '/');
+        }
+        $url = $base . '/assets/' . $path;
         static $hashes = [];
         if (!array_key_exists($path, $hashes)) {
             $file = QP_ROOT . '/public/assets/' . $path;
