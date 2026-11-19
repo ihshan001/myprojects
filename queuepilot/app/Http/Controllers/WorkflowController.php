@@ -43,9 +43,12 @@ final class WorkflowController
             'steps'   => $this->workflows->all($clinicId, false),
             'kinds'   => WorkflowService::KINDS,
             'queues'  => Db::all(
-                "SELECT id, name, kind FROM queues WHERE clinic_id = ? AND session_date >= date('now', '-7 day')
+                "SELECT id, name, kind FROM queues
+                  WHERE clinic_id = ? AND session_date >= ?
                   ORDER BY session_date DESC, id DESC",
-                [$clinicId]
+                // date('now', '-7 day') is SQLite-only. A date bound from PHP is
+                // the same string on both engines and needs no dialect branch.
+                [$clinicId, date('Y-m-d', strtotime('-7 days'))]
             ),
             'old'     => [],
             'errors'  => [],
@@ -65,9 +68,10 @@ final class WorkflowController
                 'steps'  => $this->workflows->all($clinicId, false),
                 'kinds'  => WorkflowService::KINDS,
                 'queues' => Db::all(
-                    "SELECT id, name, kind FROM queues WHERE clinic_id = ? AND session_date >= date('now', '-7 day')
+                    "SELECT id, name, kind FROM queues
+                      WHERE clinic_id = ? AND session_date >= ?
                       ORDER BY session_date DESC, id DESC",
-                    [$clinicId]
+                    [$clinicId, date('Y-m-d', strtotime('-7 days'))]
                 ),
                 'old'    => $in,
                 'errors' => [$e->getMessage()],

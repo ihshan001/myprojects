@@ -47,6 +47,10 @@ $sqliteOnly = [
     '/\bjulianday\s*\(/i' => 'julianday() is SQLite-only; compute the difference in PHP',
     '/\bunixepoch\s*\(/i' => 'unixepoch() is SQLite-only',
     '/\bdate\s*\(\s*\?\s*,/i' => "date(x, 'modifier') is SQLite-only syntax",
+    // The exact form that shipped on two pages: date('now', '-7 day').
+    "/\bdate\s*\(\s*['\"]now['\"]\s*,/i" => "date('now', modifier) is SQLite-only; bind a PHP date instead",
+    // MySQL 5.7 (a documented requirement) has no CAST ... AS REAL.
+    '/\bCAST\s*\([^)]*\bAS\s+REAL\b/i' => 'CAST(x AS REAL) needs MySQL 8.0.17; use DOUBLE',
     '/\bAUTOINCREMENT\b/i' => 'AUTOINCREMENT is SQLite; MySQL uses AUTO_INCREMENT',
     '/\bINSERT\s+OR\s+(IGNORE|REPLACE)\b/i' => 'INSERT OR IGNORE/REPLACE is SQLite; MySQL uses ON DUPLICATE KEY UPDATE',
     '/\bPRAGMA\b/i' => 'PRAGMA is SQLite-only',

@@ -100,6 +100,15 @@ ALTER TABLE queue_entries
     ADD COLUMN hold_reason VARCHAR(255) NULL,
     ADD COLUMN hold_since  DATETIME NULL;
 
+-- The "your turn is approaching" message is a separate, once-only message from
+-- "your turn is now", so it needs its own claimed-at stamp. The SQLite half has
+-- had this column since this migration was written; the MySQL half never added
+-- it. NotificationService::notifyApproaching() selects and updates it, so on
+-- MySQL every queue-worker run for a clinic that had turned the option on threw
+-- — and the option was on the settings screen, so it was one toggle away.
+ALTER TABLE queue_entries
+    ADD COLUMN approach_notified_at DATETIME NULL;
+
 -- ---------- 9. platform alerts ----------------------------------------
 CREATE TABLE IF NOT EXISTS system_alerts (
   id           INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,

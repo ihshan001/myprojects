@@ -70,9 +70,11 @@ final class PriorityRuleController
             )),
             'doctors'  => Db::all('SELECT id, name FROM doctors WHERE clinic_id = ? ORDER BY name', [$clinicId]),
             'queues'   => Db::all(
-                "SELECT id, name FROM queues WHERE clinic_id = ? AND session_date >= date('now', '-7 day')
+                "SELECT id, name FROM queues
+                  WHERE clinic_id = ? AND session_date >= ?
                   ORDER BY session_date DESC, id DESC",
-                [$clinicId]
+                // date('now', '-7 day') is SQLite-only; this page threw on MySQL.
+                [$clinicId, date('Y-m-d', strtotime('-7 days'))]
             ),
             'sources'  => PriorityRuleService::SOURCES,
             'kinds'    => PriorityRuleService::KINDS,

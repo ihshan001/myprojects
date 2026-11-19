@@ -8424,6 +8424,77 @@ Assert::test('the decision queue works on MySQL, not only SQLite', function (): 
 });
 
 
+Assert::test('approving twice, or a double-click, cannot bill twice', function (): void {
+    // The approve button posts a form. On a slow host an admin clicks it twice,
+    // or the browser retries, and the second request arrives while the first is
+    // still running. Two invoices for one clinic is a support call the customer
+    // is right about; two ops hostnames means the address in their email is not
+    // the one they ended up with.
+    foreach ([['race_p', 'RacePlan', 4000, 1]] as [$code, $name, $price, $sort]) {
+        if (!Db::scalar('SELECT id FROM plans WHERE code = ?', [$code])) {
+            Db::insert(
+                'INSERT INTO plans (code,name,price_monthly,price_yearly,yearly_discount_pct,currency,
+                                    max_doctors,max_staff,max_queues,features,sort_order,is_active,created_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?)',
+                [$code, $name, $price, round($price * 12 * 0.8, 2), 20, 'LKR', 1, 2, 2, 'x', $sort, Db::now()]
+            );
+        }
+    }
+
+    $svc = new App\Services\ClinicService();
+    $lc  = new App\Services\LifecycleService();
+    $inv = new App\Services\InvoiceService();
+
+    $r = $svc->register([
+        'name' => 'Double Click Clinic', 'owner_name' => 'Owner',
+        'email' => 'double-click@example.test', 'phone' => '0779999999',
+        'city' => 'Negombo', 'district' => 'Western', 'password' => 'Str0ngPassw0rd!',
+    ], 'race_p');
+    $id = (int) $r['clinic_id'];
+
+    $first = $lc->approve($id, null, null, 'monthly');
+    Assert::true($first['ok'], 'the first approval succeeds');
+
+    $second = $lc->approve($id, null, null, 'monthly');
+    Assert::false($second['ok'], 'the second is refused, not silently repeated');
+
+    // The same period must yield the same invoice, not a second one.
+    $a = $inv->raiseFirst($id);
+    $b = $inv->raiseFirst($id);
+    Assert::true($a['ok'], 'an invoice is raised');
+    Assert::same($a['number'], $b['number'], 'raising again returns the same invoice');
+    Assert::same(
+        1,
+        (int) Db::scalar('SELECT COUNT(*) FROM invoices WHERE clinic_id = ?', [$id]),
+        'exactly one invoice exists'
+    );
+
+    // And one ops address, so the link in the welcome email stays the right one.
+    // Hosts are only minted when APP_DOMAIN is configured; set it for this
+    // check and put it back, because a domain in the shared test environment
+    // would change what every other test sees.
+    $savedDomain = App\Core\Env::get('app.domain', '');
+    $cfg = require QP_ROOT . '/config/config.php';
+    $cfg['app']['domain'] = 'queue.lk';
+    App\Core\Env::init($cfg);
+    $hosts = (new App\Services\ProvisionService())->provision(
+        Db::one('SELECT * FROM clinics WHERE id = ?', [$id]) ?? []
+    );
+    Assert::true($hosts['site_host'] !== '', 'a public site address is minted');
+    Assert::true($hosts['ops_host'] !== '', 'an operations address is minted');
+    Assert::true($hosts['ops_host'] !== $hosts['site_host'], 'and they are different addresses');
+
+    // Idempotent: a second provision must not mint a new ops address.
+    $again = (new App\Services\ProvisionService())->provision(
+        Db::one('SELECT * FROM clinics WHERE id = ?', [$id]) ?? []
+    );
+    Assert::same($hosts['ops_host'], $again['ops_host'], 'provisioning twice keeps the same ops address');
+
+    $cfg['app']['domain'] = $savedDomain;
+    App\Core\Env::init($cfg);
+});
+
+
 $code = Assert::summary();
 Database::cleanup($dbPath);
 echo "\n";

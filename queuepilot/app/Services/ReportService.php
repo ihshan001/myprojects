@@ -231,8 +231,11 @@ final class ReportService
         return Db::all(
             "SELECT d.name AS doctor,
                     COUNT(*) AS delay_events,
-                    ROUND(AVG(CAST(json_extract(e.meta_json, '$.minutes') AS REAL)), 1) AS avg_minutes,
-                    MAX(CAST(json_extract(e.meta_json, '$.minutes') AS REAL)) AS worst_minutes
+                    -- DOUBLE, not REAL: MySQL 5.7 accepts REAL only from 8.0.17,
+                    -- and 5.7 is a documented requirement here. SQLite treats
+                    -- DOUBLE as a REAL affinity, so this is identical there.
+                    ROUND(AVG(CAST(json_extract(e.meta_json, '$.minutes') AS DOUBLE)), 1) AS avg_minutes,
+                    MAX(CAST(json_extract(e.meta_json, '$.minutes') AS DOUBLE)) AS worst_minutes
                FROM queue_events e
                JOIN queues q ON q.id = e.queue_id
                JOIN doctors d ON d.id = q.doctor_id

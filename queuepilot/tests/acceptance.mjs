@@ -679,6 +679,29 @@ async function main() {
     check('reports still render', reports.status === 200, `HTTP ${reports.status}`);
   }
 
+  /* --------------------------------- 12. the pages a signed-in user opens */
+  // A route that is wired but throws is the bug nobody reports: the link is in
+  // the nav, the user clicks it, and gets a 500 with no way to know whether it
+  // was them. These are the pages the navigation actually links to, checked for
+  // both roles. Not every route in the table — the php-wasm harness this runs
+  // on exhausts its file descriptors somewhere around a hundred requests, and a
+  // sweep that fails for its own reasons proves nothing. The full route sweep
+  // lives in tests/route-sweep.mjs, which runs against a real server.
+  step = '12. The navigation works for both kinds of account';
+  {
+    const staffPages = ['/app', '/queue', '/queue/new', '/patients', '/doctors', '/reports',
+      '/settings', '/billing', '/notifications', '/getting-started'];
+    for (const path of staffPages) {
+      const res = await owner.get(path);
+      check(`a clinic owner can open ${path}`, res.status === 200, `HTTP ${res.status}`);
+    }
+    const platformPages = ['/admin', '/admin/clinics', '/admin/plans', '/admin/billing', '/admin/monitor'];
+    for (const path of platformPages) {
+      const res = await platform.get(path);
+      check(`the platform admin can open ${path}`, res.status === 200, `HTTP ${res.status}`);
+    }
+  }
+
   /* --------------------------------------------------------------- verdict */
   console.log('');
   if (failures.length > 0) {

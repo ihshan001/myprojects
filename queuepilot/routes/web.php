@@ -330,8 +330,12 @@ Router::get('/admin/features', [AdminController::class, 'features'], ['auth' => 
 // The same checks /api/health returns, laid out for a person. Super admin
 // only: the checks name tenants, queue depth and staff.
 Router::get('/admin/monitor', [AdminController::class, 'monitor'], ['auth' => true, 'roles' => ['super_admin']]);
-Router::post('/admin/features/{clinicId}', [AdminController::class, 'saveFeature'], ['auth' => true, 'roles' => ['super_admin'], 'csrf' => false]);
-Router::post('/admin/features/{clinicId}/unset', [AdminController::class, 'unsetFeature'], ['auth' => true, 'roles' => ['super_admin'], 'csrf' => false]);
+// CSRF is ON. These two were the only authenticated POSTs in the file with it
+// turned off, and nothing replaced it — the forms already send csrf_field(), so
+// the token was being generated, rendered and then ignored. A page on another
+// site could toggle a feature for any clinic while a super admin was signed in.
+Router::post('/admin/features/{clinicId}', [AdminController::class, 'saveFeature'], ['auth' => true, 'roles' => ['super_admin']]);
+Router::post('/admin/features/{clinicId}/unset', [AdminController::class, 'unsetFeature'], ['auth' => true, 'roles' => ['super_admin']]);
 
 /* ------------------------------------------------------------- JSON API */
 Router::get('/api/queue/board', [ApiController::class, 'board'], ['auth' => true, 'ability' => 'queue.operate']);
