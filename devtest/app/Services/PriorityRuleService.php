@@ -19,11 +19,15 @@ use App\Core\Db;
  * token is issued (source, patient age, queue kind, doctor, hour), and name
  * the priority and the reason. Two design decisions worth stating:
  *
- *   * **The highest matching boost wins; boosts do not stack.** "Child" and
- *     "appointment" and "morning" describe one patient, not three units of
- *     urgency. Adding them turns a policy into an accident of overlapping
- *     filters. A tie on the boost is broken by the older rule, then by id,
- *     so the same patient always sorts the same way.
+ *   * **The first matching rule in the manager's list wins; nothing stacks.**
+ *     "Child" and "appointment" and "morning" describe one patient, not
+ *     three units of urgency, so adding them turns a policy into an accident
+ *     of overlapping filters. Which one wins used to be decided by the
+ *     largest `effect`, which meant the only way to promote a policy was to
+ *     inflate a number until it beat the others. `sort_order` is now the
+ *     ranking the manager actually sees and drags, and the first match in it
+ *     decides. Ties on position fall back to id so the same patient always
+ *     sorts the same way.
  *
  *   * **The reason is written onto the entry.** A priority nobody typed has
  *     to be explainable afterwards, and explaining it by re-reading a rule
@@ -36,6 +40,39 @@ use App\Core\Db;
 final class PriorityRuleService
 {
     public const SOURCES = ['appointment' => 'Appointment', 'walkin' => 'Walk-in'];
+
+    /**
+     * A temperature outside this band is a mistyped reading, not a patient.
+     * Stored in tenths of a degree so a 39.0 threshold compares exactly.
+     */
+    public const TEMP_MIN_C = 30.0;
+    public const TEMP_MAX_C = 45.0;
+
+    /**
+     * "38.7" -> 387. Returns null for blank, and false for anything that is
+     * not a plausible reading, so the caller can tell "not measured" apart
+     * from "nonsense" instead of silently treating both as no measurement.
+     */
+    public static function tempToTenths(mixed $value): int|false|null
+    {
+        if ($value === null || $value === '' || $value === false) {
+            return null;
+        }
+        if (!is_numeric($value)) {
+            return false;
+        }
+        $c = (float) $value;
+        if ($c < self::TEMP_MIN_C || $c > self::TEMP_MAX_C) {
+            return false;
+        }
+        return (int) round($c * 10);
+    }
+
+    /** 387 -> "38.7". */
+    public static function tenthsToText(?int $tenths): string
+    {
+        return $tenths === null ? '' : number_format($tenths / 10, 1, '.', '');
+    }
 
     public const KINDS = [
         'consultation' => 'Consultation',
@@ -54,7 +91,7 @@ final class PriorityRuleService
         if ($activeOnly) {
             $sql .= ' AND r.is_active = 1';
         }
-        $sql .= ' ORDER BY r.effect DESC, r.id ASC';
+        $sql .= ' ORDER BY r.sort_order ASC, r.id ASC';
 
         return Db::all($sql, [$clinicId]);
     }
@@ -122,6 +159,20 @@ final class PriorityRuleService
             $errors[] = 'The youngest age cannot be above the oldest age.';
         }
 
+        $minTemp = self::tempToTenths($in['min_temp'] ?? null);
+        $maxTemp = self::tempToTenths($in['max_temp'] ?? null);
+        foreach (['min_temp' => $minTemp, 'max_temp' => $maxTemp] as $field => $value) {
+            if (($in[$field] ?? '') !== '' && $value === false) {
+                $errors[] = sprintf(
+                    'A temperature must be a reading between %s and %s °C.',
+                    number_format(self::TEMP_MIN_C, 1), number_format(self::TEMP_MAX_C, 1)
+                );
+            }
+        }
+        if (is_int($minTemp) && is_int($maxTemp) && $minTemp > $maxTemp) {
+            $errors[] = 'The lower temperature cannot be above the upper one.';
+        }
+
         return $errors;
     }
 
@@ -148,11 +199,18 @@ final class PriorityRuleService
             throw new \InvalidArgumentException('That queue does not belong to this clinic.');
         }
 
-        return Db::insert(
+        // A new policy goes to the bottom of the list, where the manager can
+        // see it and drag it. Defaulting it to the top would silently overrule
+        // every existing rule the moment it was saved.
+        $next = (int) Db::scalar('SELECT COALESCE(MAX(sort_order), 0) + 1 FROM priority_rules WHERE clinic_id = ?', [$clinicId]);
+        $now = Db::now();
+
+        $id = Db::insert(
             'INSERT INTO priority_rules
                (clinic_id, queue_id, name, source, kind, doctor_id, min_age, max_age,
-                from_hour, to_hour, effect, reason, is_active, created_by, created_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)',
+                from_hour, to_hour, min_temp_x10, max_temp_x10, effect, reason,
+                is_active, created_by, created_at, updated_at, sort_order)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?)',
             [
                 $clinicId, $queueId, trim((string) $in['name']),
                 ($in['source'] ?? '') !== '' ? (string) $in['source'] : null,
@@ -162,27 +220,123 @@ final class PriorityRuleService
                 $this->nullableInt($in['max_age'] ?? null),
                 $this->nullableHour($in['from_hour'] ?? null),
                 $this->nullableHour($in['to_hour'] ?? null),
+                self::tempToTenths($in['min_temp'] ?? null),
+                self::tempToTenths($in['max_temp'] ?? null),
                 (int) $in['effect'],
                 trim((string) $in['reason']),
-                $actorId, Db::now(),
+                $actorId, $now, $now, $next,
             ]
+        );
+
+        $rule = Db::one('SELECT * FROM priority_rules WHERE id = ? AND clinic_id = ?', [$id, $clinicId]);
+        $this->record($clinicId, $id, (string) $in['name'], 'created', $actorId,
+            'Added at position ' . $next . '.', null, $rule);
+
+        return $id;
+    }
+
+    /**
+     * Move rules into the order the manager dragged them into.
+     *
+     * Every id must belong to this clinic and every rule must appear exactly
+     * once: a partial list would leave two rules sharing a position, and the
+     * tie would then be settled by id rather than by the manager.
+     *
+     * @param list<int> $orderedIds
+     */
+    public function reorder(int $clinicId, array $orderedIds, ?int $actorId = null): bool
+    {
+        $ids = [];
+        foreach ($orderedIds as $raw) {
+            $id = filter_var($raw, FILTER_VALIDATE_INT);
+            if ($id === false || $id <= 0 || in_array($id, $ids, true)) {
+                return false;
+            }
+            $ids[] = (int) $id;
+        }
+        if ($ids === []) {
+            return false;
+        }
+
+        $owned = array_map('intval', array_column(
+            Db::all('SELECT id FROM priority_rules WHERE clinic_id = ?', [$clinicId]), 'id'
+        ));
+        sort($owned);
+        $given = $ids;
+        sort($given);
+        if ($given !== $owned) {
+            return false;   // another clinic's rule, a stale id, or a missing one
+        }
+
+        $before = Db::all('SELECT id, name, sort_order FROM priority_rules WHERE clinic_id = ? ORDER BY sort_order, id', [$clinicId]);
+
+        Db::transaction(function () use ($ids, $clinicId): void {
+            $pos = 1;
+            foreach ($ids as $id) {
+                Db::run('UPDATE priority_rules SET sort_order = ?, updated_at = ? WHERE id = ? AND clinic_id = ?',
+                    [$pos++, Db::now(), $id, $clinicId]);
+            }
+        });
+
+        $after = Db::all('SELECT id, name, sort_order FROM priority_rules WHERE clinic_id = ? ORDER BY sort_order, id', [$clinicId]);
+        $this->record($clinicId, null, 'Rule order', 'reordered', $actorId,
+            'Order changed to: ' . implode(' → ', array_column($after, 'name')) . '.', $before, $after);
+
+        return true;
+    }
+
+    /** Most recent changes first. */
+    public function history(int $clinicId, int $limit = 50): array
+    {
+        return Db::all(
+            'SELECT h.*, u.name AS actor_name
+               FROM priority_rule_history h
+               LEFT JOIN users u ON u.id = h.actor_id
+              WHERE h.clinic_id = ?
+              ORDER BY h.id DESC LIMIT ' . max(1, min(200, $limit)),
+            [$clinicId]
+        );
+    }
+
+    /** When any rule last changed; null when the clinic has never had one. */
+    public function lastChangedAt(int $clinicId): ?string
+    {
+        $at = Db::scalar('SELECT MAX(updated_at) FROM priority_rules WHERE clinic_id = ?', [$clinicId]);
+        return $at !== null ? (string) $at : null;
+    }
+
+    private function record(int $clinicId, ?int $ruleId, string $name, string $action,
+                            ?int $actorId, string $detail, mixed $before, mixed $after): void
+    {
+        Db::insert(
+            'INSERT INTO priority_rule_history
+               (clinic_id, rule_id, rule_name, action, actor_id, detail, before_json, after_json, created_at)
+             VALUES (?,?,?,?,?,?,?,?,?)',
+            [$clinicId, $ruleId, $name, $action, $actorId, $detail,
+             $before === null ? null : json_encode($before),
+             $after === null ? null : json_encode($after),
+             Db::now()]
         );
     }
 
     /** Turn a rule off without deleting the history that refers to it. */
     public function setActive(int $clinicId, int $ruleId, bool $active): bool
     {
-        $rule = Db::one('SELECT id FROM priority_rules WHERE id = ? AND clinic_id = ?', [$ruleId, $clinicId]);
+        $rule = Db::one('SELECT * FROM priority_rules WHERE id = ? AND clinic_id = ?', [$ruleId, $clinicId]);
         if ($rule === null) {
             return false;
         }
-        Db::run('UPDATE priority_rules SET is_active = ? WHERE id = ? AND clinic_id = ?', [$active ? 1 : 0, $ruleId, $clinicId]);
+        Db::run('UPDATE priority_rules SET is_active = ?, updated_at = ? WHERE id = ? AND clinic_id = ?',
+            [$active ? 1 : 0, Db::now(), $ruleId, $clinicId]);
+        $this->record($clinicId, $ruleId, (string) $rule['name'], $active ? 'enabled' : 'disabled', null,
+            $active ? 'Turned on.' : 'Turned off; it no longer decides arrivals.',
+            ['is_active' => (int) $rule['is_active']], ['is_active' => $active ? 1 : 0]);
         return true;
     }
 
     public function delete(int $clinicId, int $ruleId): bool
     {
-        $rule = Db::one('SELECT id FROM priority_rules WHERE id = ? AND clinic_id = ?', [$ruleId, $clinicId]);
+        $rule = Db::one('SELECT * FROM priority_rules WHERE id = ? AND clinic_id = ?', [$ruleId, $clinicId]);
         if ($rule === null) {
             return false;
         }
@@ -190,13 +344,17 @@ final class PriorityRuleService
         // the foreign reference is cleared, so the audit trail still reads.
         Db::run('UPDATE queue_entries SET priority_rule_id = NULL WHERE priority_rule_id = ?', [$ruleId]);
         Db::run('DELETE FROM priority_rules WHERE id = ? AND clinic_id = ?', [$ruleId, $clinicId]);
+        // History keeps the name and the full rule, so a deleted policy is
+        // still readable months later.
+        $this->record($clinicId, $ruleId, (string) $rule['name'], 'deleted', null,
+            'Deleted. Entries it already decided keep their reason.', $rule, null);
         return true;
     }
 
     /**
      * Which rule, if any, decides this arrival.
      *
-     * @param array $ctx clinic_id, queue_id, kind, doctor_id, source, age, hour
+     * @param array $ctx clinic_id, queue_id, kind, doctor_id, source, age, hour, temp_c_x10
      * @return array{priority:int, reason:string, rule_id:?int, rule_name:?string}
      *               priority 0 and rule_id null when nothing matches.
      */
@@ -210,10 +368,11 @@ final class PriorityRuleService
         $kind = $ctx['kind'] ?? null;
         $doctorId = isset($ctx['doctor_id']) ? (int) $ctx['doctor_id'] : null;
         $queueId = isset($ctx['queue_id']) ? (int) $ctx['queue_id'] : null;
+        $temp = isset($ctx['temp_c_x10']) && $ctx['temp_c_x10'] !== null ? (int) $ctx['temp_c_x10'] : null;
 
-        // Ordered by effect desc, so the first match is the strongest boost.
-        // A penalty only applies when nothing else matches, which falls out of
-        // the same ordering: boosts are positive and sort first.
+        // rules() returns the manager's ranked list, so the FIRST match decides
+        // and the loop stops there. Position is the policy; `effect` is only
+        // what the winning rule writes onto the entry.
         $best = null;
         foreach ($this->rules($clinicId) as $rule) {
             if ($rule['queue_id'] !== null && (int) $rule['queue_id'] !== $queueId) {
@@ -244,10 +403,18 @@ final class PriorityRuleService
                     continue;
                 }
             }
-
-            if ($best === null || (int) $rule['effect'] > (int) $best['effect']) {
-                $best = $rule;
+            // An unmeasured patient is not an afebrile one: no reading means a
+            // temperature rule cannot match, exactly as no birth year means an
+            // age rule cannot.
+            if ($rule['min_temp_x10'] !== null && ($temp === null || $temp < (int) $rule['min_temp_x10'])) {
+                continue;
             }
+            if ($rule['max_temp_x10'] !== null && ($temp === null || $temp > (int) $rule['max_temp_x10'])) {
+                continue;
+            }
+
+            $best = $rule;
+            break;
         }
 
         if ($best === null) {
@@ -295,6 +462,15 @@ final class PriorityRuleService
             $parts[] = 'age ' . $rule['min_age'] . '+';
         } elseif ($rule['max_age'] !== null) {
             $parts[] = 'age ' . $rule['max_age'] . ' and under';
+        }
+        $minTemp = $rule['min_temp_x10'] ?? null;
+        $maxTemp = $rule['max_temp_x10'] ?? null;
+        if ($minTemp !== null && $maxTemp !== null) {
+            $parts[] = self::tenthsToText((int) $minTemp) . '–' . self::tenthsToText((int) $maxTemp) . ' °C';
+        } elseif ($minTemp !== null) {
+            $parts[] = 'temperature ' . self::tenthsToText((int) $minTemp) . ' °C and above';
+        } elseif ($maxTemp !== null) {
+            $parts[] = 'temperature up to ' . self::tenthsToText((int) $maxTemp) . ' °C';
         }
         if ($rule['from_hour'] !== null || $rule['to_hour'] !== null) {
             $from = (int) ($rule['from_hour'] ?? 0);

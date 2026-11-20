@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { PHP } from '@php-wasm/universal';
 import { loadNodeRuntime, useHostFilesystem } from '@php-wasm/node';
+import { expandPhpKeys } from './form-parser.mjs';
 
 const ROOT = path.resolve(process.cwd());
 const PORT = Number(process.env.PORT || 8080);
@@ -93,7 +94,26 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://' + (req.headers.host || 'localhost'));
 
   try {
-    if (serveStatic(req, res, decodeURIComponent(url.pathname))) return;
+    // Mount prefix, for testing a subdirectory install (htdocs/clinicqueue) or
+    // for serving behind a reverse proxy that strips a path. Apache + XAMPP
+    // produce this naturally; a Node server has to be told.
+    const MOUNT = (process.env.QP_MOUNT || '').replace(/\/+$/, '');
+    if (MOUNT !== '') {
+      const p = decodeURIComponent(url.pathname);
+      if (p === MOUNT) {
+        res.writeHead(301, { Location: MOUNT + '/' });
+        res.end();
+        return;
+      }
+      if (!p.startsWith(MOUNT + '/')) {
+        res.writeHead(404, { 'content-type': 'text/plain' });
+        res.end(`Not mounted here. This server serves under ${MOUNT}/`);
+        return;
+      }
+      // Static files keep their full path for serveStatic; PHP sees the
+      // stripped one, which is what Request::path() has to cope with anyway.
+      if (serveStatic(req, res, p.slice(MOUNT.length))) return;
+    } else if (serveStatic(req, res, decodeURIComponent(url.pathname))) return;
 
     const raw = await readBody(req);
     const contentType = (req.headers['content-type'] || '').split(';')[0].trim();
@@ -101,7 +121,7 @@ const server = http.createServer(async (req, res) => {
     let rawBody = '';
 
     if (contentType === 'application/x-www-form-urlencoded') {
-      post = Object.fromEntries(new URLSearchParams(raw.toString('utf8')));
+      post = expandPhpKeys([...new URLSearchParams(raw.toString('utf8')).entries()]);
     } else if (contentType === 'application/json') {
       rawBody = raw.toString('utf8');
       try {
@@ -126,7 +146,10 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    const mount = (process.env.QP_MOUNT || '').replace(/\/+$/, '');
     const serverVars = {
+      // REQUEST_URI keeps the mount prefix, exactly as Apache gives it. That is
+      // the whole point of this mode: Request::path() has to strip it.
       REQUEST_URI: req.url,
       REQUEST_METHOD: req.method,
       QUERY_STRING: url.search.slice(1),
@@ -224,6 +247,15 @@ require ${JSON.stringify(ROOT + '/public/index.php')};
     if (meta.encoding === 'base64') payload = Buffer.from(body, 'base64');
 
     const headers = { ...meta.headers };
+    // PHP's implicit text/html never appears in headers_list(), so a page
+    // response arrives with NO Content-Type. With X-Content-Type-Options:
+    // nosniff (set by Response) the browser then refuses to guess and prints
+    // the markup as escaped source. Default it here — tools/serve-role.mjs
+    // and serve-landing.mjs already carry this fix; anything genuinely
+    // non-HTML (QR png, JSON, zip) sends its own header and keeps it.
+    if (!Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')) {
+      headers['Content-Type'] = 'text/html; charset=utf-8';
+    }
     delete headers['Content-Length'];
     headers['Content-Length'] = Buffer.byteLength(payload);
     res.writeHead(meta.status || 200, headers);

@@ -187,3 +187,95 @@ Two settings that break sign-in if changed carelessly:
 4. If patient data may be involved: follow `docs/CONTINUITY.md` (paper
    fallback), and do not restart into a backup without a second pair of eyes on
    which rows would be lost.
+
+## Deploying behind OpenLiteSpeed (CyberPanel) or cPanel
+
+This section exists because both panels default to something that breaks this
+app in a specific way. Read it before the first install, not after.
+
+### The document root must be `public/`
+
+```
+/srv/queuepilot
+├── app/            ← never web-reachable
+├── database/
+├── docs/
+├── resources/
+├── storage/        ← never web-reachable
+├── tools/
+├── .env            ← never web-reachable
+└── public/         ← THIS is the site root
+```
+
+**CyberPanel:** Websites → Manage → change the document root to
+`/home/<user>/public_html/queuepilot/public` (or the equivalent), or create the
+site with that root from the start.
+
+**cPanel:** `public_html` is the root and cannot be changed. Either install the
+app *above* `public_html` and point a rewrite at it, or upload only `public/`
+into `public_html` and keep the rest in `~/queuepilot`. The second is cleaner:
+
+```
+~/queuepilot/{app,database,resources,storage,tools,.env}
+~/public_html/index.php        → requires ../queuepilot/public/index.php
+~/public_html/assets/          → symlink to ../queuepilot/public/assets
+```
+
+If the root points at the repository instead of `public/`, then `/.env` is a
+plain text file containing `APP_KEY`, the database password and the SMS token,
+and `GET /.env` returns it. Nothing else in this document matters as
+much as that one line.
+
+### Rewrites are not `.htaccess` on OpenLiteSpeed
+
+OLS ignores `.htaccess` unless per-vhost rewriting is explicitly enabled.
+Apache-style syntax does work in CyberPanel's per-vhost **Rewrite Rules** box:
+
+```apache
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [L]
+```
+
+For cPanel/Apache the repository's `public/.htaccess` already does this. Ship
+both; the file is inert where it is not read.
+
+### No daemons: drive the work from cron
+
+Shared hosting will kill a long-running process. Both panels are happiest with
+one-shot invocations, which is what these tools are written for:
+
+```cron
+*/2 * * * * cd ~/queuepilot && php tools/queue-worker.php >> storage/logs/worker.log 2>&1
+15 2 * * *  cd ~/queuepilot && php tools/backup.php >> storage/logs/backup.log 2>&1
+*/30 * * * * cd ~/queuepilot && php tools/invoices.php --yes >> storage/logs/invoices.log 2>&1
+30 3 * * *  cd ~/queuepilot && php tools/trials.php --yes >> storage/logs/trials.log 2>&1
+0 4 * * *   cd ~/queuepilot && php tools/purge.php --yes >> storage/logs/purge.log 2>&1
+```
+
+`tools/trials.php` is not optional once you sell trials: without it a trial
+never ends, because expiry is a scheduled decision rather than a request-time
+one.
+
+### No Node in production
+
+Tailwind and every tool under `tools/*.mjs` are build-time only. Run
+`npm run css` locally and commit the output; do not expect `node` on a cPanel
+account. `tools/serve.mjs` and the php-wasm harness are development conveniences
+and must not be used to serve traffic.
+
+### Caching must not touch authenticated responses
+
+If LiteSpeed Cache is enabled, exclude `/app`, `/admin`, `/settings`,
+`/patients`, `/queue`, `/reports`, `/billing` and every `/api/` path. A cached
+dashboard or queue board is one clinic's patient list served to another, which
+is the worst failure this application can have. Only `/assets/` and the public
+landing page are safe to cache.
+
+### Database naming
+
+cPanel prefixes databases and users (`myaccount_queuepilot`) and restricts the
+host to `localhost`. Nothing in `.env` may hardcode a database name; set
+`DB_DATABASE`, `DB_USERNAME` and `DB_PASSWORD` to the prefixed values the panel
+gives you, and keep `DB_HOST=localhost`.

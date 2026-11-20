@@ -54,6 +54,76 @@ final class AdminController
         ]);
     }
 
+    /**
+     * Platform health, as a page.
+     *
+     * Every other admin screen here answers "is the business OK"; this one
+     * answers "is the software OK" — the same checks /api/health returns,
+     * readable by a person instead of a probe. It exists because the
+     * Incidents page linked to /admin/monitor for years without this route
+     * ever existing: the button 404'd, so whoever owned incidents had no way
+     * to see the platform state behind them.
+     *
+     * Super admin only — the checks name tenants, queue depth and staff.
+     */
+    public function monitor(): void
+    {
+        $service = new \App\Services\MonitorService();
+        $result = $service->run();
+
+        // ?clinic=<id> narrows the same checks to one tenant, which is the
+        // view to open when a single branch reports trouble.
+        $clinicId = Request::int('clinic');
+        $scoped = null;
+        if ($clinicId > 0) {
+            $scoped = Db::row('SELECT id, name FROM clinics WHERE id = ? LIMIT 1', [$clinicId]);
+            if ($scoped !== null) {
+                $result = $service->run($clinicId);
+            }
+        }
+
+        view('admin/monitor', [
+            'title'      => 'Platform health',
+            'status'     => $result['status'],
+            'checks'     => $result['checks'],
+            'generated'  => $result['generated_at'],
+            'scoped'     => $scoped,
+            'alerts'     => $service->openAlerts(),
+            // Recent incidents, so a failing check can be read next to what
+            // the team already knows about rather than in isolation.
+            'incidents'  => $this->recentIncidents(),
+        ]);
+    }
+
+    /**
+     * The incidents table is created by migration 0012, and a monitor page
+     * that 500s on a database that has not run it is worse than one that
+     * simply shows no incidents -- health tooling is exactly what you open
+     * while the platform is already unwell.
+     */
+    private function recentIncidents(): array
+    {
+        try {
+            if (Db::scalar("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'incidents' LIMIT 1") !== null) {
+                return Db::all(
+                    'SELECT id, reference, title, severity, status, clinic_id, detected_at
+                       FROM incidents ORDER BY detected_at DESC LIMIT 8'
+                );
+            }
+        } catch (\Throwable $e) {
+            // Driver without sqlite_master (MySQL) falls through to the
+            // information_schema check below.
+        }
+        try {
+            return Db::all(
+                'SELECT id, reference, title, severity, status, clinic_id, detected_at
+                   FROM incidents ORDER BY detected_at DESC LIMIT 8'
+            );
+        } catch (\Throwable $e) {
+            return [];
+        }
+    }
+
     public function clinics(): void
     {
         $clinics = Db::all(

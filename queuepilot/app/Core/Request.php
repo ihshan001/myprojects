@@ -14,6 +14,21 @@ final class Request
     {
         $uri = $_SERVER['REQUEST_URI'] ?? '/';
         $path = parse_url($uri, PHP_URL_PATH) ?: '/';
+
+        // An install mounted under a path (http://localhost/clinicqueue) sees
+        // REQUEST_URI as /clinicqueue/login while the route table says /login.
+        // Without this strip, EVERY route 404s — the app looks installed and
+        // completely broken at the same time. The prefix comes from the path on
+        // APP_URL, which is the single place the mount point is declared.
+        $base = base_path();
+        if ($base !== '') {
+            if ($path === $base) {
+                $path = '/';
+            } elseif (str_starts_with($path, $base . '/')) {
+                $path = substr($path, strlen($base));
+            }
+        }
+
         return '/' . trim($path, '/');
     }
 

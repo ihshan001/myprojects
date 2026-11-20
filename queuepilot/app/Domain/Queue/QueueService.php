@@ -332,17 +332,42 @@ final class QueueService
                 // Only `call` and `start` are gated: a desk may still cancel,
                 // skip or transfer a patient before the doctor arrives, and
                 // someone already in consultation must always be able to finish.
-                if (in_array($action, ['call', 'start'], true)) {
-                    $sessionStarted = Db::scalar(
-                        'SELECT started_at FROM queues WHERE id = ? AND clinic_id = ?',
+                // `complete_next` also calls, so it is gated with the others.
+                if (in_array($action, ['call', 'start', 'complete_next'], true)) {
+                    $queueState = Db::one(
+                        'SELECT started_at, status, break_started_at FROM queues WHERE id = ? AND clinic_id = ?',
                         [(int) $entry['queue_id'], $clinicId]
                     );
-                    if ($sessionStarted === null) {
+                    if (($queueState['started_at'] ?? null) === null) {
                         return [
                             'ok' => false,
                             'status' => (string) $entry['status'],
                             'message' => 'That session has not been started yet. '
                                 . 'Press "Start session" when the doctor is ready — patients are still queued.',
+                        ];
+                    }
+
+                    /* A paused queue must not call the next patient.
+                     *
+                     * Pausing already stopped new tokens being issued, so a
+                     * doctor stepping out does not come back to a longer line.
+                     * It did not stop the doctor calling somebody in, which is
+                     * the other half of the same promise: a patient called while
+                     * the doctor is away walks to a closed door and is then
+                     * marked absent for not being there. Ending a break is one
+                     * click, and the message says so.
+                     *
+                     * `start` is gated too — it means "the patient has entered
+                     * the room" — but `complete` deliberately is not: somebody
+                     * mid-consultation when the break starts must still be able
+                     * to finish.
+                     */
+                    if (($queueState['status'] ?? '') === 'paused' || !empty($queueState['break_started_at'])) {
+                        return [
+                            'ok' => false,
+                            'status' => (string) $entry['status'],
+                            'message' => 'This queue is paused. End the break before calling the next patient '
+                                . '— nobody should be called to a room with no doctor in it.',
                         ];
                     }
                 }
@@ -488,6 +513,49 @@ final class QueueService
                     ]);
                 }
 
+                // "Complete & call next" — the one action that finishes a visit
+                // and rings in the following patient together. It stays inside
+                // this transaction on purpose: if the call cannot be written,
+                // the completion rolls back with it, and a doctor is never left
+                // with a finished visit in front of a silent waiting room.
+                $calledNext = null;
+                if ($action === 'complete_next' && $to === QueueStateMachine::COMPLETED) {
+                    $next = $this->repo->nextWaitingForCall($clinicId, (int) $entry['queue_id'], $entryId);
+
+                    if ($next === null) {
+                        $message = 'Consultation completed for ' . $entry['token_label']
+                            . '. Nobody else is waiting.';
+                    } else {
+                        [$nextTo, $nextPatch] = $this->plan($next, 'call', []);
+                        $nextPatch['status']  = $nextTo;
+                        $nextPatch['version'] = (int) $next['version'] + 1;
+
+                        if ($this->updateEntry($clinicId, (int) $next['id'], $nextPatch, (int) $next['version']) === 1) {
+                            $this->recordEvent(
+                                $clinicId, (int) $next['queue_id'], (int) $next['id'],
+                                'entry.call', $next['status'], $nextTo, null,
+                                ['by' => Auth::id(), 'via' => 'complete_next']
+                            );
+                            $this->audit->log($clinicId, 'queue.call', 'queue_entry', (int) $next['id'], [
+                                'from' => $next['status'], 'to' => $nextTo, 'via' => 'complete_next',
+                            ]);
+                            $this->notifications->queue($clinicId, (int) $next['id'], 'entry_called', [
+                                'token' => $next['token_label'],
+                                'room'  => $ctx['room'] ?? null,
+                            ]);
+
+                            $calledNext = $this->repo->entry($clinicId, (int) $next['id']);
+                            $message = 'Consultation completed for ' . $entry['token_label']
+                                . '. Called ' . $next['token_label'] . '.';
+                        } else {
+                            // Lost the race on the next row. The completion
+                            // still stands; say so rather than implying a call.
+                            $message = 'Consultation completed for ' . $entry['token_label']
+                                . '. The next patient was taken on another device.';
+                        }
+                    }
+                }
+
                 $result = [
                     'ok' => true,
                     'status' => $to,
@@ -501,6 +569,9 @@ final class QueueService
                         'token' => $issued['token'],
                         'track_url' => $issued['track_url'],
                     ];
+                }
+                if ($calledNext !== null) {
+                    $result['called_next'] = $calledNext;
                 }
                 return $result;
             });
@@ -551,7 +622,20 @@ final class QueueService
                 $entry['token_label'] . ' is now in consultation.',
             ],
 
+            // Completes this visit and immediately rings in the next patient.
+            // It is a single explicit action the doctor chooses — the engine
+            // must never call anyone on its own after a completion.
             'complete' => [
+                QueueStateMachine::COMPLETED,
+                [
+                    'finished_at' => $now,
+                    'wait_minutes' => $this->minsBetween($entry['joined_at'], $entry['started_at'] ?? $now),
+                    'consult_minutes' => $this->minsBetween($entry['started_at'] ?? $now, $now),
+                ],
+                'Consultation completed for ' . $entry['token_label'] . '.',
+            ],
+
+            'complete_next' => [
                 QueueStateMachine::COMPLETED,
                 [
                     'finished_at' => $now,

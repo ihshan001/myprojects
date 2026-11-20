@@ -68,7 +68,7 @@
                   </details>
 
                   <form method="post" action="/rooms/<?= (int) $r['id'] ?>/delete"
-                        onsubmit="return confirm('Remove <?= e(addslashes((string) $r['name'])) ?>? A room still assigned to a doctor cannot be removed.')">
+                        data-confirm="Remove <?= e((string) $r['name']) ?>? A room still assigned to a doctor cannot be removed.">
                     <?= csrf_field() ?>
                     <button class="text-[11px] font-medium text-ink-400 underline hover:text-rose-700">remove</button>
                   </form>

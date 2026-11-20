@@ -78,17 +78,19 @@ final class ClinicService
             }
 
             $plan = Db::one('SELECT * FROM plans WHERE code = ?', [$planCode]);
-            $trialEnds = date('Y-m-d', strtotime('+14 days'));
 
             $clinicId = Db::insert(
                 'INSERT INTO clinics (slug, name, phone, email, city, district, timezone, locale, plan_id,
-                    billing_status, trial_ends_on, token_prefix, created_at, updated_at)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    billing_status, token_prefix, created_at, updated_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
                 [
                     $slug, $data['name'], $data['phone'] ?? null, $data['email'] ?? null,
                     $data['city'] ?? null, $data['district'] ?? null,
                     'Asia/Colombo', 'en', $plan['id'] ?? null,
-                    'trial', $trialEnds, strtoupper(substr($slug, 0, 1)),
+                    // Not 'trial'. A trial is a platform decision, granted
+                    // deliberately for a named clinic, not something anybody
+                    // gets by filling in the signup form.
+                    'pending', strtoupper(substr($slug, 0, 1)),
                     Db::now(), Db::now(),
                 ]
             );
@@ -124,12 +126,23 @@ final class ClinicService
             Db::insert(
                 "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
                  VALUES (?,?,?,?, 'open', ?, ?, 0, 3, ?)",
-                [$clinicId, $doctorId, 'OPD — Consultation', 'consultation', Db::today(), strtoupper(substr($slug, 0, 1)), Db::now()]
+                [$clinicId, $doctorId, 'OPD — Consultation', 'consultation', Db::today(),
+                 (new DoctorService())->prefixFor($clinicId, $doctorId), Db::now()]
             );
 
             Db::insert(
                 "INSERT INTO settings (scope, owner_id, key_name, value) VALUES ('clinic', ?, 'onboarding', 'done')",
                 [$clinicId]
+            );
+
+            // The signup page promises a waiting-room display key, and until
+            // this row exists there is nothing for a patient to open: the
+            // board, the position screen and the phone board are all keyed off
+            // it. Creating it on demand the first time somebody asked left a
+            // new clinic with a promise and no board.
+            Db::insert(
+                "INSERT INTO settings (scope, owner_id, key_name, value) VALUES ('clinic', ?, 'display_token', ?)",
+                [$clinicId, Str::urlToken(20)]
             );
 
             return ['clinic_id' => $clinicId, 'slug' => $slug, 'owner_email' => mb_strtolower($data['email'])];
@@ -141,7 +154,8 @@ final class ClinicService
         Db::run(
             'UPDATE clinics SET name = ?, phone = ?, email = ?, address_line = ?, city = ?, district = ?,
                     brand_color = ?, locale = ?, token_prefix = ?, late_grace_minutes = ?,
-                    notify_approach = ?, approach_threshold = ?, updated_at = ?
+                    notify_approach = ?, approach_threshold = ?,
+                    legal_name = ?, tax_id = ?, billing_email = ?, po_number = ?, updated_at = ?
               WHERE id = ?',
             [
                 $data['name'], $data['phone'] ?? null, $data['email'] ?? null,
@@ -151,6 +165,13 @@ final class ClinicService
                 (int) ($data['late_grace_minutes'] ?? 15),
                 !empty($data['notify_approach']) ? 1 : 0,
                 max(1, min(10, (int) ($data['approach_threshold'] ?? 2))),
+                // Billing identity. Blank falls back to the clinic's own name
+                // and email rather than rendering an empty invoice header: an
+                // invoice with no legal name on it cannot be filed.
+                ($data['legal_name'] ?? '') !== '' ? $data['legal_name'] : $data['name'],
+                ($data['tax_id'] ?? '') !== '' ? $data['tax_id'] : null,
+                ($data['billing_email'] ?? '') !== '' ? $data['billing_email'] : ($data['email'] ?? null),
+                ($data['po_number'] ?? '') !== '' ? $data['po_number'] : null,
                 Db::now(), $clinicId,
             ]
         );

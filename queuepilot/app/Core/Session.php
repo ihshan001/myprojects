@@ -13,17 +13,43 @@ final class Session
         $lifetime = (int) Env::get('security.session_lifetime', 28800);
         $secure = (($_SERVER['HTTPS'] ?? '') === 'on') || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
 
+        // Resolved against QP_ROOT, never the process working directory.
+        //
+        // SESSION_PATH is a relative path in .env. PHP resolves a relative
+        // session.save_path against the CWD, which is `public/` under the dev
+        // server and the front-controller's directory under some FastCGI
+        // setups — so sessions landed in public/storage/sessions, inside the
+        // document root, where /storage/sessions/sess_<id> answered 200 and
+        // served the session contents. Anything inside the web root is public
+        // by definition; a session directory there is a session-hijack
+        // primitive, not a configuration detail.
         $savePath = (string) Env::get('security.session_path', '');
         if ($savePath !== '') {
+            if (!str_starts_with($savePath, '/')) {
+                $savePath = QP_ROOT . '/' . ltrim($savePath, '/');
+            }
             if (!is_dir($savePath)) {
-                @mkdir($savePath, 0775, true);
+                @mkdir($savePath, 0770, true);
             }
             if (is_dir($savePath) && is_writable($savePath)) {
                 session_save_path($savePath);
             }
         }
 
-        session_name((string) Env::get('security.session_name', 'qp_session'));
+        // The cookie name carries the tenant. Two clinics on two subdomains of
+        // the same parent domain would otherwise share a cookie: the browser
+        // sends `qp_session` to *.queue.lk, so a session started on serenity's
+        // host is presented to lakeview's. Tenant::bind() would catch it, but
+        // it should never have been sent — and a shared cookie also means
+        // two clinics cannot be signed in at once in one browser, which is
+        // exactly what support does all day.
+        //
+        // Scoped to the exact host where possible: `domain` is left unset, so
+        // the cookie is host-only and never reaches a sibling subdomain.
+        session_name((string) Env::get('security.session_name', 'qp_session')
+            . (\App\Core\Tenant::clinicId() !== null
+                ? '_' . \App\Core\Tenant::clinicId()
+                : ''));
         // SameSite=None lets the session cookie survive cross-origin proxying
         // (e.g. the live preview at https://{port}-{sandboxId}.e2b.app), where
         // Lax would be dropped on the redirect after login. Secure is required

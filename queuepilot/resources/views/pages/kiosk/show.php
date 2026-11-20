@@ -161,7 +161,7 @@ $chosenQueue = (int) ($old['queue_id'] ?? 0) ?: ($first !== null ? (int) $first[
     <?php endif; ?>
 
     <p class="mt-8 text-center text-[10px] text-slate-400">
-      Powered by QueuePilot · this screen shows no other patient's details
+      Powered by <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?> · this screen shows no other patient's details
     </p>
   </main>
 </body>

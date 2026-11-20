@@ -127,6 +127,38 @@ $avgWait = $summary['avg_wait'] ?? null;
                 </button>
               </form>
             <?php endif; ?>
+            <?php /* The notice button. Never fires on its own — staff press it
+                     when they know something the line needs to hear. */ ?>
+            <details class="relative">
+              <summary class="btn-sm btn-secondary list-none" title="Message everyone still waiting">
+                <svg class="h-3.5 w-3.5"><use href="#i-megaphone"/></svg>
+              </summary>
+              <div class="absolute right-0 z-20 mt-2 w-72 rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
+                <p class="text-[11px] font-bold text-slate-900">Tell everyone waiting</p>
+                <p class="mt-1 text-[10px] leading-snug text-slate-500">
+                  Sends one message to each patient still in this line who has a number.
+                </p>
+                <form method="post" action="/queue/notify" class="mt-2 space-y-1.5">
+                  <?= csrf_field() ?>
+                  <input type="hidden" name="queue_id" value="<?= $qid ?>">
+                  <button name="preset" value="called_away" class="w-full rounded-lg bg-slate-50 px-2.5 py-1.5 text-left text-[11px] font-medium text-slate-800 hover:bg-slate-100">
+                    Doctor called away
+                  </button>
+                  <button name="preset" value="delayed" class="w-full rounded-lg bg-slate-50 px-2.5 py-1.5 text-left text-[11px] font-medium text-slate-800 hover:bg-slate-100">
+                    Running very late
+                  </button>
+                  <button name="preset" value="abandoned"
+                          class="w-full rounded-lg bg-rose-50 px-2.5 py-1.5 text-left text-[11px] font-medium text-rose-800 hover:bg-rose-100"
+                          data-confirm-submit="Tell everyone waiting that this session has been interrupted?"
+                          data-confirm-danger>
+                    Session interrupted
+                  </button>
+                  <input class="input !text-[11px]" name="message" maxlength="320"
+                         placeholder="Or write your own…">
+                  <button class="btn-primary btn-sm w-full">Send</button>
+                </form>
+              </div>
+            </details>
           </div>
         </header>
 

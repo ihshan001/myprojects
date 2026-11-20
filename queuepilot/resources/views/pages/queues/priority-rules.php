@@ -14,6 +14,29 @@
   </div>
 </div>
 
+<!-- Live and counted, not decorative: how many people in the building are
+     being held ahead of the line by a person rather than a rule. -->
+<div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+  <div class="card card-pad flex items-center gap-3">
+    <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+      <svg class="h-4 w-4"><use href="#i-check-circle"/></svg>
+    </span>
+    <div class="min-w-0">
+      <p class="text-lg font-bold leading-tight text-slate-900"><?= (int) ($activeCount ?? 0) ?></p>
+      <p class="truncate text-[11px] text-slate-500">Rules in action</p>
+    </div>
+  </div>
+  <div class="card card-pad flex items-center gap-3">
+    <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
+      <svg class="h-4 w-4"><use href="#i-shield"/></svg>
+    </span>
+    <div class="min-w-0">
+      <p class="text-lg font-bold leading-tight text-slate-900"><?= (int) ($overridingNow ?? 0) ?></p>
+      <p class="truncate text-[11px] text-slate-500">Overriding by hand, right now</p>
+    </div>
+  </div>
+</div>
+
 <?php if (!empty($errors)): ?>
   <div class="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
     <p class="font-semibold">That rule was not saved.</p>
@@ -40,12 +63,38 @@
           has a standing clinical priority.
         </p>
       <?php else: ?>
-        <div class="divide-y divide-slate-100">
-          <?php foreach ($rules as $rule): ?>
+        <?php $last = count($rules) - 1; ?>
+        <div class="divide-y divide-slate-100" data-rule-list>
+          <?php foreach ($rules as $i => $rule): ?>
             <?php $isActive = (int) $rule['is_active'] === 1; ?>
-            <div class="flex flex-wrap items-start gap-3 px-4 py-3 <?= $isActive ? '' : 'bg-slate-50/70' ?>">
+            <div class="flex flex-wrap items-start gap-3 px-4 py-3 <?= $isActive ? '' : 'bg-slate-50/70' ?>"
+                 draggable="true" data-rule-row="<?= (int) $rule['id'] ?>">
+              <!-- Order is the policy. A drag handle and up/down buttons, so the
+                   list can be reordered by mouse or by keyboard — a ranked list
+                   that only works one way locks out whoever uses the other. -->
+              <div class="flex shrink-0 flex-col items-center gap-0.5 pt-0.5">
+                <form method="post" action="/queues/priority-rules/<?= (int) $rule['id'] ?>/move">
+                  <?= csrf_field() ?>
+                  <input type="hidden" name="direction" value="up">
+                  <button type="submit" class="rule-nudge" <?= $i === 0 ? 'disabled' : '' ?>
+                          aria-label="Move <?= e($rule['name']) ?> up">
+                    <svg class="h-3.5 w-3.5"><use href="#i-arrow-up"/></svg>
+                  </button>
+                </form>
+                <span class="select-none px-0.5 text-[11px] font-bold text-slate-300" aria-hidden="true" data-rule-grip>⣿</span>
+                <form method="post" action="/queues/priority-rules/<?= (int) $rule['id'] ?>/move">
+                  <?= csrf_field() ?>
+                  <input type="hidden" name="direction" value="down">
+                  <button type="submit" class="rule-nudge" <?= $i === $last ? 'disabled' : '' ?>
+                          aria-label="Move <?= e($rule['name']) ?> down">
+                    <svg class="h-3.5 w-3.5"><use href="#i-chevron-down"/></svg>
+                  </button>
+                </form>
+              </div>
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-2">
+                  <span class="tabular w-5 shrink-0 text-[11px] font-bold text-slate-400"
+                        title="Position in the ranked list"><?= (int) ($rule['sort_order'] ?? ($i + 1)) ?></span>
                   <span class="font-medium text-slate-900"><?= e($rule['name']) ?></span>
                   <?php if ((int) $rule['effect'] > 0): ?>
                     <span class="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">+<?= (int) $rule['effect'] ?> ahead</span>
@@ -70,7 +119,7 @@
                   <button class="btn-secondary btn-sm" type="submit"><?= $isActive ? 'Turn off' : 'Turn on' ?></button>
                 </form>
                 <form method="post" action="/queues/priority-rules/<?= (int) $rule['id'] ?>/delete"
-                      onsubmit="return confirm('Delete this rule? Patients it already reordered keep their recorded reason.')">
+                      data-confirm-submit="Delete this rule? Patients it already reordered keep their recorded reason." data-confirm-danger>
                   <?= csrf_field() ?>
                   <button class="btn-secondary btn-sm text-red-700" type="submit">Delete</button>
                 </form>
@@ -98,7 +147,7 @@
       <p class="text-xs font-semibold text-slate-600">New rule</p>
     </div>
 
-    <form method="post" action="/queues/priority-rules" class="space-y-3 p-4">
+    <form method="post" action="/queues/priority-rules" class="space-y-3 p-4" data-rule-form>
       <?= csrf_field() ?>
 
       <div>
@@ -194,6 +243,28 @@
         Hours use the clinic's clock, 0–23. A window that crosses midnight is two rules.
       </p>
 
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="label" for="min_temp">Temperature at least (°C)</label>
+          <input class="input" id="min_temp" name="min_temp" type="number" step="0.1" min="34" max="43"
+                 value="<?= e(isset($old['min_temp']) && $old['min_temp'] !== ''
+                        ? (string) $old['min_temp']
+                        : '') ?>" placeholder="any">
+        </div>
+        <div>
+          <label class="label" for="max_temp">Temperature at most (°C)</label>
+          <input class="input" id="max_temp" name="max_temp" type="number" step="0.1" min="34" max="43"
+                 value="<?= e(isset($old['max_temp']) && $old['max_temp'] !== ''
+                        ? (string) $old['max_temp']
+                        : '') ?>" placeholder="any">
+        </div>
+      </div>
+      <p class="-mt-1 text-[11px] text-slate-500">
+        Fever triage: “at least 39.0” matches a measured fever. A patient whose
+        temperature was not taken never matches — not measured is not the same as
+        not febrile.
+      </p>
+
       <div>
         <label class="label" for="reason">Clinical reason</label>
         <input class="input" id="reason" name="reason" required maxlength="160"
@@ -206,6 +277,78 @@
       <button class="btn-primary w-full" type="submit">Save rule</button>
     </form>
   </div>
+</div>
+
+<!-- ==================== does prioritising actually help? ============== -->
+<?php
+// What priority DID to waiting times, measured rather than asserted.
+//
+// This is an observational comparison, not a controlled trial: a clinic that
+// prioritises children is also a clinic whose children arrive at different
+// hours. So the figure is always labelled "against unprioritised visits in
+// the same period", never as time "saved", and the sample sizes travel with
+// it so a reader can see how thin the evidence is.
+//
+// The sign is kept. Prioritising a group can come out SLOWER than baseline
+// in a given month, and clamping that to a flattering zero would hide the
+// one result a manager most needs to see.
+$dash        = '—';
+$baseMean    = $impact['baseline']['mean'] ?? null;
+$ruleDiff    = $impact['rule']['diff'] ?? null;
+$manualDiff  = $impact['manual']['diff'] ?? null;
+$minutes     = static fn (?float $d): string => $d === null
+    ? $dash
+    : (($d < 0 ? '−' : '') . (int) round(abs($d)) . ' min');
+$tooltip     = static fn (array $g): string => ($g['mean'] ?? null) === null
+    ? 'Fewer than 5 finished visits in this group — a mean of three is noise.'
+    : 'Compared with unprioritised visits in the same period. A minus means this group waited longer.';
+?>
+<div class="card mt-5 overflow-hidden">
+  <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
+    <p class="text-xs font-semibold text-slate-600">Did prioritising actually shorten the wait?</p>
+    <p class="text-[11px] text-slate-400">
+      <?= e($from) ?> to <?= e($to) ?> · measured on finished visits, against the
+      <?= (int) ($impact['baseline']['n'] ?? 0) ?> unprioritised ones in the same period
+    </p>
+  </div>
+
+  <?php if (!($impact['enough'] ?? false)): ?>
+    <p class="px-4 py-4 text-[12px] leading-relaxed text-slate-500">
+      Not enough finished visits in this period to compare yet — a group needs at least
+      <?= App\Services\PriorityImpactService::MIN_SAMPLES ?> before its average means anything.
+      Until then a dash is the honest answer, not a zero.
+    </p>
+  <?php else: ?>
+    <div class="grid grid-cols-3 divide-x divide-slate-100 border-b border-slate-100 text-center">
+      <div class="px-3 py-3">
+        <p class="text-xl font-bold text-slate-900"><?= e($baseMean === null ? $dash : ((int) round($baseMean) . 'm')) ?></p>
+        <p class="text-[10px] uppercase tracking-wide text-slate-500">
+          Unprioritised avg. wait (<?= (int) ($impact['baseline']['n'] ?? 0) ?>)
+        </p>
+      </div>
+      <div class="px-3 py-3" title="<?= e($tooltip($impact['rule'] ?? [])) ?>">
+        <p class="text-xl font-bold <?= $ruleDiff === null ? 'text-slate-400' : (($ruleDiff < 0) ? 'text-amber-700' : 'text-emerald-700') ?>">
+          <?= e($minutes($ruleDiff)) ?>
+        </p>
+        <p class="text-[10px] uppercase tracking-wide text-slate-500">
+          By rule (<?= (int) ($impact['rule']['n'] ?? 0) ?>)
+        </p>
+      </div>
+      <div class="px-3 py-3" title="<?= e($tooltip($impact['manual'] ?? [])) ?>">
+        <p class="text-xl font-bold <?= $manualDiff === null ? 'text-slate-400' : (($manualDiff < 0) ? 'text-amber-700' : 'text-emerald-700') ?>">
+          <?= e($minutes($manualDiff)) ?>
+        </p>
+        <p class="text-[10px] uppercase tracking-wide text-slate-500">
+          By hand (<?= (int) ($impact['manual']['n'] ?? 0) ?>)
+        </p>
+      </div>
+    </div>
+    <p class="px-4 py-2.5 text-[11px] leading-relaxed text-slate-500">
+      A minus means that group waited <b class="text-slate-700">longer</b> than unprioritised
+      patients. That is a real result, not a broken number: it usually means the flagged
+      patients were sicker to begin with, or that a rule is firing far more often than intended.
+    </p>
+  <?php endif; ?>
 </div>
 
 <!-- ==================== overuse ==================== -->
@@ -225,6 +368,28 @@ $severityTone = static fn (string $s): string => match ($s) {
       <p class="text-xs font-semibold text-slate-600">Who is overriding priority</p>
       <p class="text-[11px] text-slate-400"><?= e($from) ?> to <?= e($to) ?></p>
     </div>
+  <?php if (($history ?? []) !== []): ?>
+    <div class="card card-pad mt-5">
+      <h2 class="text-sm font-bold text-slate-900">What changed, and who changed it</h2>
+      <p class="mt-1 text-xs text-slate-500">
+        A priority order nobody typed has to be explainable afterwards. A rule's reason is copied onto the
+        entry it decided, but the rule itself can be edited or deleted — this is the record of that.
+      </p>
+      <ul class="mt-3 space-y-2">
+        <?php foreach ($history as $h): ?>
+          <li class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-l-2 border-slate-200 pl-3 text-xs">
+            <span class="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600"><?= e($h['action']) ?></span>
+            <span class="font-semibold text-slate-800"><?= e($h['rule_name']) ?></span>
+            <span class="text-slate-500"><?= e($h['detail'] ?? '') ?></span>
+            <span class="ml-auto shrink-0 text-[10px] text-slate-400">
+              <?= e($h['actor_name'] ?? 'system') ?> · <?= e(ago((string) $h['created_at'])) ?>
+            </span>
+          </li>
+        <?php endforeach; ?>
+      </ul>
+    </div>
+  <?php endif; ?>
+
     <form method="get" action="/queues/priority-rules" class="flex items-end gap-1.5">
       <input class="input !py-1.5 text-xs" type="date" name="from" value="<?= e($from) ?>">
       <input class="input !py-1.5 text-xs" type="date" name="to" value="<?= e($to) ?>">

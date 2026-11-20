@@ -7,6 +7,7 @@ use App\Core\Auth;
 use App\Core\Db;
 use App\Core\Request;
 use App\Services\AuditService;
+use App\Services\PriorityImpactService;
 use App\Services\PriorityRuleService;
 
 /**
@@ -22,6 +23,7 @@ final class PriorityRuleController
     public function __construct(
         private readonly PriorityRuleService $rules = new PriorityRuleService(),
         private readonly AuditService $audit = new AuditService(),
+        private readonly PriorityImpactService $impact = new PriorityImpactService(),
     ) {}
 
     private function clinicId(): int
@@ -33,17 +35,56 @@ final class PriorityRuleController
         return $id;
     }
 
-    public function index(): void
+    /**
+     * Everything the screen reads, built once.
+     *
+     * The tiles are measurements, not decoration: the active-rule count and the
+     * live override count are counted, the wait figures come from
+     * PriorityImpactService with a sample floor, and "last updated" is the newest
+     * rule change. Anything that cannot be measured yet arrives as null and the
+     * view prints a dash.
+     */
+    private function payload(int $clinicId, array $old = [], array $errors = []): array
     {
-        $clinicId = $this->clinicId();
-        $rules = $this->rules->rules($clinicId, false);
+        $allRules = $this->rules->rules($clinicId, false);
+        $activeCount = count(array_filter($allRules, static fn (array $r): bool => (int) $r['is_active'] === 1));
 
-        foreach ($rules as &$rule) {
-            $rule['matches'] = $this->rules->describeMatch($rule);
+        // Search is a GET parameter, not a client-side filter, so the list is
+        // still searchable with JavaScript off. `position` is assigned BEFORE
+        // filtering: it is the rule's true rank in the engine, not its index in
+        // the visible subset, or the number would misstate which rule wins.
+        $q = trim(Request::string('q', ''));
+        $needle = mb_strtolower($q);
+        // Status is a real filter, not a decorative button: "off" is how a
+        // manager finds the rules they suspended without deleting them.
+        $status = Request::string('status', 'all');
+        if (!in_array($status, ['all', 'active', 'off'], true)) {
+            $status = 'all';
         }
-        unset($rule);
+        $rules = [];
+        $position = 0;
+        foreach ($allRules as $rule) {
+            $rule['matches'] = $this->rules->describeMatch($rule);
+            $rule['position'] = ++$position;
+            $isActive = (int) $rule['is_active'] === 1;
+            if ($status === 'active' && !$isActive) {
+                continue;
+            }
+            if ($status === 'off' && $isActive) {
+                continue;
+            }
+            $haystack = mb_strtolower($rule['name'] . ' ' . ($rule['queue_name'] ?? '') . ' ' . ($rule['reason'] ?? ''));
+            if ($needle === '' || str_contains($haystack, $needle)) {
+                $rules[] = $rule;
+            }
+        }
 
-        view('queues/priority-rules', [
+        // Seven days inclusive of today, so the panel's "last 7 days" label is
+        // arithmetically true. `-7 days` would span eight calendar days.
+        $from = Request::string('from', date('Y-m-d', strtotime('-6 days')));
+        $to = Request::string('to', Db::today());
+
+        return [
             'title'    => 'Priority rules',
             'rules'    => $rules,
             'doctors'  => Db::all('SELECT id, name FROM doctors WHERE clinic_id = ? ORDER BY name', [$clinicId]),
@@ -54,19 +95,30 @@ final class PriorityRuleController
             ),
             'sources'  => PriorityRuleService::SOURCES,
             'kinds'    => PriorityRuleService::KINDS,
-            'old'      => [],
-            'errors'   => [],
-            // The rules decide who gets seen first; the overuse report is what
-            // shows whether they are still being used as intended. Both on one
-            // screen so a rule and its consequences are read together.
-            'overuse'  => (new \App\Services\PriorityAuditService())->report(
-                $clinicId,
-                Request::string('from', date('Y-m-d', strtotime('-30 days'))),
-                Request::string('to', Db::today())
-            ),
-            'from'     => Request::string('from', date('Y-m-d', strtotime('-30 days'))),
-            'to'       => Request::string('to', Db::today()),
-        ]);
+            'old'      => $old,
+            'errors'   => $errors,
+            'tab'      => Request::string('tab', 'active') === 'history' ? 'history' : 'active',
+            'history'  => $this->rules->history($clinicId),
+            'activeCount' => $activeCount,
+            'q'        => $q,
+            'status'   => $status,
+            // Dragging posts the whole order, so it is only offered when the
+            // visible list IS the whole list.
+            'filtering' => $q !== '' || $status !== 'all',
+            'overridingNow' => $this->impact->overridingNow($clinicId, Db::today()),
+            'impact'   => $this->impact->measure($clinicId, $from, $to),
+            'lastChangedAt' => $this->rules->lastChangedAt($clinicId),
+            // The overuse report answers a different question — who is overriding
+            // by hand — and keeps its own longer window.
+            'overuse'  => (new \App\Services\PriorityAuditService())->report($clinicId, $from, $to),
+            'from'     => $from,
+            'to'       => $to,
+        ];
+    }
+
+    public function index(): void
+    {
+        view('queues/priority-rules', $this->payload($this->clinicId()));
     }
 
     public function save(): void
@@ -77,26 +129,7 @@ final class PriorityRuleController
         try {
             $ruleId = $this->rules->create($clinicId, $in, Auth::id());
         } catch (\InvalidArgumentException $e) {
-            $rules = $this->rules->rules($clinicId, false);
-            foreach ($rules as &$rule) {
-                $rule['matches'] = $this->rules->describeMatch($rule);
-            }
-            unset($rule);
-
-            view('queues/priority-rules', [
-                'title'   => 'Priority rules',
-                'rules'   => $rules,
-                'doctors' => Db::all('SELECT id, name FROM doctors WHERE clinic_id = ? ORDER BY name', [$clinicId]),
-                'queues'  => Db::all(
-                    "SELECT id, name FROM queues WHERE clinic_id = ? AND session_date >= date('now', '-7 day')
-                      ORDER BY session_date DESC, id DESC",
-                    [$clinicId]
-                ),
-                'sources' => PriorityRuleService::SOURCES,
-                'kinds'   => PriorityRuleService::KINDS,
-                'old'     => $in,
-                'errors'  => [$e->getMessage()],
-            ]);
+            view('queues/priority-rules', $this->payload($clinicId, $in, [$e->getMessage()]));
             return;
         }
 
@@ -126,6 +159,33 @@ final class PriorityRuleController
         flash('success', $active
             ? 'Rule turned off. Entries it already decided keep their reason.'
             : 'Rule turned on. It applies from the next token.');
+        redirect('/queues/priority-rules');
+    }
+
+    /**
+     * Persist the order the manager dragged the list into.
+     *
+     * Rejects a partial or foreign list rather than applying half of it: two
+     * rules sharing a position would be ordered by id, which is precisely the
+     * invisible tiebreak this screen exists to remove.
+     */
+    public function reorder(): void
+    {
+        $clinicId = $this->clinicId();
+        $raw = Request::payload()['order'] ?? [];
+        if (is_string($raw)) {
+            $raw = array_filter(explode(',', $raw), static fn (string $v): bool => trim($v) !== '');
+        }
+        if (!is_array($raw) || !$this->rules->reorder($clinicId, array_values($raw), Auth::id())) {
+            flash('error', 'That order did not match this clinic\'s rules. The list has been reloaded.');
+            redirect('/queues/priority-rules');
+            return;
+        }
+
+        $this->audit->log($clinicId, 'priority_rule.reordered', 'priority_rule', null, [
+            'order' => array_map('intval', $raw),
+        ]);
+        flash('success', 'Order saved. The first matching rule now decides the next token.');
         redirect('/queues/priority-rules');
     }
 

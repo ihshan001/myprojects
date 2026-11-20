@@ -110,6 +110,41 @@ final class QrCode
      * The raw matrix with a specific mask forced on, for reference comparison.
      * Rows are '0'/'1' strings ('1' = dark).
      */
+    public static function dataUri(
+        string $text,
+        int $scale = 4,
+        string $dark = '#000000',
+        string $light = '#ffffff'
+    ): string {
+        $safe = static function (string $c, string $fallback): string {
+            return preg_match('/^#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?$/', $c) === 1 ? $c : $fallback;
+        };
+        $dark = $safe($dark, '#000000');
+        $light = $safe($light, '#ffffff');
+
+        $qr = new self();
+        $qr->encode($text);
+        $quiet = 4;
+        $dim = ($qr->size + $quiet * 2) * $scale;
+
+        // One path instead of hundreds of rects: a tracking page is opened on
+        // a phone over mobile data, so the payload matters.
+        $parts = [];
+        foreach ($qr->modules as $r => $row) {
+            foreach ($row as $c => $on) {
+                if ($on) {
+                    $parts[] = 'M' . (($c + $quiet) * $scale) . ' ' . (($r + $quiet) * $scale)
+                        . 'h' . $scale . 'v' . $scale . 'h-' . $scale . 'z';
+                }
+            }
+        }
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' . $dim . ' ' . $dim . '"'
+            . ' shape-rendering="crispEdges">'
+            . '<rect width="' . $dim . '" height="' . $dim . '" fill="' . $light . '"/>'
+            . '<path d="' . implode('', $parts) . '" fill="' . $dark . '"/></svg>';
+
+        return 'data:image/svg+xml;base64,' . base64_encode($svg);
+    }
     public static function matrixWithMask(string $text, int $mask): array
     {
         $qr = new self();

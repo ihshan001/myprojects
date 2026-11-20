@@ -7,6 +7,7 @@ use App\Core\Auth;
 use App\Core\Db;
 use App\Core\Request;
 use App\Services\AuditService;
+use App\Services\SubscriptionService;
 use App\Services\ClinicService;
 
 /**
@@ -20,6 +21,48 @@ use App\Services\ClinicService;
  */
 final class BillingController
 {
+    /**
+     * One invoice, as a document a clinic can print, save to PDF and hand to
+     * an accountant.
+     *
+     * Scoped to the signed-in clinic's own invoices: an invoice id from
+     * another clinic must 404, not 403, so the page cannot be used to probe
+     * which invoice numbers exist on the platform.
+     */
+    public function invoice(string $id): void
+    {
+        $clinicId = Auth::clinicId();
+        if ($clinicId === null) {
+            abort(403, 'Platform administrators do not have a clinic subscription.');
+            return;
+        }
+
+        $invoice = Db::one(
+            'SELECT * FROM invoices WHERE id = ? AND clinic_id = ?',
+            [(int) $id, $clinicId]
+        );
+        if ($invoice === null) {
+            abort(404, 'That invoice does not exist.');
+            return;
+        }
+
+        $clinic = Auth::clinic();
+        $plan = Db::one('SELECT name FROM plans WHERE id = ?', [(int) ($clinic['plan_id'] ?? 0)]);
+
+        header('Content-Type: text/html; charset=utf-8');
+        // The document must not be served from a cache: a status change (paid,
+        // rejected) has to show the moment the page is reloaded.
+        header('Cache-Control: no-store');
+        view('billing/invoice', [
+            'title' => 'Invoice ' . $invoice['number'],
+            'invoice' => $invoice,
+            'clinic' => $clinic,
+            'planName' => (string) ($plan['name'] ?? ''),
+            'company' => (array) \App\Core\Env::get('company', []),
+            'appName' => (string) \App\Core\Env::get('app.name', 'QueuePilot'),
+        ], false);   // false = the view is already a complete document
+    }
+
     public function index(): void
     {
         $clinicId = Auth::clinicId();
@@ -43,6 +86,13 @@ final class BillingController
             'plan' => $plan,
             'plans' => $service->plans(),
             'invoices' => Db::all('SELECT * FROM invoices WHERE clinic_id = ? ORDER BY id DESC LIMIT 24', [$clinicId]),
+            'payments' => (new SubscriptionService())->paymentsFor($clinicId),
+            'subscription' => (function () use ($clinicId): array {
+                $service = new SubscriptionService();
+                $service->ensureOpen($clinicId);          // clinics older than this table
+                return $service->current($clinicId) ?? [];
+            })(),
+            'planHistory' => (new SubscriptionService())->history($clinicId),
             'usage' => $usage,
             'notifStats' => (new \App\Services\NotificationService())->stats($clinicId),
             'suspended' => (bool) Request::int('suspended'),
@@ -78,6 +128,15 @@ final class BillingController
         }
 
         Db::run('UPDATE clinics SET plan_id = ?, updated_at = ? WHERE id = ?', [$planId, Db::now(), $clinicId]);
+
+        // clinics.plan_id can only describe the present. Recording the change
+        // is what makes "we used to be on Professional" answerable.
+        (new SubscriptionService())->open(
+            $clinicId,
+            $planId,
+            (string) (Auth::clinic()['billing_status'] ?? 'active'),
+            'Changed to ' . $plan['name'] . '.'
+        );
         (new AuditService())->log($clinicId, 'billing.plan_changed', 'clinic', $clinicId, [
             'plan' => $plan['code'], 'price' => $plan['price_monthly'],
         ]);
@@ -134,9 +193,23 @@ final class BillingController
             ['bank_transfer', $reference, Db::now(), $invoiceId, $clinicId]
         );
 
+        // The invoice says "claimed"; the durable record of *what was claimed*
+        // lives in payments. If an admin rejects it the invoice goes back to
+        // unpaid, and without this row the clinic's claim would go with it.
+        (new SubscriptionService())->claim($clinicId, $invoiceId, $reference, 'bank_transfer');
+
         (new AuditService())->log($clinicId, 'billing.payment_claimed', 'invoice', $invoiceId, [
             'amount' => $invoice['amount'], 'reference' => $reference,
         ]);
+
+        // The bell only reaches somebody looking at the console. The person who
+        // can check the bank is more likely to be in their inbox, and a claim
+        // that waits until they next sign in is a clinic that stays suspended.
+        try {
+            (new \App\Services\PlatformAlertService())->paymentClaimed($clinicId, $invoiceId);
+        } catch (\Throwable $e) {
+            \App\Core\Log::warn('platform.claim_alert_failed', ['error' => $e->getMessage()]);
+        }
 
         // Every platform administrator sees it, so a claim cannot sit
         // unnoticed behind one person's login.

@@ -116,7 +116,7 @@ $statusCopy = (string) $appointment['status'] === 'checked_in'
         </details>
 
         <form method="post" action="/a/<?= e($token) ?>/cancel" class="mt-3"
-              onsubmit="return confirm('Cancel this appointment? The time goes back to the clinic.');">
+              data-confirm="Cancel this appointment? The time goes back to the clinic.">
           <?= csrf_field() ?>
           <button type="submit" class="btn w-full justify-center border border-hairline bg-white text-xs text-rose-700 hover:bg-rose-50">
             I cannot come — cancel it

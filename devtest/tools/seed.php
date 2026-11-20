@@ -161,6 +161,30 @@ Db::transaction(function () use ($planIds, $today) {
         );
     }
 
+    // Standing priority rules. Every one of these is expressible by the
+    // engine: age, a recorded temperature, source and doctor. Nothing here is
+    // a label the evaluator cannot act on — "post-op" is not a fact the desk
+    // records, so the booked-review rule is named for what it actually matches.
+    //
+    // Order matters now: the first matching rule in this list decides. A child
+    // with a fever is decided by "Under-5 first" because it sits above the
+    // fever rule, which is the ordering a manager would expect to see and drag.
+    $ruleService = new \App\Services\PriorityRuleService();
+    foreach ([
+        ['Under-5 first', 6, ['max_age' => 4],
+            'Child under five — see before adults'],
+        ['High fever', 6, ['min_temp' => '39.0'],
+            'Febrile at 39.0 °C or above — assess promptly'],
+        ['Booked reviews ahead', 2, ['source' => 'appointment', 'doctor_id' => $doctors[0]],
+            'Booked review — keeps the appointment list moving'],
+        ['Elderly support', 2, ['min_age' => 65],
+            'Age 65 or over — limit time spent waiting'],
+    ] as [$ruleName, $effect, $conditions, $reason]) {
+        $ruleService->create($c1, $conditions + [
+            'name' => $ruleName, 'effect' => $effect, 'reason' => $reason,
+        ], $admin1);
+    }
+
     // historical completed visits (last 14 days) → makes wait estimates real
     $histStatuses = ['completed', 'completed', 'completed', 'no_show', 'completed', 'skipped'];
     foreach ($patients as $pi => $pid) {
@@ -171,14 +195,34 @@ Db::transaction(function () use ($planIds, $today) {
             $started = date('Y-m-d H:i:s', strtotime($joined) + (12 + $pi % 9) * 60);
             $done = date('Y-m-d H:i:s', strtotime($started) + (7 + ($pi * 3) % 12) * 60);
             $status = $histStatuses[$pi % count($histStatuses)];
+
+            // Attributed by the real evaluator, not labelled by hand: the
+            // same first-match-wins pass the desk runs decides whether this
+            // visit was prioritised and which rule did it. The wait formula
+            // below is left exactly as it was — the demo does not shorten
+            // prioritised waits to manufacture an improvement, so the page
+            // reports whatever this cohort actually measures.
+            $histSource = $pi % 3 === 0 ? 'appointment' : 'walkin';
+            $histQueue = Db::one('SELECT kind, doctor_id FROM queues WHERE id = ?', [$q]);
+            $histBirth = Db::scalar('SELECT birth_year FROM patients WHERE id = ?', [$pid]);
+            $histMatch = $ruleService->evaluate($c1, [
+                'queue_id'  => $q,
+                'kind'      => $histQueue['kind'] ?? null,
+                'doctor_id' => $histQueue['doctor_id'] ?? null,
+                'source'    => $histSource,
+                'age'       => $ruleService->ageOf($histBirth !== null ? (int) $histBirth : null),
+                'hour'      => (int) substr($joined, 11, 2),
+            ]);
             Db::insert(
                 'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status, priority,
-                    sort_weight, source, joined_at, called_at, started_at, finished_at, wait_minutes,
-                    consult_minutes, track_token, version)
-                 VALUES (?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,0)',
+                    priority_rule_id, priority_reason, sort_weight, source, joined_at, called_at, started_at,
+                    finished_at, wait_minutes, consult_minutes, track_token, version)
+                 VALUES (?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,0)',
                 [
                     $c1, $q, $pid, 100 + $pi + $d, 'H' . (100 + $pi + $d), $status,
-                    $pi % 3 === 0 ? 'appointment' : 'walkin',
+                    $histMatch['priority'], $histMatch['rule_id'],
+                    $histMatch['rule_id'] !== null ? $histMatch['reason'] : null,
+                    $histSource,
                     $joined, date('Y-m-d H:i:s', strtotime($joined) + 4 * 60),
                     $status === 'completed' ? $started : null,
                     $status === 'completed' ? $done : (in_array($status, ['no_show', 'skipped']) ? $done : null),
@@ -219,7 +263,7 @@ Db::transaction(function () use ($planIds, $today) {
         $called = in_array($status, ['called', 'in_consultation'], true)
             ? date('Y-m-d H:i:s', strtotime($joined) + 6 * 60) : null;
         $started = $status === 'in_consultation' ? date('Y-m-d H:i:s', strtotime($joined) + 9 * 60) : null;
-        Db::insert(
+        $liveEntryId = Db::insert(
             'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status, priority,
                 priority_reason, sort_weight, source, joined_at, called_at, started_at, call_count,
                 track_token, version, created_by)
@@ -232,6 +276,24 @@ Db::transaction(function () use ($planIds, $today) {
             ]
         );
         Db::run('UPDATE queues SET last_token_no = ? WHERE id = ?', [$n, $qid]);
+
+        // The override report is audit-driven, so the demo has to write the
+        // same rows the desk writes — otherwise the tile counts two live
+        // overrides while the report underneath it claims none happened.
+        Db::insert(
+            'INSERT INTO audit_logs (clinic_id, actor_id, action, entity, entity_id, ip, meta_json, created_at)
+             VALUES (?,?,?,?,?,?,?,?)',
+            [$c1, $recep1, 'queue.token_issued', 'queue_entry', $liveEntryId, '127.0.0.1',
+                json_encode(['token' => $prefix . Str::pad($n, 3), 'queue_id' => $qid]), $joined]
+        );
+        if ($priority !== 0) {
+            Db::insert(
+                'INSERT INTO audit_logs (clinic_id, actor_id, action, entity, entity_id, ip, meta_json, created_at)
+                 VALUES (?,?,?,?,?,?,?,?)',
+                [$c1, $recep1, 'queue.priority', 'queue_entry', $liveEntryId, '127.0.0.1',
+                    json_encode(['reason' => 'Chest pain — clinician approved priority', 'to' => $priority]), $joined]
+            );
+        }
     }
 
     // audit + display screen token
@@ -322,6 +384,51 @@ Db::transaction(function () use ($planIds, $today) {
         'INSERT INTO users (clinic_id, role, name, email, password_hash, locale, is_active, created_at)
          VALUES (NULL, ?, ?, ?, ?, ?, 1, ?)',
         ['super_admin', 'Platform Admin', 'owner@queuepilot.app', password_hash('QueuePilot#2026', PASSWORD_DEFAULT), 'en', Db::now()]
+    );
+
+    /* ---------- holidays ----------
+       The settings screen shows "upcoming holidays", so they have to be in
+       the FUTURE relative to the demo day. Seeding last year's dates would
+       make the panel permanently empty on a fresh install, which reads as a
+       bug rather than as "nothing scheduled". */
+    // Month-day only, so the year can be rolled forward. Sri Lankan public
+    // holidays: the two fixed national dates plus Good Friday, which is
+    // seeded as a fixed date because its real date is computed.
+    $holidaySeed = [
+        [$c1, '01-01', "New Year's Day"],
+        [$c1, '02-04', 'Independence Day'],
+        [$c1, '04-18', 'Good Friday'],
+        [$c2, '01-01', "New Year's Day"],
+        [$c2, '02-04', 'Independence Day'],
+    ];
+    $year = (int) date('Y');
+    foreach ($holidaySeed as [$cid, $md, $label]) {
+        // Already past this year? Roll to next year, so the list is always
+        // upcoming no matter when the demo is installed.
+        $date = $year . '-' . $md;
+        if ($date < Db::today()) {
+            $date = ($year + 1) . '-' . $md;
+        }
+        Db::insert(
+            'INSERT INTO holidays (clinic_id, date, name, created_by, created_at) VALUES (?,?,?,NULL,?)',
+            [$cid, $date, $label, Db::now()]
+        );
+    }
+
+    /* ---------- a pending staff invite ----------
+       The staff table on the settings screen lists people AND outstanding
+       invitations. With no pending invite the table has no "Invited" row and
+       the viewer never learns that state exists. */
+    Db::insert(
+        'INSERT INTO staff_invites (clinic_id, email, role, token_hash, invited_by, expires_at, created_at)
+         VALUES (?,?,?,?,?,?,?)',
+        [
+            $c1, 'kavindi.perera@serenity.lk', 'receptionist',
+            hash('sha256', 'demo-invite-token'),
+            (int) Db::scalar('SELECT id FROM users WHERE clinic_id = ? ORDER BY id LIMIT 1', [$c1]),
+            date('Y-m-d H:i:s', strtotime('+3 days')),
+            Db::now(),
+        ]
     );
 
     /* ---------- invoices ---------- */

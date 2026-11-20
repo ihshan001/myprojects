@@ -1,0 +1,52 @@
+# Front controller for a subdirectory install (htdocs\clinicqueue).
+#
+# This file exists so the whole repository can be dropped into htdocs and opened
+# at http://localhost/clinicqueue, which is how the system is usually tried for
+# the first time. Apache's document root is then this folder rather than `public/`,
+# so two things have to be arranged: routes have to reach index.php, and static
+# files have to be readable out of `public/`.
+#
+# The routing rule below is the only Apache-specific mechanism here, and it is the
+# standard four-line idiom — nothing below depends on the folder being called
+# "clinicqueue", so a folder named anything else works unchanged.
+#
+# A production install never reads this file: its DocumentRoot is `public/`, where
+# `public/.htaccess` does the same job with the document root already in place.
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # A real file or directory under the document root is served as-is. This keeps
+    # index.php itself working and stops a genuinely-present asset from being
+    # swallowed by the front controller.
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # Everything else is a route. The path arrives unchanged in REQUEST_URI, which
+    # is where Request::path() reads it, then strips the APP_URL prefix from.
+    RewriteRule ^ index.php [L]
+</IfModule>
+
+# Without mod_rewrite there is no front controller and every route 404s. Serve
+# index.php at least, rather than a directory listing of the source tree.
+DirectoryIndex index.php
+
+# Nothing above `public/` is part of the public surface. On a production install
+# this file is never consulted — the document root is one level in, so these paths
+# are not addressable at all. Here they sit under the document root, so they have
+# to be refused explicitly: .env holds the database password and APP_KEY, and
+# storage/ holds session files.
+<IfModule mod_authz_core.c>
+    <FilesMatch "^\.(env|git|htaccess)|\.(md|log|sql|sqlite|bak)$">
+        Require all denied
+    </FilesMatch>
+</IfModule>
+
+RedirectMatch 404 /\.git
+RedirectMatch 404 /\.env
+RedirectMatch 404 /(app|config|database|resources|storage|tests|tools|docs)(/|$)
+
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+</IfModule>

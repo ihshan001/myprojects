@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
-  <title><?= e($title ?? 'Link not valid') ?> · QueuePilot</title>
+  <title><?= e($title ?? 'Link not valid') ?> · <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?></title>
   <link rel="stylesheet" href="<?= e(asset('build/app.css')) ?>">
 </head>
 <body class="flex min-h-full items-center justify-center bg-slate-100 px-5">
@@ -28,7 +28,7 @@
         Call the clinic
       </a>
     <?php endif; ?>
-    <a href="/" class="btn-ghost mt-2 w-full text-xs">What is QueuePilot?</a>
+    <a href="/" class="btn-ghost mt-2 w-full text-xs">What is <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?>?</a>
   </div>
 </body>
 </html>

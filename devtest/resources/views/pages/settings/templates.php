@@ -56,7 +56,7 @@ $errorTemplate = (string) ($old['template'] ?? '');
         </div>
         <?php if ($t['customised']): ?>
           <form method="post" action="/settings/templates/reset"
-                onsubmit="return confirm('Go back to the default wording for this message?');">
+                data-confirm="Go back to the default wording for this message?">
             <?= csrf_field() ?>
             <input type="hidden" name="template" value="<?= e((string) $t['key']) ?>">
             <button class="btn-ghost text-xs">Use the default</button>
@@ -86,8 +86,7 @@ $errorTemplate = (string) ($old['template'] ?? '');
               <?php foreach ($t['allowed'] as $ph): ?>
                 <button type="button" class="rounded border border-hairline bg-white px-1.5 py-0.5 font-mono text-[10px]
                                                text-ink-700 hover:border-teal-400 hover:text-brand-700"
-                        onclick="(function(b){var f=b.closest('form'),t=f.querySelector('textarea');
-                                 t.value += '{<?= e($ph) ?>}'; t.focus();})(this)">
+                        data-insert="{<?= e($ph) ?>}">
                   {<?= e($ph) ?>}
                 </button>
               <?php endforeach; ?>

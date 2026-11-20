@@ -11,8 +11,20 @@ storage/backups/
 
 # dependencies and build tooling
 node_modules/
+# node_modules may be a symlink to ../devtest/node_modules. The plain
+# `node_modules/` rule matches directories only and would let the symlink be
+# committed as a dangling link on a fresh clone. No trailing slash catches both.
+node_modules
 .arena/
 
 # local environment
 .env
 .env.local
+
+# Never let a session or cache file inside the web root be committed.
+# /storage/sessions/sess_<id> answered 200 over HTTP once; see Session.php.
+public/storage/
+
+# Python bytecode from tools/sql-validate.py
+__pycache__/
+*.pyc

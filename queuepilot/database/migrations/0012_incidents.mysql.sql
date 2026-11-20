@@ -22,35 +22,39 @@
 -- =====================================================================
 
 CREATE TABLE IF NOT EXISTS incidents (
-  id           INTEGER PRIMARY KEY AUTO_INCREMENT,
-  clinic_id    INTEGER REFERENCES clinics(id) ON DELETE CASCADE,  -- NULL = platform-wide
-  reference    TEXT NOT NULL,
-  title        TEXT NOT NULL,
-  severity     TEXT NOT NULL DEFAULT 'minor',
-  status       TEXT NOT NULL DEFAULT 'open',
-  summary      TEXT,
-  detected_at  TEXT NOT NULL,
-  acknowledged_at TEXT,
-  resolved_at  TEXT,
-  created_by   INTEGER,
-  created_at   TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+  id              INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  clinic_id       INT UNSIGNED NULL,   -- NULL = platform-wide
+  reference       VARCHAR(40) NOT NULL,
+  title           VARCHAR(200) NOT NULL,
+  severity        VARCHAR(12) NOT NULL DEFAULT 'minor',
+  status          VARCHAR(12) NOT NULL DEFAULT 'open',
+  summary         TEXT NULL,
+  detected_at     DATETIME NOT NULL,
+  acknowledged_at DATETIME NULL,
+  resolved_at     DATETIME NULL,
+  created_by      INT UNSIGNED NULL,
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY ux_incident_reference (reference),
+  KEY idx_incident_status (status, detected_at),
   CONSTRAINT ck_inc_severity CHECK (severity IN ('minor','major','critical')),
-  CONSTRAINT ck_inc_status CHECK (status IN ('open','mitigated','resolved'))
-);
-CREATE UNIQUE INDEX IF NOT EXISTS ux_incident_reference ON incidents (reference);
-CREATE INDEX IF NOT EXISTS idx_incident_status ON incidents (status, detected_at);
+  CONSTRAINT ck_inc_status CHECK (status IN ('open','mitigated','resolved')),
+  CONSTRAINT fk_incident_clinic FOREIGN KEY (clinic_id) REFERENCES clinics (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS incident_entries (
-  id          INTEGER PRIMARY KEY AUTO_INCREMENT,
-  incident_id INTEGER NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
-  kind        TEXT NOT NULL DEFAULT 'note',
+  id          INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  incident_id INT UNSIGNED NOT NULL,
+  kind        VARCHAR(12) NOT NULL DEFAULT 'note',
   body        TEXT NOT NULL,
-  actor_id    INTEGER,
-  created_at  TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
-  CONSTRAINT ck_inc_kind CHECK (kind IN ('note','action','decision','cause','link'))
-);
-CREATE INDEX IF NOT EXISTS idx_incident_entries ON incident_entries (incident_id, created_at);
+  actor_id    INT UNSIGNED NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_incident_entries (incident_id, created_at),
+  CONSTRAINT ck_inc_kind CHECK (kind IN ('note','action','decision','cause','link')),
+  CONSTRAINT fk_incentry_incident FOREIGN KEY (incident_id) REFERENCES incidents (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Which infrastructure alert belongs to which incident, so the timeline can
--- say what the platform was complaining about at the time.
-ALTER TABLE system_alerts ADD COLUMN incident_id INTEGER REFERENCES incidents(id) ON DELETE SET NULL;
+-- `INTEGER REFERENCES ...` on an ALTERed column is SQLite-only: MySQL stores no
+-- reference from it and silently ignores the clause, which would have left this
+-- column with no foreign key at all while the schema looked correct.
+ALTER TABLE system_alerts ADD COLUMN incident_id INT UNSIGNED NULL,
+    ADD CONSTRAINT fk_alert_incident FOREIGN KEY (incident_id) REFERENCES incidents (id) ON DELETE SET NULL;

@@ -54,7 +54,7 @@ $json = htmlspecialchars(json_encode([
   </div>
 
   <?php if ($actions !== []): ?>
-    <div class="flex w-full flex-wrap items-center gap-1.5 border-t border-hairline pt-2 sm:w-auto sm:border-0 sm:pt-0">
+    <div class="flex w-full flex-wrap items-center gap-1.5 border-t border-hairline pt-2 md:w-auto md:border-0 md:pt-0">
       <?php if (in_array('call', $actions, true)): ?>
         <button type="button" class="act-call" data-act="call"><svg class="h-3.5 w-3.5"><use href="#i-megaphone"/></svg>Call</button>
       <?php endif; ?>

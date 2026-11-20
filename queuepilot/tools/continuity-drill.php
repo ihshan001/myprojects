@@ -29,7 +29,7 @@ $clinicId = (int) (App\Support\Argv::value('--clinic') ?? 1);
 
 $clinic = Db::one('SELECT id, name FROM clinics WHERE id = ?', [$clinicId]);
 if (!$clinic) {
-    fwrite(STDERR, "No clinic {$clinicId}.\n");
+    err("No clinic {$clinicId}.\n");
     exit(1);
 }
 

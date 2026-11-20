@@ -30,6 +30,6 @@ ALTER TABLE queues ADD COLUMN started_by INTEGER;
 -- Existing open sessions on the day this ships are treated as started, so a
 -- live clinic is not locked out by the upgrade at 09:00 on a busy morning.
 -- Sessions created later start unstarted and must be started deliberately.
-UPDATE queues SET started_at = COALESCE(created_at, datetime('now')) WHERE status = 'open' AND started_at IS NULL;
+UPDATE queues SET started_at = COALESCE(created_at, NOW()) WHERE status = 'open' AND started_at IS NULL;
 
 CREATE INDEX idx_queue_started ON queues (clinic_id, session_date, started_at);

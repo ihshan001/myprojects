@@ -35,21 +35,41 @@ $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
         <p class="text-[11px] uppercase tracking-[0.2em] text-slate-500">Now serving</p>
       </div>
     </div>
-    <div class="text-right">
-      <p class="text-2xl font-bold tabular text-white" data-tv-clock><?= e(date('h:i A')) ?></p>
-      <p class="text-[11px] text-slate-500" data-tv-counts>
-        <?= count($queues) ?> queue(s) today
-      </p>
+    <div class="flex items-center gap-4">
+      <!-- The board shows where the queue is. This is how you find where YOU
+           are in it: type the number on your slip. Without it the screen
+           answers the clinic's question and leaves the patient's unanswered. -->
+      <a href="/board/<?= e($key) ?>/position"
+         class="flex items-center gap-2 rounded-xl border border-teal-400/30 bg-teal-400/10 px-4 py-2.5 text-sm font-semibold text-teal-200 transition hover:bg-teal-400/20">
+        <svg class="h-4 w-4" aria-hidden="true"><use href="#i-search"/></svg>
+        Check my position
+      </a>
+      <div class="text-right">
+        <p class="text-2xl font-bold tabular text-white" data-tv-clock><?= e(date('h:i A')) ?></p>
+        <p class="text-[11px] text-slate-500" data-tv-counts>
+          <?= count($queues) ?> queue(s) today
+        </p>
+      </div>
     </div>
   </header>
 
   <div class="grid flex-1 gap-6 pt-6 lg:grid-cols-[1.35fr_1fr]">
 
     <!-- now serving -->
-    <div class="flex flex-col items-center justify-center rounded-3xl bg-white/[0.04] px-6 py-10 text-center">
+    <div class="flex flex-col rounded-3xl bg-white/[0.04] px-6 py-6">
       <p class="text-xs font-bold uppercase tracking-[0.35em] text-teal-400">Now serving</p>
-      <p class="tv-token mt-4 text-[7rem] leading-none text-white lg:text-[10rem]" data-tv-serving data-token="">—</p>
-      <div class="mt-6 flex items-center gap-3">
+
+      <!-- One doctor: the whole wall is theirs. -->
+      <div data-tv-solo class="flex flex-1 flex-col items-center justify-center text-center">
+        <p class="tv-token mt-4 text-[7rem] leading-none text-white lg:text-[10rem]" data-tv-serving data-token="">—</p>
+        <p class="mt-3 text-xl font-semibold text-slate-300" data-tv-serving-room></p>
+      </div>
+
+      <!-- Several doctors: one card each. Collapsing a five-room clinic into a
+           single token means four rooms of patients never see their number. -->
+      <div data-tv-rooms class="mt-4 hidden flex-1 content-start gap-3 sm:grid-cols-2"></div>
+
+      <div class="mt-6 flex items-center justify-center gap-3">
         <span class="live-pill" data-tv-live><span class="pulse-dot"><span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span></span><span data-tv-live-text>Live</span></span>
         <p class="text-sm text-slate-400">Please have your token ready</p>
       </div>
@@ -104,7 +124,7 @@ $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
             </button>
           </form>
           <?php if ($kioskKey !== null): ?>
-            <form method="post" action="/display/kiosk/off" onsubmit="return confirm('Switch the kiosk off? Any tablet using it stops issuing tokens.');">
+            <form method="post" action="/display/kiosk/off" data-confirm-submit="Switch the kiosk off? Any tablet using it stops issuing tokens." data-confirm-danger>
               <?= csrf_field() ?>
               <button class="rounded border border-white/15 px-2.5 py-1 text-[11px] text-slate-400 hover:text-white">Switch off</button>
             </form>
@@ -133,7 +153,7 @@ $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
         Voice announcements: on
       </button>
       <?php if ($canRotate): ?>
-        <form method="post" action="/display/rotate" onsubmit="return confirm('Rotate the display key? Every screen using the old link stops updating.')">
+        <form method="post" action="/display/rotate" data-confirm-submit="Rotate the display key? Every screen using the old link stops updating." data-confirm-danger>
           <?= csrf_field() ?>
           <button class="rounded border border-white/15 px-2 py-1 text-slate-400 hover:text-white">Rotate key</button>
         </form>
@@ -144,19 +164,5 @@ $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
 </div>
 
 <script src="<?= e(asset('js/app.js')) ?>" defer></script>
-<script>
-  // Voice announcements toggle (persisted; some clinics prefer silence).
-  (function () {
-    var btn = document.getElementById('tv-speech');
-    var on = localStorage.getItem('qp_speech') !== 'off';
-    function render() { btn.textContent = 'Voice announcements: ' + (on ? 'on' : 'off'); }
-    btn.addEventListener('click', function () {
-      on = !on;
-      localStorage.setItem('qp_speech', on ? 'on' : 'off');
-      render();
-    });
-    render();
-  })();
-</script>
 </body>
 </html>

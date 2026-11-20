@@ -69,7 +69,10 @@ final class PublicController
         };
 
         // Full link for the "share/print" affordance, never exposes clinic ids.
-        $fullLink = rtrim((string) Env::get('app.url', ''), '/') . '/t/' . $token;
+        // Built from the clinic's own host: this page is served on the site
+        // subdomain, and a share link that pointed at the platform root would
+        // send the patient to a signup page.
+        $fullLink = clinic_url((int) ($entry['clinic_id'] ?? 0), '/t/' . $token);
 
         // A visit that came from a booking carries the appointment, so the
         // patient can move it from the same link they use to watch the queue.
@@ -359,11 +362,24 @@ final class PublicController
             return;
         }
         $plans = (new ClinicService())->plans();
-        $selected = Request::string('plan', 'professional');
+
+        // Honour the plan the visitor clicked on the pricing page, and only if
+        // it is a plan that exists. An unknown ?plan= falls back to the middle
+        // plan rather than registering somebody on a plan code that resolves to
+        // no plan row and no price.
+        $requested = mb_strtolower(Request::string('plan', ''));
+        $codes = array_map(static fn (array $p): string => (string) $p['code'], $plans);
+        $selected = in_array($requested, $codes, true) ? $requested : 'professional';
+
+        // Enterprise is priced on application. Arriving with the enquiry flag
+        // means the visitor wants a conversation, not a self-serve signup, so
+        // the page says so instead of quietly signing them up to it.
+        $enquiry = Request::string('enquiry') === '1';
         view('auth/register', [
             'title' => 'Create your clinic',
             'plans' => $plans,
             'selected' => $selected,
+            'enquiry' => $enquiry,
             'old' => [],
         ], false);
     }
@@ -398,6 +414,13 @@ final class PublicController
         if (Db::scalar('SELECT id FROM users WHERE email = ?', [$data['email']])) {
             $errors['email'] = 'An account with this email already exists. Try signing in.';
         }
+        // The clinic becomes the data controller the moment it collects a
+        // patient's name, and we become the processor. A processor arrangement
+        // has to be agreed in writing, not implied by using the form, so the
+        // box is required rather than decorative.
+        if (Request::string('accept_terms') !== '1') {
+            $errors['accept_terms'] = 'Please accept the terms and the data processing agreement.';
+        }
 
         if ($errors !== []) {
             Session::flash('old', array_diff_key($data, ['password' => 1]));
@@ -423,6 +446,23 @@ final class PublicController
                 \App\Core\Log::warn('auth.verification_send_failed', ['error' => $e->getMessage()]);
             }
 
+            // Tell the platform somebody is waiting. A signup that only
+            // appears on a page nobody opened is a signup that gets missed —
+            // and an unapproved clinic cannot issue a single token, so being
+            // missed means the owner sits with a system they cannot use.
+            try {
+                $planName = (string) (Db::scalar('SELECT name FROM plans WHERE code = ?', [$plan]) ?: '');
+                $fresh = Db::one('SELECT * FROM clinics WHERE id = ?', [(int) $result['clinic_id']]);
+                if ($fresh !== null) {
+                    (new \App\Services\PlatformAlertService())->clinicApplied(
+                        $fresh + ['owner_name' => $data['owner_name']],
+                        $planName
+                    );
+                }
+            } catch (\Throwable $e) {
+                \App\Core\Log::warn('platform.apply_alert_failed', ['error' => $e->getMessage()]);
+            }
+
             [$ok] = Auth::attempt($data['email'], $data['password'], Request::ip());
             if (!$ok) {
                 flash('success', 'Clinic created. Please sign in.');
@@ -433,7 +473,13 @@ final class PublicController
             // an empty dashboard has to guess what to do first; the checklist
             // names it and is measured from the data, so it cannot claim more
             // progress than the clinic has.
-            flash('success', 'Welcome to QueuePilot! Your 14-day trial has started. These are the steps that make the clinic run — most take a minute.');
+            // Not "your trial has started". Signup creates a clinic with
+            // billing_status = 'pending' and no trial_ends_on, because a trial
+            // is a platform decision granted to a named clinic, never something
+            // anybody gets by filling in a form. Telling them otherwise here
+            // and showing "awaiting approval" on the next screen is a lie the
+            // new owner sees within one click.
+            flash('success', 'Your clinic has been created. An administrator reviews it before it goes live — usually within a working day. You can set things up in the meantime.');
             redirect('/getting-started');
         } catch (\Throwable $e) {
             Log::error('clinic.register.failed', ['error' => $e->getMessage()]);
@@ -846,10 +892,17 @@ final class PublicController
     public function manifest(): void
     {
         header('Content-Type: application/manifest+json; charset=utf-8');
-        $name = (string) (Auth::clinic()['name'] ?? 'QueuePilot');
+        $brand = (string) \App\Core\Env::get('app.name', 'QueuePilot');
+        $clinicName = (string) (Auth::clinic()['name'] ?? '');
+        // "QueuePilot · QueuePilot" when there is no clinic in context — the
+        // platform host serves this too, and on the landing page there is no
+        // clinic to prefix the brand with.
+        $name = $clinicName !== '' && $clinicName !== $brand
+            ? $clinicName . ' · ' . $brand
+            : $brand;
         echo json_encode([
-            'name' => $name . ' · QueuePilot',
-            'short_name' => 'QueuePilot',
+            'name' => $name,
+            'short_name' => $brand,
             'description' => 'Live clinic queues — tokens, waiting times and patient tracking.',
             'start_url' => '/app',
             'scope' => '/',
@@ -865,61 +918,4 @@ final class PublicController
         ], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
     }
 
-    public function serviceWorker(): void
-    {
-        header('Content-Type: text/javascript; charset=utf-8');
-        header('Cache-Control: no-cache');
-        // The shell is cached; API traffic is always network-first so a stale
-        // queue can never be mistaken for a live one.
-        echo <<<'JS'
-const VERSION = 'qp-v1';
-const SHELL = ['/assets/build/app.css', '/assets/js/app.js', '/assets/img/icon.svg'];
-
-self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
-});
-
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim())
-  );
-});
-
-self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
-
-  // Never cache live data or state-changing requests.
-  if (event.request.method !== 'GET' || url.pathname.startsWith('/api/')) {
-    return;
-  }
-
-  // Static assets: cache-first.
-  if (url.pathname.startsWith('/assets/')) {
-    event.respondWith(
-      caches.match(event.request).then((hit) => hit || fetch(event.request).then((res) => {
-        const copy = res.clone();
-        caches.open(VERSION).then((c) => c.put(event.request, copy));
-        return res;
-      }))
-    );
-    return;
-  }
-
-  // Pages: network-first, fall back to the cached shell with an offline notice.
-  event.respondWith(
-    fetch(event.request).catch(() =>
-      caches.match(event.request).then((hit) => hit || new Response(
-        '<!doctype html><meta name="viewport" content="width=device-width">' +
-        '<body style="font:16px system-ui;padding:2rem;color:#0f172a">' +
-        '<h1 style="font-size:1.1rem">You are offline</h1>' +
-        '<p style="color:#64748b">QueuePilot needs a connection to show live queue data. ' +
-        'Your last known position is still on screen if you had it open.</p></body>',
-        { headers: { 'Content-Type': 'text/html; charset=utf-8' }, status: 503 }
-      ))
-    )
-  );
-});
-JS;
-    }
 }

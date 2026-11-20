@@ -68,7 +68,7 @@
                     <?php endif; ?>
                   </span>
                   <form method="post" action="/admin/organisations/<?= (int) $org['id'] ?>/detach"
-                        onsubmit="return confirm('Detach <?= e(addslashes((string) $b['name'])) ?> from this group?')">
+                        data-confirm="Detach <?= e((string) $b['name']) ?> from this group?">
                     <?= csrf_field() ?>
                     <input type="hidden" name="clinic_id" value="<?= (int) $b['id'] ?>">
                     <button class="text-[10px] font-medium text-ink-500 underline hover:text-rose-700">detach</button>

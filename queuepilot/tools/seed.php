@@ -21,6 +21,30 @@ $today = Db::today();
 // `migrate.php && seed.php --plans-only`; nobody runs the demo on real data.
 $plansOnly = in_array('--plans-only', $_SERVER['argv'] ?? [], true);
 
+/*
+ * Fail with the instruction, not with a PDO stack trace.
+ *
+ * Seeding before importing the schema is the single easiest step to do in the
+ * wrong order: both are commands in the same install guide, one line apart, and
+ * the raw result is "SQLSTATE[HY000]: no such table: plans" from four frames
+ * deep in Db::insert. That reads like a broken build rather than a step that
+ * has not been run yet.
+ */
+try {
+    Db::scalar('SELECT COUNT(*) FROM plans');
+} catch (Throwable $e) {
+    echo PHP_EOL;
+    echo "  The database has no schema yet — the `plans` table does not exist.", PHP_EOL;
+    echo PHP_EOL;
+    echo "  Run the schema import first, then this command:", PHP_EOL;
+    echo "      php tools/migrate.php", PHP_EOL;
+    echo "  (or import database/install.sql in phpMyAdmin, which does the same thing)", PHP_EOL;
+    echo PHP_EOL;
+    echo "  Then: php tools/seed.php --plans-only", PHP_EOL;
+    echo PHP_EOL;
+    exit(1);
+}
+
 /* ---------------------------------------------------------------- plans */
 $plans = [
     ['starter', 'Starter', 3500, 1, 2, 2, 10, 'Single doctor, one queue, live tracking links', 1],
@@ -28,12 +52,25 @@ $plans = [
     ['clinic_plus', 'Clinic Plus', 14900, 15, 25, 20, 30, 'Priority support, WhatsApp, custom branding, display screens', 3],
     ['enterprise', 'Enterprise', 0, 999, 999, 999, 40, 'Multi-branch, SSO, dedicated onboarding, API access', 4],
 ];
+// Yearly price is derived, never typed twice. Storing a hand-entered yearly
+// figure next to a monthly one is how they drift apart, and the drift is
+// invisible until a clinic is charged the wrong amount once a year.
+$yearlyDiscountPct = 20;
 foreach ($plans as [$code, $name, $price, $docs, $staff, $qs, $sort, $features]) {
+    $priceYearly = round($price * 12 * (1 - $yearlyDiscountPct / 100), 2);
     if (!Db::scalar('SELECT id FROM plans WHERE code = ?', [$code])) {
         Db::insert(
-            'INSERT INTO plans (code, name, price_monthly, currency, max_doctors, max_staff, max_queues, features, sort_order, is_active, created_at)
-             VALUES (?,?,?,?,?,?,?,?,?,1,?)',
-            [$code, $name, $price, 'LKR', $docs, $staff, $qs, $features, $sort, Db::now()]
+            'INSERT INTO plans (code, name, price_monthly, price_yearly, yearly_discount_pct,
+                                currency, max_doctors, max_staff, max_queues, features, sort_order, is_active, created_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?)',
+            [$code, $name, $price, $priceYearly, $yearlyDiscountPct,
+             'LKR', $docs, $staff, $qs, $features, $sort, Db::now()]
+        );
+    } else {
+        // Keep an existing install's prices in step when the discount changes.
+        Db::run(
+            'UPDATE plans SET price_yearly = ?, yearly_discount_pct = ? WHERE code = ?',
+            [$priceYearly, $yearlyDiscountPct, $code]
         );
     }
 }
@@ -74,13 +111,23 @@ function makeClinic(array $c, int $planId): int
 function addUser(int $clinicId, string $role, string $name, string $email, string $password, ?int $doctorId = null): int
 {
     return Db::insert(
-        'INSERT INTO users (clinic_id, role, name, email, phone, password_hash, doctor_id, locale, is_active, created_at)
-         VALUES (?,?,?,?,?,?,?,?,1,?)',
-        [$clinicId, $role, $name, mb_strtolower($email), '+94770000000', password_hash($password, PASSWORD_DEFAULT), $doctorId, 'en', Db::now()]
+        'INSERT INTO users (clinic_id, role, name, email, phone, password_hash, doctor_id, locale, is_active, email_verified_at, created_at)
+         VALUES (?,?,?,?,?,?,?,?,1,?,?)',
+        // Demo accounts are seeded pre-verified. clinicMayIssueTokens() blocks
+        // token issuance while any active clinic_admin is unverified, so a
+        // seeded clinic whose owner has never clicked a verification mail can
+        // never issue a token — the boards would open empty for no visible
+        // reason. Real signups still have to verify.
+        [$clinicId, $role, $name, mb_strtolower($email), '+94770000000', password_hash($password, PASSWORD_DEFAULT), $doctorId, 'en', Db::now(), Db::now()]
     );
 }
 
-Db::transaction(function () use ($planIds, $today) {
+// Whether the full seeder had to create the platform admin, or found one the
+// operator had already made with make-admin.php. Set inside the transaction and
+// read by the credentials summary printed below it.
+$seedAdminCreated = false;
+
+Db::transaction(function () use ($planIds, $today, &$seedAdminCreated) {
     if (Db::scalar("SELECT id FROM users WHERE email = 'admin@serenity.lk'")) {
         echo "Demo data already present — skipping tenants.\n";
         return;
@@ -125,11 +172,14 @@ Db::transaction(function () use ($planIds, $today) {
     addUser($c1, 'doctor', 'Dr. Ruwan Jayasinghe', 'ruwan@serenity.lk', 'Doctor#2026', $doctors[2]);
 
     $queues = [];
+    $doctorService = new App\Services\DoctorService();
     foreach ($doctors as $i => $docId) {
         $queues[$i] = Db::insert(
             "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
              VALUES (?,?,?,?, 'open', ?, ?, 0, 3, ?)",
-            [$c1, $docId, 'OPD — ' . explode(' ', $doctorDefs[$i][0])[1] . ' ' . explode(' ', $doctorDefs[$i][0])[2], 'consultation', $today, 'A', Db::now()]
+            // One prefix per doctor (A, B, C …) so the display board and the
+            // printed slip can tell the consulting rooms apart.
+            [$c1, $docId, 'OPD — ' . explode(' ', $doctorDefs[$i][0])[1] . ' ' . explode(' ', $doctorDefs[$i][0])[2], 'consultation', $today, $doctorService->prefixFor($c1, $docId), Db::now()]
         );
     }
 
@@ -269,11 +319,24 @@ Db::transaction(function () use ($planIds, $today) {
     addUser($c3, 'clinic_admin', 'Dr. Suresh Mendis', 'admin@coastal.lk', 'Coastal#2026');
 
     /* ---------- platform super admin ---------- */
-    Db::insert(
-        'INSERT INTO users (clinic_id, role, name, email, password_hash, locale, is_active, created_at)
-         VALUES (NULL, ?, ?, ?, ?, ?, 1, ?)',
-        ['super_admin', 'Platform Admin', 'owner@queuepilot.app', password_hash('QueuePilot#2026', PASSWORD_DEFAULT), 'en', Db::now()]
-    );
+    // Only when there is no platform admin yet. The documented install order is
+    // `seed.php --plans-only`, then `make-admin.php`, and only then the full
+    // seeder for demo data — so by the time this runs the operator very often
+    // already has an admin, and inserting another one with this email aborts the
+    // whole transaction (MySQL: duplicate key; SQLite: UNIQUE users.email) and
+    // takes the demo clinics down with it. Skipping is correct, and the password
+    // printed at the end is qualified below so nobody is told to use one that
+    // was never set.
+    $seedAdmin = 'owner@queuepilot.app';
+    $alreadyHasAdmin = (bool) Db::scalar('SELECT id FROM users WHERE email = ?', [$seedAdmin]);
+    $seedAdminCreated = !$alreadyHasAdmin;
+    if (!$alreadyHasAdmin) {
+        Db::insert(
+            'INSERT INTO users (clinic_id, role, name, email, password_hash, locale, is_active, created_at)
+             VALUES (NULL, ?, ?, ?, ?, ?, 1, ?)',
+            ['super_admin', 'Platform Admin', $seedAdmin, password_hash('QueuePilot#2026', PASSWORD_DEFAULT), 'en', Db::now()]
+        );
+    }
 
     /* ---------- invoices ---------- */
     foreach ([[$c1, 'INV-2026-0001', 7900, 'paid'], [$c2, 'INV-2026-0002', 3500, 'unpaid'], [$c3, 'INV-2026-0003', 3500, 'unpaid']] as [$cid, $no, $amt, $st]) {
@@ -289,11 +352,244 @@ Db::transaction(function () use ($planIds, $today) {
     }
 });
 
+/* ------------------------------------------------------- reference data */
+/*
+ * Idempotent, and deliberately outside the transaction above.
+ *
+ * The main block seeds one working clinic and stops if it already exists;
+ * this one fills in the reference data that makes the rest of the product
+ * demonstrable — doctor schedules (without which appointment availability
+ * falls back to clinic hours and the "real availability" rule is never
+ * exercised), departments, holidays, notification templates, priority rules,
+ * appointments, feedback, an organisation and a support ticket.
+ *
+ * Every insert is guarded so `npm run seed` can be re-run against a live
+ * database without duplicating anything.
+ */
+(function (): void {
+    $c1 = (int) (Db::scalar("SELECT id FROM clinics WHERE slug = 'serenity'") ?: 0);
+    if ($c1 === 0) {
+        return;
+    }
+
+    $doctors = array_column(
+        Db::all('SELECT id, name FROM doctors WHERE clinic_id = ? AND is_active = 1 ORDER BY id', [$c1]),
+        'name', 'id'
+    );
+    $doctorIds = array_map('intval', array_keys($doctors));
+    if ($doctorIds === []) {
+        return;
+    }
+
+    /* ---- doctor schedules: the source of truth for availability -------- */
+    // A schedule is what makes "real availability" real. Two windows a day
+    // (a morning and an evening clinic) with a gap in the middle, which is
+    // how most Sri Lankan OPDs actually run.
+    $hasSched = (int) Db::scalar('SELECT COUNT(*) FROM doctor_schedules WHERE clinic_id = ?', [$c1]);
+    if ($hasSched === 0) {
+        foreach ($doctorIds as $i => $docId) {
+            // Stagger the roster so the "who is working today" question has a
+            // real answer rather than everybody working every day.
+            $weekend = $i % 2 === 0 ? [6] : [];
+            foreach (array_merge([1, 2, 3, 4, 5], $weekend) as $wd) {
+                foreach ([['08:30', '12:30'], ['16:00', '19:30']] as [$from, $to]) {
+                    Db::insert(
+                        'INSERT INTO doctor_schedules (clinic_id, doctor_id, weekday, starts_at, ends_at, is_active, created_at)
+                         VALUES (?,?,?,?,?,1,?)',
+                        [$c1, $docId, $wd, $from, $to, Db::now()]
+                    );
+                }
+            }
+        }
+    }
+
+    /* ---- departments -------------------------------------------------- */
+    $hasDept = (int) Db::scalar('SELECT COUNT(*) FROM departments WHERE clinic_id = ?', [$c1]);
+    if ($hasDept === 0) {
+        $deptDefs = [
+            ['General OPD', 'OPD', 'Walk-in and booked general consultations', 'Ground', 1],
+            ['Family medicine', 'FAM', 'Family and long-term care', 'First', 2],
+        ];
+        $i = 0;
+        foreach ($deptDefs as [$name, $code, $desc, $floor, $sort]) {
+            $deptId = Db::insert(
+                'INSERT INTO departments (clinic_id, name, code, description, floor, lead_doctor_id, sort_order, is_active, created_at)
+                 VALUES (?,?,?,?,?,?,?,1,?)',
+                [$c1, $name, $code, $desc, $floor, $doctorIds[$i % count($doctorIds)], $sort, Db::now()]
+            );
+            // Half the doctors in each department: enough to show the
+            // department board, not so many that the assignment is noise.
+            foreach ($doctorIds as $k => $docId) {
+                if ($k % 2 === $i % 2) {
+                    Db::run('UPDATE doctors SET department_id = ? WHERE id = ? AND clinic_id = ?', [$deptId, $docId, $c1]);
+                }
+            }
+            $i++;
+        }
+    }
+
+    /* ---- clinic holidays ---------------------------------------------- */
+    $hasHol = (int) Db::scalar('SELECT COUNT(*) FROM holidays WHERE clinic_id = ?', [$c1]);
+    if ($hasHol === 0) {
+        Db::insert(
+            'INSERT INTO holidays (clinic_id, date, name, created_by, created_at) VALUES (?,?,?,NULL,?)',
+            [$c1, date('Y-m-d', strtotime('+18 days')), 'Poya Day', Db::now()]
+        );
+        Db::insert(
+            'INSERT INTO holidays (clinic_id, date, name, created_by, created_at) VALUES (?,?,?,NULL,?)',
+            [$c1, date('Y-m-d', strtotime('+47 days')), 'Annual maintenance day', Db::now()]
+        );
+    }
+
+    /* ---- notification templates --------------------------------------- */
+    // Seeded as *overrides* so the templates screen opens with content and a
+    // clinic can see what it is editing. They deliberately carry the same
+    // placeholders as the defaults.
+    $hasTpl = (int) Db::scalar('SELECT COUNT(*) FROM notification_templates WHERE clinic_id = ?', [$c1]);
+    if ($hasTpl === 0) {
+        $custom = [
+            'token_issued' => 'You are {token} in the {queue} queue at {clinic}. Track your place: {link}',
+            'entry_called' => 'Your turn now — please go to {room}. Token {token}, {clinic}.',
+        ];
+        foreach ($custom as $key => $body) {
+            Db::insert(
+                'INSERT INTO notification_templates (clinic_id, template, body, created_at, updated_at)
+                 VALUES (?,?,?,?,?)',
+                [$c1, $key, $body, Db::now(), Db::now()]
+            );
+        }
+    }
+
+    /* ---- priority rules ----------------------------------------------- */
+    $hasPrio = (int) Db::scalar('SELECT COUNT(*) FROM priority_rules WHERE clinic_id = ?', [$c1]);
+    if ($hasPrio === 0) {
+        Db::insert(
+            "INSERT INTO priority_rules (clinic_id, queue_id, name, source, kind, min_age, max_age, effect, reason, is_active, created_at)
+             VALUES (?,NULL,?,NULL,?,?,?,?,?,1,?)",
+            [$c1, 'Elderly patients', 'consultation', 65, null, 3, 'Patients over 65 move ahead of the line.', Db::now()]
+        );
+        Db::insert(
+            "INSERT INTO priority_rules (clinic_id, queue_id, name, source, kind, min_age, max_age, effect, reason, is_active, created_at)
+             VALUES (?,NULL,?,?,?,?,?,?,?,1,?)",
+            [$c1, 'Infants under two', NULL, 'consultation', null, 2, 4, 'Infants move ahead of the line.', Db::now()]
+        );
+    }
+
+    /* ---- appointments -------------------------------------------------- */
+    // Without bookings the appointment list, check-in, reschedule and
+    // reminder paths are all dead ends on a fresh install.
+    $hasAppt = (int) Db::scalar('SELECT COUNT(*) FROM appointments WHERE clinic_id = ?', [$c1]);
+    if ($hasAppt === 0) {
+        $patients = array_column(
+            Db::all('SELECT id FROM patients WHERE clinic_id = ? ORDER BY id', [$c1]), 'id'
+        );
+        if ($patients !== []) {
+            $slots = [
+                ['+1 day 09:00', 'booked'], ['+1 day 09:20', 'booked'],
+                ['+1 day 10:00', 'booked'], ['+2 days 16:30', 'booked'],
+                ['+0 days 11:00', 'booked'],
+            ];
+            foreach ($slots as $i => [$when, $status]) {
+                Db::insert(
+                    'INSERT INTO appointments (clinic_id, doctor_id, patient_id, scheduled_for, duration_minutes, status, source, notes, created_at)
+                     VALUES (?,?,?,?,?,?,?,?,?)',
+                    [
+                        $c1,
+                        $doctorIds[$i % count($doctorIds)],
+                        (int) $patients[$i % count($patients)],
+                        date('Y-m-d H:i:s', strtotime($when)),
+                        15, $status, $i % 2 === 0 ? 'online' : 'reception', null, Db::now(),
+                    ]
+                );
+            }
+        }
+    }
+
+    /* ---- visit feedback ------------------------------------------------ */
+    $hasFb = (int) Db::scalar('SELECT COUNT(*) FROM visit_feedback WHERE clinic_id = ?', [$c1]);
+    if ($hasFb === 0) {
+        $done = Db::all(
+            "SELECT e.id, q.doctor_id FROM queue_entries e
+               JOIN queues q ON q.id = e.queue_id
+              WHERE e.clinic_id = ? AND e.status = 'completed'
+              ORDER BY e.id DESC LIMIT 6",
+            [$c1]
+        );
+        $ratings = [5, 4, 5, 3, 4, 5];
+        foreach ($done as $i => $row) {
+            Db::insert(
+                'INSERT INTO visit_feedback (clinic_id, entry_id, doctor_id, rating, wait_rating, comment, created_at)
+                 VALUES (?,?,?,?,?,NULL,?)',
+                [$c1, (int) $row['id'], (int) $row['doctor_id'], $ratings[$i % 6], max(2, $ratings[$i % 6] - 1), Db::now()]
+            );
+        }
+    }
+
+    /* ---- organisation (so the Group screen has something to show) ------ */
+    $hasOrg = (int) Db::scalar('SELECT COUNT(*) FROM organisations');
+    if ($hasOrg === 0) {
+        $orgId = Db::insert(
+            'INSERT INTO organisations (name, slug, owner_email, notes, is_active, created_at, updated_at)
+             VALUES (?,?,?,?,1,?,?)',
+            ['Western Medical Group', 'western-medical', 'group@western.lk',
+             'Two clinics sharing a group: Serenity OPD and Lakeview Medical Centre.', Db::now(), Db::now()]
+        );
+        Db::run(
+            "UPDATE clinics SET organisation_id = ? WHERE slug IN ('serenity','lakeview')",
+            [$orgId]
+        );
+    }
+
+    /* ---- one support ticket, so the queue is not an empty state -------- */
+    $hasTicket = (int) Db::scalar('SELECT COUNT(*) FROM support_tickets');
+    if ($hasTicket === 0) {
+        $owner = (int) (Db::scalar('SELECT id FROM users WHERE email = ?', ['admin@serenity.lk']) ?: 0);
+        Db::insert(
+            "INSERT INTO support_tickets (clinic_id, user_id, subject, body, category, priority, status, created_at, updated_at)
+             VALUES (?,?,?,?,?,?,?,?,?)",
+            [$c1, $owner ?: null, 'Add a third doctor to our plan',
+             'We are taking on Dr. Perera from next month. What does moving from Professional to Clinic Plus involve?',
+             'billing', 'normal', 'open', Db::now(), Db::now()]
+        );
+    }
+
+    /* ---- clinic working hours ------------------------------------------ */
+    // SlotService falls back to built-in defaults when these are absent, and
+    // says so on the booking page ("the clinic has not set its own hours").
+    // Seeding them means the demo clinic looks configured, and the
+    // schedule-vs-hours intersection — a doctor rostered beyond opening time
+    // is clipped to opening time — is actually exercised.
+    $hasHours = (int) Db::scalar(
+        "SELECT COUNT(*) FROM settings WHERE scope = 'clinic' AND owner_id = ? AND key_name LIKE 'hours.%'",
+        [$c1]
+    );
+    if ($hasHours === 0) {
+        $hours = [
+            1 => '08:30-19:30', 2 => '08:30-19:30', 3 => '08:30-19:30',
+            4 => '08:30-19:30', 5 => '08:30-19:30', 6 => '09:00-13:00',
+            0 => 'closed',
+        ];
+        foreach ($hours as $dow => $value) {
+            Db::insert(
+                "INSERT INTO settings (scope, owner_id, key_name, value) VALUES ('clinic', ?, ?, ?)",
+                [$c1, 'hours.' . $dow, $value]
+            );
+        }
+    }
+
+    /* ---- public booking ------------------------------------------------ */
+    // Off by default, and it was left off in the seed, which meant the
+    // patient-facing booking page 404'd for every demo clinic. Serenity is
+    // the "everything switched on" tenant, so switch it on here.
+    Db::run('UPDATE clinics SET allow_online_booking = 1 WHERE id = ?', [$c1]);
+})();
+
 echo "\n──────────────────────────────────────────────────────────\n";
 echo " QueuePilot demo data ready\n";
 echo "──────────────────────────────────────────────────────────\n";
 printf(" %-22s %-26s %s\n", 'ROLE', 'EMAIL', 'PASSWORD');
-printf(" %-22s %-26s %s\n", 'Platform owner', 'owner@queuepilot.app', 'QueuePilot#2026');
+printf(" %-22s %-26s %s\n", 'Platform owner', 'owner@queuepilot.app',
+    $seedAdminCreated ? 'QueuePilot#2026' : '(kept the account you already had)');
 printf(" %-22s %-26s %s\n", 'Clinic admin', 'admin@serenity.lk', 'Serenity#2026');
 printf(" %-22s %-26s %s\n", 'Receptionist', 'reception@serenity.lk', 'Reception#2026');
 printf(" %-22s %-26s %s\n", 'Doctor', 'amara@serenity.lk', 'Doctor#2026');

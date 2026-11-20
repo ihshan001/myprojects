@@ -231,8 +231,11 @@ final class ReportService
         return Db::all(
             "SELECT d.name AS doctor,
                     COUNT(*) AS delay_events,
-                    ROUND(AVG(CAST(json_extract(e.meta_json, '$.minutes') AS REAL)), 1) AS avg_minutes,
-                    MAX(CAST(json_extract(e.meta_json, '$.minutes') AS REAL)) AS worst_minutes
+                    -- DOUBLE, not REAL: MySQL 5.7 accepts REAL only from 8.0.17,
+                    -- and 5.7 is a documented requirement here. SQLite treats
+                    -- DOUBLE as a REAL affinity, so this is identical there.
+                    ROUND(AVG(CAST(json_extract(e.meta_json, '$.minutes') AS DOUBLE)), 1) AS avg_minutes,
+                    MAX(CAST(json_extract(e.meta_json, '$.minutes') AS DOUBLE)) AS worst_minutes
                FROM queue_events e
                JOIN queues q ON q.id = e.queue_id
                JOIN doctors d ON d.id = q.doctor_id
@@ -254,14 +257,19 @@ final class ReportService
      */
     public function byDepartment(int $clinicId, string $from, string $to): array
     {
-        return Db::all(
+        // Counts come from one grouped query; the average wait comes from a
+        // second query that returns one row per entry. They are separate
+        // because the average used to be computed with julianday() — SQLite
+        // only — and pulling the raw timestamps back means the arithmetic
+        // happens once, in PHP, and gives the same answer on MySQL.
+        //
+        // Selecting `e.called_at` inside the GROUP BY would not work: it is an
+        // arbitrary row from the group, so the "average" would be one entry's
+        // wait repeated. That is worse than no number at all.
+        $rows = Db::all(
             "SELECT COALESCE(dept.name, '(unassigned)') AS department,
                     COUNT(e.id) AS seen,
-                    SUM(CASE WHEN e.status = 'completed' THEN 1 ELSE 0 END) AS completed,
-                    ROUND(AVG(
-                        CASE WHEN e.called_at IS NOT NULL AND e.joined_at IS NOT NULL
-                             THEN (julianday(e.called_at) - julianday(e.joined_at)) * 1440 END
-                    ), 1) AS avg_wait_minutes
+                    SUM(CASE WHEN e.status = 'completed' THEN 1 ELSE 0 END) AS completed
                FROM queue_entries e
                JOIN queues q ON q.id = e.queue_id
                LEFT JOIN departments dept ON dept.id = q.department_id
@@ -270,6 +278,56 @@ final class ReportService
               ORDER BY seen DESC",
             [$clinicId, $from . ' 00:00:00', date('Y-m-d', strtotime($to . ' +1 day')) . ' 00:00:00']
         );
+        if ($rows === []) {
+            return [];
+        }
+
+        $waits = Db::all(
+            "SELECT COALESCE(dept.name, '(unassigned)') AS department,
+                    e.joined_at, e.called_at
+               FROM queue_entries e
+               JOIN queues q ON q.id = e.queue_id
+               LEFT JOIN departments dept ON dept.id = q.department_id
+              WHERE e.clinic_id = ? AND e.joined_at >= ? AND e.joined_at < ?
+                AND e.called_at IS NOT NULL",
+            [$clinicId, $from . ' 00:00:00', date('Y-m-d', strtotime($to . ' +1 day')) . ' 00:00:00']
+        );
+
+        $totals = [];
+        foreach ($waits as $w) {
+            $minutes = $this->minutesBetween((string) $w['joined_at'], (string) $w['called_at']);
+            if ($minutes !== null) {
+                $totals[(string) $w['department']][] = $minutes;
+            }
+        }
+
+        foreach ($rows as $i => $r) {
+            $set = $totals[(string) $r['department']] ?? [];
+            $rows[$i]['avg_wait_minutes'] = $set === []
+                ? null
+                : round(array_sum($set) / count($set), 1);
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Minutes between two timestamps, or null when either is unusable.
+     *
+     * Parsed in PHP rather than in SQL so the result cannot depend on whether
+     * the engine is MySQL or SQLite.
+     */
+    private function minutesBetween(string $from, string $to): ?float
+    {
+        if ($from === '' || $to === '') {
+            return null;
+        }
+        $a = strtotime($from);
+        $b = strtotime($to);
+        if ($a === false || $b === false || $b < $a) {
+            return null;
+        }
+        return ($b - $a) / 60;
     }
 
     /**
@@ -281,16 +339,23 @@ final class ReportService
      */
     public function waitPercentiles(int $clinicId, string $from, string $to): array
     {
-        $waits = array_map(
-            static fn ($r): float => (float) $r['minutes'],
-            Db::all(
-                "SELECT (julianday(called_at) - julianday(joined_at)) * 1440 AS minutes
-                   FROM queue_entries
-                  WHERE clinic_id = ? AND called_at IS NOT NULL AND joined_at IS NOT NULL
-                    AND joined_at >= ? AND joined_at < ?",
-                [$clinicId, $from . ' 00:00:00', date('Y-m-d', strtotime($to . ' +1 day')) . ' 00:00:00']
-            )
+        // Durations are computed in PHP. They used to use julianday(), which is
+        // SQLite-only and made this page a fatal error on MySQL.
+        $rows = Db::all(
+            "SELECT called_at, joined_at
+               FROM queue_entries
+              WHERE clinic_id = ? AND called_at IS NOT NULL AND joined_at IS NOT NULL
+                AND joined_at >= ? AND joined_at < ?",
+            [$clinicId, $from . ' 00:00:00', date('Y-m-d', strtotime($to . ' +1 day')) . ' 00:00:00']
         );
+
+        $waits = [];
+        foreach ($rows as $r) {
+            $minutes = $this->minutesBetween((string) ($r['joined_at'] ?? ''), (string) ($r['called_at'] ?? ''));
+            if ($minutes !== null) {
+                $waits[] = $minutes;
+            }
+        }
 
         if ($waits === []) {
             return ['p50' => 0.0, 'p90' => 0.0, 'p99' => 0.0, 'max' => 0.0, 'count' => 0];

@@ -19,7 +19,7 @@
     <div class="section-head">
       <p class="section-title">Doctor weekly schedule</p>
       <form method="get" action="/calendar" class="flex items-center gap-2">
-        <select class="select py-1 text-xs" name="doctor_id" onchange="this.form.submit()" aria-label="Doctor">
+        <select class="select py-1 text-xs" name="doctor_id" data-autosubmit aria-label="Doctor">
           <?php foreach ($doctors as $doc): ?>
             <option value="<?= (int) $doc['id'] ?>" <?= (int) ($selectedDoctor['id'] ?? 0) === (int) $doc['id'] ? 'selected' : '' ?>>
               <?= e($doc['name']) ?>
@@ -80,7 +80,7 @@
 
       <?php if ($canManage && $hasSchedule): ?>
         <form method="post" action="/calendar/schedule/clear" class="border-t border-slate-100 px-4 py-3"
-              onsubmit="return confirm('Clear this schedule? The doctor will follow clinic hours again.')">
+              data-confirm="Clear this schedule? The doctor will follow clinic hours again.">
           <?= csrf_field() ?>
           <input type="hidden" name="doctor_id" value="<?= (int) $selectedDoctor['id'] ?>">
           <button class="text-xs font-medium text-rose-600 hover:underline">Clear schedule and follow clinic hours</button>
@@ -110,7 +110,7 @@
               </div>
               <?php if ($canManage): ?>
                 <form method="post" action="/calendar/holidays/<?= (int) $h['id'] ?>/delete"
-                      onsubmit="return confirm('Reopen this date for booking?')">
+                      data-confirm="Reopen this date for booking?">
                   <?= csrf_field() ?>
                   <button class="btn-ghost btn-sm text-rose-600">Reopen</button>
                 </form>

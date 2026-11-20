@@ -20,7 +20,7 @@ foreach ($byHour as $h) { $peak = max($peak, (int) $h['total']); }
       <svg class="h-4 w-4"><use href="#i-download"/></svg>
       Export this day
     </a>
-    <button onclick="window.print()" class="btn-secondary">
+    <button data-print class="btn-secondary">
       <svg class="h-4 w-4"><use href="#i-print"/></svg>
       Print
     </button>

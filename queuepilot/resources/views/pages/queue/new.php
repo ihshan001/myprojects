@@ -169,6 +169,19 @@ $selectedPatient = (int) ($preselect ?? 0);
         <p class="help">Kept internal — never shown on the public tracking page.</p>
       </div>
 
+      <?php /* The PDPA requires the notice at the point of collection, and this
+               is the point: the moment a receptionist types a name and a number.
+               It is placed immediately above the button, where the eye already
+               is, rather than at the foot of the page where it would be seen by
+               nobody. The receptionist is the one who has to be able to answer
+               "what happens to my details", so the wording is written to be read
+               aloud. */ ?>
+      <p class="rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500 ring-1 ring-slate-200">
+        This patient's name and number are stored to run the queue. Their clinic
+        is responsible for the record; the public board shows the token only.
+        <a href="/privacy" target="_blank" class="font-medium text-teal-700 underline">Privacy notice</a>
+      </p>
+
       <button class="btn-primary btn-lg w-full" type="submit" <?= $queues === [] ? 'disabled' : '' ?>>
         <svg class="h-4 w-4"><use href="#i-plus"/></svg>
         Issue token
@@ -182,60 +195,3 @@ $selectedPatient = (int) ($preselect ?? 0);
 </div>
 
 <script src="<?= e(asset('js/app.js')) ?>" defer></script>
-<script>
-(function () {
-  const patientId = document.getElementById('patient_id');
-  const fields = document.getElementById('new-patient-fields');
-  const picked = document.getElementById('picked-patient');
-  const nameEl = document.querySelector('[data-picked-name]');
-  const phoneEl = document.querySelector('[data-picked-phone]');
-
-  function pick(btn) {
-    patientId.value = btn.dataset.pickPatient;
-    nameEl.textContent = btn.dataset.pickName;
-    phoneEl.textContent = btn.dataset.pickPhone || 'no phone on file';
-    picked.classList.remove('hidden');
-    fields.classList.add('hidden');
-    document.querySelectorAll('[data-pick-patient]').forEach((b) => b.classList.remove('border-teal-400', 'bg-teal-50/40'));
-    btn.classList.add('border-teal-400', 'bg-teal-50/40');
-    picked.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }
-
-  document.querySelectorAll('[data-pick-patient]').forEach((btn) => {
-    btn.addEventListener('click', () => pick(btn));
-  });
-
-  document.getElementById('clear-picked').addEventListener('click', () => {
-    patientId.value = '';
-    picked.classList.add('hidden');
-    fields.classList.remove('hidden');
-    document.getElementById('full_name').focus();
-  });
-
-  // Alt+Enter submits from anywhere in the form (receptionist speed)
-  document.addEventListener('keydown', (e) => {
-    if (e.altKey && e.key === 'Enter') {
-      document.getElementById('token-form').requestSubmit();
-    }
-  });
-
-  // Phone: show what will be used for the link, and validate length inline.
-  const phone = document.querySelector('[data-phone]');
-  const hint = document.getElementById('phone-hint');
-  if (phone) {
-    phone.addEventListener('blur', () => {
-      const digits = phone.value.replace(/\D/g, '');
-      if (digits === '') {
-        hint.textContent = 'Optional, for SMS tracking link';
-        hint.className = 'help';
-      } else if (digits.length < 9) {
-        hint.textContent = 'That looks short — use 07X XXX XXXX';
-        hint.className = 'help text-rose-600';
-      } else {
-        hint.textContent = 'Tracking link will be sent to this number';
-        hint.className = 'help text-teal-700';
-      }
-    });
-  }
-})();
-</script>

@@ -108,6 +108,7 @@ Router::post('/queues/{id}/prefix', [QueueConfigController::class, 'prefix'], ['
 // Priority rules — the standing clinical decisions the desk used to retype.
 Router::get('/queues/priority-rules', [PriorityRuleController::class, 'index'], ['auth' => true]);
 Router::post('/queues/priority-rules', [PriorityRuleController::class, 'save'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/queues/priority-rules/reorder', [PriorityRuleController::class, 'reorder'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/queues/priority-rules/{id}/toggle', [PriorityRuleController::class, 'toggle'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/queues/priority-rules/{id}/delete', [PriorityRuleController::class, 'delete'], ['auth' => true, 'ability' => 'clinic.manage']);
 
@@ -179,6 +180,18 @@ Router::post('/settings/hours', [ClinicController::class, 'saveHours'], ['auth' 
 // 90-day retention window rather than deleting anything on the spot.
 Router::post('/settings/closure', [AdminController::class, 'requestClosure'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/settings/staff', [ClinicController::class, 'storeStaff'], ['auth' => true, 'ability' => 'staff.manage']);
+// Language + timezone from the settings rail.
+Router::post('/settings/preferences', [ClinicController::class, 'savePreferences'], ['auth' => true, 'ability' => 'clinic.manage']);
+// Which of the three notification switches are on. Any clinic manager may
+// change these: they only control what the clinic is told about, not who may
+// see patient data.
+Router::post('/settings/notifications', [ClinicController::class, 'saveNotifications'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/settings/integrations/connect', [ClinicController::class, 'connectIntegration'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/settings/integrations/disconnect', [ClinicController::class, 'disconnectIntegration'], ['auth' => true, 'ability' => 'clinic.manage']);
+// Destructive. The route declares `clinic.manage` as a floor, but
+// purgeClinicData() re-checks for the owner role itself, so the real gate
+// lives next to the deletion rather than only in this file.
+Router::post('/settings/purge', [ClinicController::class, 'purgeClinicData'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::get('/settings/templates', [ClinicController::class, 'templates'], ['auth' => true]);
 Router::post('/settings/templates', [ClinicController::class, 'saveTemplate'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/settings/templates/reset', [ClinicController::class, 'resetTemplate'], ['auth' => true, 'ability' => 'clinic.manage']);
@@ -238,6 +251,7 @@ Router::post('/admin/billing/{id}/reject', [AdminBillingController::class, 'reje
 Router::get('/admin/features', [AdminController::class, 'features'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/admin/features/{clinicId}', [AdminController::class, 'saveFeature'], ['auth' => true, 'roles' => ['super_admin'], 'csrf' => false]);
 Router::post('/admin/features/{clinicId}/unset', [AdminController::class, 'unsetFeature'], ['auth' => true, 'roles' => ['super_admin'], 'csrf' => false]);
+Router::get('/admin/monitor', [AdminController::class, 'monitor'], ['auth' => true, 'roles' => ['super_admin']]);
 
 /* ------------------------------------------------------------- JSON API */
 Router::get('/api/queue/board', [ApiController::class, 'board'], ['auth' => true, 'ability' => 'queue.operate']);
@@ -271,6 +285,8 @@ Router::get('/a/{token}', [PublicController::class, 'manageAppointment'], ['csrf
 Router::post('/a/{token}/reschedule', [PublicController::class, 'rescheduleManaged']);
 Router::post('/a/{token}/cancel', [PublicController::class, 'cancelManaged']);
 Router::get('/api/summary', [ApiController::class, 'summary'], ['auth' => true]);
+// Live patient lookup for the token desk. Read-only and clinic-scoped.
+Router::get('/api/patient/search', [ApiController::class, 'patientSearch'], ['auth' => true, 'ability' => 'patient.manage']);
 
 // Health endpoint for an external monitor. Authorisation is inside the
 // controller (bearer token or super admin) because a "signed-in" probe is not

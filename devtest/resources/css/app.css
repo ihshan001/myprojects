@@ -66,6 +66,36 @@
     scroll-behavior: smooth;
   }
 
+  /* ================================================================
+     SCALE — every page renders at the proportions of a browser zoomed
+     to 90%, so nobody has to press Ctrl/Cmd − to get that view.
+     ----------------------------------------------------------------
+     `zoom` is the property that reproduces browser zoom faithfully:
+     it scales type, Tailwind's px utilities, images, borders and
+     shadows together. A root `font-size: 90%` would only reach
+     rem-based sizes and leave everything written in px behind, so it
+     cannot produce the same picture.
+
+     Two things must stay in step with this number:
+       · `screens` in resources/tailwind/tailwind.config.js and the
+         two max-width rules below are every breakpoint × 0.9 —
+         element zoom does NOT resize the viewport media queries see
+         (real browser zoom divides it by 0.9), so without that the
+         layouts would flip at the wrong physical window widths;
+       · app.js asks matchMedia for the same scaled lg (921.6px).
+     Change 0.9, change all three.
+     ================================================================ */
+  html {
+    zoom: 0.9;
+  }
+
+  /* Printing is never screen-scaled: a browser at 90% zoom still prints
+     at 100%, so slips, receipts and reports come out at their true size
+     and QR codes stay scannable. */
+  @media print {
+    html { zoom: 1; }
+  }
+
   /* Nothing may make the page wider than the phone. A single wide table used
      to drag the whole layout sideways, which also moved the fixed top bar. */
   html, body {
@@ -74,8 +104,10 @@
   }
 
   /* iOS Safari zooms in when a focused input is under 16px, then never zooms
-     back out — the page stays mis-scaled for the rest of the session. */
-  @media (max-width: 640px) {
+     back out — the page stays mis-scaled for the rest of the session.
+     640 × 0.9 = 576, kept in step with the scale above (every real phone is
+     far below it either way, so the guard still fires where iOS needs it). */
+  @media (max-width: 576px) {
     input, select, textarea {
       font-size: 16px !important;
     }
@@ -224,6 +256,48 @@
   .label {
     @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500;
   }
+  /* In-page dialogs, replacing confirm() and prompt(). The native ones are
+     prefaced by the browser with "an embedded page at <host> says" whenever
+     the console runs inside the preview iframe, which reads like a phishing
+     attempt and takes no styling at all. */
+  .qp-dialog-locked { overflow: hidden; }
+
+  .qp-dialog-host {
+    @apply fixed inset-0 z-[120] flex items-center justify-center p-4;
+    background: rgb(15 23 42 / 0.45);
+    /* The console is drawn at 0.9 zoom, so a fixed overlay has to undo it or
+       it lands slightly off-centre against the rest of the chrome. */
+    zoom: 1;
+  }
+  .qp-dialog-host[hidden] { display: none; }
+
+  .qp-dialog {
+    @apply w-full max-w-[26rem] rounded-xl border border-hairline bg-white p-5 shadow-pop;
+  }
+  .qp-dialog-title {
+    @apply text-[15px] font-bold tracking-tight text-ink-900;
+  }
+  .qp-dialog-text {
+    @apply mt-1.5 text-[13px] leading-relaxed text-ink-600;
+  }
+  .qp-dialog-field {
+    @apply mt-3 block;
+  }
+  .qp-dialog-field > span {
+    @apply mb-1 block text-[11.5px] font-semibold text-ink-700;
+  }
+  .qp-dialog-field > .input {
+    @apply mt-0 w-full;
+  }
+  .qp-dialog-actions {
+    @apply mt-4 flex flex-wrap items-center justify-end gap-2;
+  }
+  .qp-dialog-actions > .btn-primary,
+  .qp-dialog-actions > .btn-danger,
+  .qp-dialog-actions > .btn-secondary {
+    @apply !w-auto;
+  }
+
   .input {
     @apply w-full rounded-lg border border-hairline bg-white px-3 py-2.5 text-sm text-ink-900
            placeholder:text-slate-400 focus:border-brand-600 focus:ring-2 focus:ring-brand-600/15;
@@ -424,10 +498,45 @@
 
   /* One waiting patient. Columns collapse rather than scroll on a phone. */
   .prow {
-    @apply flex items-center gap-2.5 border-b border-slate-100 px-2.5 py-1.5 last:border-0;
+    /* Wraps rather than crushing the name: the action cluster is fixed
+       width, so on a narrow panel the buttons drop to their own line
+       instead of squeezing the patient's name down to nothing. */
+    @apply flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-slate-100 px-2.5 py-1.5 last:border-0;
   }
+  /* The blanket `main .flex > * { min-width: 0 }` further up stops a wide
+     child stretching the page, but on this row it also let the fixed-width
+     action cluster squeeze the patient's name down to 0px -- measured 0 at
+     xl, where the dashboard grid makes the panel only 431px wide. Two
+     classes beat that rule's specificity, so the name keeps a floor and
+     the row wraps the buttons to a second line instead. */
+  .prow > .prow-main { min-width: 8rem; }
   .prow-name { @apply truncate text-[13px] font-semibold text-ink-900; }
   .prow-meta { @apply truncate text-[11px] text-ink-500; }
+
+  /* Priority rules. The reference design sets this page's labels in sentence
+     case and its stat icons in circles, where the rest of the console uses
+     uppercase labels and rounded squares. Scoped to the two wrappers rather
+     than changing `.label` / `.stat-ico` globally, so every other page keeps
+     the shared treatment. */
+  .pr-stats .stat-label {
+    @apply text-[11px] font-medium normal-case tracking-normal text-ink-500;
+  }
+  .pr-stats .stat-ico { @apply h-12 w-12 rounded-full; }
+  .pr-stats .stat-value { @apply text-[20px]; }
+  .pr-form .label {
+    @apply text-[11px] font-medium normal-case tracking-normal text-ink-700;
+  }
+
+  /* The row being dragged. The list is the evaluation order, so the row in
+     flight is dimmed rather than hidden — the manager needs to see the rank
+     it is about to land in. */
+  .pr-dragging { @apply opacity-40; }
+  .pr-rule { @apply bg-white; }
+  .pr-grip:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
 
   /* Right rail rows: label left, value right, hairline between. */
   .glance-row {
@@ -516,7 +625,10 @@
   .table-scroll > table {
     @apply min-w-full;
   }
-  @media (max-width: 640px) {
+  /* 640 × 0.9 — with the scale rule above, these small-screen overrides
+     must flip at the same physical window width a browser at 90% zoom
+     would switch them (see the SCALE comment in @layer base). */
+  @media (max-width: 576px) {
     /* Selects were rendering at 13px next to 10px labels and pushing their
        row wider than the card. Keep them legible but proportional. */
     .qtab { @apply min-h-[38px] text-[11.5px]; }
@@ -557,15 +669,77 @@
   .shell {
     @apply flex min-h-screen;
   }
-  .sidebar {
-    @apply fixed inset-y-0 left-0 z-30 hidden w-[var(--sidebar-w)] flex-col
-           border-r border-hairline bg-white lg:flex;
-  }
   .main-col {
     /* min-w-0: a flex item defaults to min-width:auto, so one wide scroller
        inside would stretch the whole column past the phone's width. */
-    @apply flex min-h-screen w-full min-w-0 flex-col lg:pl-[var(--sidebar-w)];
+    @apply flex min-h-screen w-full min-w-0 flex-col;
   }
+  /* ------------------------------------------------------ desktop header
+     Navigation moved out of the 221px side rail and into a header. A rail
+     suited a phone drawer; on a wide screen it spent the width the queue
+     board needs on labels nobody scrolled. The header keeps the same
+     grouping, just horizontal, with the long tail under "More". */
+  .topnav {
+    @apply sticky top-0 z-40 hidden border-b border-hairline bg-white/95
+           backdrop-blur lg:block;
+  }
+  .topnav-inner {
+    @apply mx-auto flex h-14 w-full max-w-[1400px] items-center gap-3
+           px-4 xl:gap-4 xl:px-8;
+  }
+  .topnav-brand {
+    @apply flex shrink-0 items-center gap-2 text-ink-900 hover:text-brand-700;
+  }
+  .topnav-links {
+    @apply flex min-w-0 items-center gap-0.5;
+  }
+  .topnav-link {
+    @apply flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-[13px]
+           font-medium text-ink-600 transition hover:bg-slate-100 hover:text-ink-900
+           xl:px-3;
+  }
+  .topnav-link.is-active {
+    @apply bg-mint-100 font-semibold text-brand-700 hover:bg-mint-100 hover:text-brand-700;
+  }
+  .topnav-right {
+    @apply ml-auto flex min-w-0 items-center gap-1.5 xl:gap-2.5;
+  }
+  .topnav-search {
+    @apply flex h-9 min-w-0 flex-1 items-center gap-2 rounded-lg border border-hairline
+           bg-canvas px-2.5 text-ink-700 lg:max-w-[15rem] xl:max-w-[19rem];
+  }
+  .topnav-branch {
+    @apply h-9 max-w-[9rem] shrink-0 cursor-pointer truncate rounded-lg border
+           border-hairline bg-white px-2 text-[12px] text-ink-700;
+  }
+  .topnav-icon {
+    @apply relative flex h-9 w-9 shrink-0 items-center justify-center rounded-lg
+           text-ink-500 transition hover:bg-slate-100 hover:text-ink-900;
+  }
+  .topnav-badge {
+    @apply absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center
+           rounded-full bg-brand-600 px-1 text-[9px] font-bold text-white;
+  }
+  .topnav-user {
+    @apply flex shrink-0 items-center gap-2 rounded-lg px-1.5 py-1 transition hover:bg-slate-100;
+  }
+
+  .topnav-more { @apply relative shrink-0; }
+  .topnav-menu {
+    @apply absolute right-0 top-full z-50 mt-1.5 w-64 rounded-xl border border-hairline
+           bg-white p-1.5 shadow-pop;
+  }
+  .topnav-menu[hidden] { display: none; }
+  .topnav-menu-label {
+    @apply px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.09em] text-ink-400
+           first:pt-1;
+  }
+  .topnav-menu-item {
+    @apply flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-[13px] font-medium
+           text-ink-700 transition hover:bg-slate-50 hover:text-ink-900;
+  }
+  .topnav-menu-item.is-active { @apply bg-mint-100 font-semibold text-brand-700; }
+
   .page {
     @apply mx-auto w-full max-w-[1400px] flex-1 px-3 py-4 sm:px-6 sm:py-6 lg:px-8;
   }
@@ -744,6 +918,139 @@
 .call-flash { animation: qp-call-flash 1.8s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   .call-flash { animation: none; box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.35); }
+}
+
+/* ===================================================================
+   SETTINGS
+   -------------------------------------------------------------------
+   The settings screen is a summary first and a form second, so most of
+   its weight is in the card HEADER (a title with a leading icon and a
+   right-hand action) rather than in inputs.
+
+   `.st-label` exists because the shared `.label` is uppercase, which the
+   right-hand rail does not want: "Language" and "Timezone" sit next to
+   their values and read as field captions, not as table headings. Rather
+   than change `.label` for everyone, the rail opts out — the same
+   reasoning as `.pr-form` on the priority screen.
+   =================================================================== */
+@layer components {
+  /* ---------------------------------------------------------- tabs */
+  .st-tabs {
+    @apply flex flex-wrap items-center gap-1 border-b border-hairline;
+  }
+  .st-tab {
+    @apply -mb-px border-b-2 border-transparent px-3 py-2 text-[13px] font-semibold text-ink-500
+           hover:text-ink-900;
+  }
+  .st-tab.is-active {
+    @apply border-brand-600 text-brand-700;
+  }
+
+  /* --------------------------------------------------- card header */
+  .st-card-head {
+    @apply flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-slate-100 px-4 py-[22px];
+  }
+  .st-card-head > :last-child { @apply shrink-0; }
+  .st-card-title {
+    @apply flex items-center gap-2 text-[13px] font-bold text-ink-900;
+  }
+  /* The one-line explanation under a card title. It sits INSIDE the header,
+     above the divider, which is where the design puts it -- a subtitle below
+     the rule reads as body copy instead of as part of the heading. */
+  .st-card-sub {
+    @apply mt-1 pl-6 text-[11px] leading-relaxed text-ink-500;
+  }
+  .st-card-icon {
+    @apply h-4 w-4 shrink-0 text-ink-400;
+  }
+
+  /* --------------------------------------------------------- links */
+  .st-link {
+    @apply text-[11px] font-semibold text-brand-700 hover:text-brand-800 hover:underline;
+  }
+
+  /* ------------------------------------- summary field label/value */
+  .st-field-label {
+    @apply text-[11px] font-semibold uppercase tracking-wide text-ink-400;
+  }
+  .st-field-value {
+    @apply mt-0.5 text-[13px] text-ink-900;
+  }
+  .st-sub {
+    @apply mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-400;
+  }
+
+  /* ------------------------------------------------ "Show more" */
+  .st-more { @apply border-t border-slate-100; }
+  .st-more-summary {
+    @apply flex cursor-pointer items-center justify-center gap-1 px-4 py-2 text-[11px]
+           font-semibold text-ink-500 hover:bg-slate-50 hover:text-ink-700;
+  }
+  .st-more-summary svg { @apply transition-transform; }
+  .st-more[open] .st-more-summary svg { @apply rotate-180; }
+  .st-dl {
+    @apply grid gap-x-6 gap-y-2.5 border-t border-slate-100 px-4 py-3 sm:grid-cols-2;
+  }
+  .st-dl dt { @apply text-[10px] font-semibold uppercase tracking-wide text-ink-400; }
+  .st-dl dd { @apply mt-0.5 text-[12px] text-ink-800; }
+
+  /* --------------------------------------------- opening hours */
+  .st-hours { @apply space-y-1.5; }
+  .st-hours-row {
+    @apply flex items-baseline justify-between gap-3 text-[12px];
+  }
+  .st-hours-row dt { @apply text-ink-700; }
+  .st-hours-row dd { @apply tabular text-ink-900; }
+
+  .st-holidays { @apply space-y-1.5; }
+  .st-holidays li {
+    @apply flex items-baseline justify-between gap-3 text-[12px];
+  }
+
+  /* --------------------------------------- system & data rows */
+  .st-row {
+    @apply flex items-start gap-3 px-4 py-3 hover:bg-slate-50;
+  }
+
+  /* Summary table: tighter rows than the console default. The settings staff
+     list is glanced at, not scanned, so the row height buys readability
+     elsewhere but only costs space here. */
+  .st-table thead th { @apply py-1.5; }
+  .st-table tbody td { @apply py-1; }
+  .st-row-icon {
+    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-ink-500;
+  }
+
+  /* ------------------------------- inline "Edit profile" popovers
+     A <details> used as a disclosure: the summary is a link-styled
+     control, the body is absolutely positioned so opening the form does
+     not reflow the card underneath it. */
+  .st-details { @apply relative; }
+  .st-details > summary {
+    @apply cursor-pointer list-none;
+  }
+  .st-details > summary::-webkit-details-marker { display: none; }
+  .st-details-body {
+    @apply absolute right-0 top-full z-20 mt-1.5 w-72 rounded-xl border border-hairline
+           bg-white p-3 shadow-lg;
+  }
+
+  /* An inline editor panel, not a dropdown.
+     The rule above is an 18rem popover sized for the "Clear data"
+     confirmation. A settings form dropped into it is clipped: "Edit profile"
+     rendered six fields and a save button into 288px, so the grid collapsed
+     and the button fell out of sight. This variant stays in normal flow and
+     spans the card instead. */
+  .st-details.st-details-panel { @apply w-full; }
+  .st-details-panel > .st-details-body {
+    @apply static right-auto top-auto z-auto mt-3 w-full max-w-none
+           rounded-lg border-0 bg-slate-50 p-3 shadow-none;
+  }
+
+  /* Rail field captions: sentence case, unlike the uppercase .label. */
+  .st-label {
+    @apply mb-1.5 block text-[11px] font-semibold text-ink-700;
+  }
 }
 
 /* Print: reports should print clean, without chrome */

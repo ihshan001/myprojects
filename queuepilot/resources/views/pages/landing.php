@@ -179,8 +179,8 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>QueuePilot — live patient queues for Sri Lankan clinics</title>
-  <meta name="description" content="Replace the paper token book. QueuePilot gives clinics a live waiting board, patient tracking links, doctor screens and wait-time ranges measured from your own consultations.">
+  <title><?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?> — live patient queues for Sri Lankan clinics</title>
+  <meta name="description" content="Replace the paper token book. <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?> gives clinics a live waiting board, patient tracking links, doctor screens and wait-time ranges measured from your own consultations.">
   <meta name="theme-color" content="#0F766E">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/assets/img/icon.svg" type="image/svg+xml">
@@ -196,7 +196,7 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
   <div class="lp-wrap flex h-[3.875rem] items-center justify-between gap-4">
     <a href="/" class="flex shrink-0 items-center gap-2.5">
       <span class="h-8 w-8 shrink-0 rounded-[0.625rem] p-0.5" style="<?= e($markBg) ?>"><?= $mark ?></span>
-      <span class="lp-wordmark text-[1.1875rem]">QueuePilot</span>
+      <span class="lp-wordmark text-[1.1875rem]"><?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?></span>
     </a>
     <nav class="hidden items-center gap-7 md:flex">
       <?php foreach ($navLinks as [$href, $label]): ?>
@@ -205,7 +205,7 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
     </nav>
     <div class="flex shrink-0 items-center gap-3">
       <a href="/login" class="hidden text-[0.8125rem] font-semibold text-slate-700 hover:text-slate-900 sm:block">Sign in</a>
-      <a href="/register" class="lp-btn !px-4 !py-2.5 !text-[0.78125rem]">Start free trial</a>
+      <a href="/register" class="lp-btn !px-4 !py-2.5 !text-[0.78125rem]">Apply for your clinic</a>
     </div>
   </div>
 </header>
@@ -224,13 +224,13 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
           Your clinic deserves<br><span class="lp-teal lp-underline">more than a queue.</span>
         </h1>
         <p class="lp-lead mt-5 max-w-lg" data-reveal style="--reveal-delay:90ms">
-          QueuePilot is the queue operating system for outpatient clinics. Issue a token in
+          <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?> is the queue operating system for outpatient clinics. Issue a token in
           seconds, put every room on one board, and let patients follow their place from
           any phone.
         </p>
         <div class="mt-7 flex flex-wrap gap-3" data-reveal style="--reveal-delay:160ms">
           <a href="/register" class="lp-btn">
-            Start 14-day free trial
+            Apply for your clinic
             <svg class="h-4 w-4" aria-hidden="true"><use href="#i-arrow-right"/></svg>
           </a>
           <a href="/demo/board" class="lp-btn-ghost">
@@ -239,7 +239,7 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
           </a>
         </div>
         <ul class="mt-7 flex flex-wrap gap-x-6 gap-y-2.5" data-reveal style="--reveal-delay:230ms">
-          <?php foreach (['No card required', '14 days, full access', 'Sinhala · Tamil · English'] as $t): ?>
+          <?php foreach (['No card required', 'Reviewed within a working day', 'Sinhala · Tamil · English'] as $t): ?>
             <li class="flex items-center gap-2 text-[0.78125rem] font-medium text-slate-600">
               <svg class="h-4 w-4 shrink-0 text-brand-600" aria-hidden="true"><use href="#i-check-circle"/></svg>
               <?= e($t) ?>
@@ -384,7 +384,7 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
 
       <div>
         <span class="lp-eyebrow">02 &mdash; The answer</span>
-        <h2 class="lp-h2 lp-teal mt-3 !text-[1.45rem] sm:!text-[1.6rem]">What QueuePilot changes</h2>
+        <h2 class="lp-h2 lp-teal mt-3 !text-[1.45rem] sm:!text-[1.6rem]">What <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?> changes</h2>
         <?php /* Mechanisms, not statistics. We have no measured study to quote a
              "2.5 hours saved" or "30% fewer no-shows" from, so none is claimed. */ ?>
         <div class="mt-6 space-y-3">
@@ -423,19 +423,25 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
           <li class="lp-duet-row">
             <div class="lp-duet-node order-1 md:order-2">
               <span class="lp-duet-dot"><?= e($n) ?></span>
-              <span class="lp-duet-moment"><?= e($moment) ?></span>
+              <span class="lp-duet-moment lp-display"><?= e($moment) ?></span>
             </div>
             <div class="lp-duet-side lp-duet-side--desk order-2 md:order-1">
               <span class="lp-duet-label md:hidden">At the desk</span>
               <p class="lp-duet-text"><?= e($desk) ?></p>
             </div>
-            <div class="lp-duet-side lp-duet-side--hand order-3">
+            <div class="lp-duet-side lp-duet-side--hand lp-duet-side--phone order-3">
               <span class="lp-duet-label md:hidden">In their hand</span>
               <p class="lp-duet-text"><?= e($hand) ?></p>
             </div>
           </li>
         <?php endforeach; ?>
       </ol>
+
+      <!-- The rail lands here: the loop closes on the brand's gold dot. -->
+      <div class="lp-duet-end">
+        <span class="lp-duet-end-dot"></span>
+        <span class="lp-duet-end-text">One loop, every visit</span>
+      </div>
     </div>
   </section>
 
@@ -502,8 +508,17 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
               </li>
             <?php endif; ?>
           </ul>
-          <a href="/register" class="<?= $featured ? 'lp-btn' : 'lp-btn-ghost' ?> mt-6 w-full">
-            <?= $price > 0 ? 'Start free trial' : 'Start a conversation' ?>
+          <?php
+            // Carry the plan the visitor is looking at. Landing on a bare
+            // /register preselected Professional for everyone, so somebody who
+            // chose Starter was silently signed up to the middle plan — the
+            // one choice on this page a visitor had already made for us.
+            $applyHref = $price > 0
+                ? '/register?plan=' . urlencode((string) $plan['code'])
+                : '/register?plan=' . urlencode((string) $plan['code']) . '&enquiry=1';
+          ?>
+          <a href="<?= e($applyHref) ?>" class="<?= $featured ? 'lp-btn' : 'lp-btn-ghost' ?> mt-6 w-full">
+            <?= $price > 0 ? 'Apply for ' . e((string) $plan['name']) : 'Enquire about ' . e((string) $plan['name']) ?>
           </a>
         </div>
       <?php endforeach; ?>
@@ -663,39 +678,64 @@ $markBg = 'background-image: linear-gradient(140deg,#0F766E,#06322E)';
   </section>
 
 <!-- ============================================================ footer -->
-<footer class="lp-footer">
-  <div class="lp-wrap py-12">
-    <div class="flex flex-wrap items-start justify-between gap-8">
+<footer class="lp-footer" data-reveal>
+  <div class="lp-wrap py-14 md:py-16">
+
+    <!-- Closing offer: the page ends the way a good counter does — with an invitation. -->
+    <div class="lp-foot-cta">
+      <div class="max-w-xl">
+        <span class="lp-eyebrow">Start today</span>
+        <p class="lp-foot-cta-line">Open your first queue today.</p>
+      </div>
+      <div class="flex flex-wrap gap-3">
+        <a href="/register" class="lp-btn-gold lp-tap">Apply for your clinic &rarr;</a>
+        <a href="/login" class="lp-btn-ghost lp-btn-ghost--dark lp-tap">Sign in</a>
+      </div>
+    </div>
+
+    <div class="lp-rail my-10 opacity-25"></div>
+
+    <div class="lp-foot-grid">
       <div class="max-w-xs">
         <div class="flex items-center gap-2.5">
           <span class="h-8 w-8 shrink-0 rounded-[0.625rem] p-0.5" style="<?= e($markBg) ?>"><?= $mark ?></span>
-          <span class="lp-display text-[1.1875rem] font-semibold text-white">QueuePilot</span>
+          <span class="lp-display text-[1.1875rem] font-semibold text-white"><?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?></span>
         </div>
         <p class="mt-4 text-[0.75rem] leading-relaxed" style="color:#9FBDB6">
           The queue operating system for Sri Lankan outpatient clinics. Tokens and rooms
           on every public screen &mdash; never a patient name.
         </p>
+        <p class="lp-foot-lang">
+          <svg aria-hidden="true"><use href="#i-globe"/></svg>
+          <span>The console speaks English, සිංහල and தமிழ்.</span>
+        </p>
       </div>
-      <nav class="grid w-full grid-cols-2 gap-x-6 sm:flex sm:w-auto sm:flex-wrap sm:gap-x-8 sm:gap-y-1">
-        <?php foreach ([['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pricing'], ['#patient', 'Patient view'], ['/demo/board', 'Live demo'], ['/login', 'Sign in'], ['/register', 'Start trial']] as [$href, $label]): ?>
+
+      <nav class="lp-foot-col" aria-label="Product">
+        <p class="lp-foot-head">Product</p>
+        <?php foreach ([['#product', 'Product'], ['#how', 'How it works'], ['#pricing', 'Pricing'], ['#patient', 'Patient view'], ['/demo/board', 'Live demo']] as [$href, $label]): ?>
           <a href="<?= e($href) ?>" class="lp-footer-link lp-tap"><?= e($label) ?></a>
         <?php endforeach; ?>
       </nav>
-      <div class="flex items-center gap-1.5">
-        <?php foreach (['EN', 'SI', 'TA'] as $lang): ?>
-          <span class="lp-mono flex h-7 items-center rounded-full px-2.5 text-[0.625rem] font-bold" style="background:rgba(255,255,255,.08);color:#CFE0DB"><?= e($lang) ?></span>
+
+      <nav class="lp-foot-col" aria-label="Account">
+        <p class="lp-foot-head">Account</p>
+        <?php foreach ([['/login', 'Sign in'], ['/register', 'Start trial'], ['/forgot-password', 'Forgot password?']] as [$href, $label]): ?>
+          <a href="<?= e($href) ?>" class="lp-footer-link lp-tap"><?= e($label) ?></a>
         <?php endforeach; ?>
-      </div>
+      </nav>
     </div>
 
-    <div class="lp-rail my-9 opacity-25"></div>
+    <div class="lp-rail my-10 opacity-25"></div>
 
     <!-- The wordmark as the closing image: the last thing on the page is the brand. -->
-    <div class="flex flex-wrap items-end justify-between gap-4">
-      <p class="lp-display select-none text-[3.25rem] leading-none text-white sm:text-[5rem] lg:text-[6.5rem]">
-        QueuePilot<span style="color:#E0A63C">.</span>
-      </p>
-      <p class="lp-mono pb-2 text-[0.6875rem]" style="color:#7FA098">&copy; <?= e(date('Y')) ?> QueuePilot</p>
+    <p class="lp-display select-none text-[3.25rem] leading-none text-white sm:text-[5rem] lg:text-[6.5rem]">
+      <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?><span style="color:#E0A63C">.</span>
+    </p>
+
+    <div class="lp-foot-bottom mt-7">
+      <p class="lp-foot-legal"><?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?> is queue-management software &mdash; never a medical record.</p>
+      <p class="lp-mono text-[0.6875rem]" style="color:#7FA098">&copy; <?= e(date('Y')) ?> <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?></p>
     </div>
   </div>
 </footer>

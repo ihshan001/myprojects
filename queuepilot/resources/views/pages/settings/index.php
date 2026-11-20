@@ -1,4 +1,25 @@
-<?php $c = $clinicRecord; ?>
+<?php
+use App\Core\Auth;
+
+$c = $clinicRecord;
+
+/* One screen, five tabs.
+   Settings stacked into a single scroll had the clinic profile, the staff
+   list, notification counters, integration switches and account closure all
+   competing on one page. A receptionist who comes to invite a colleague
+   should not have to scroll past the clinic's tax fields to find it. */
+$tabs = [
+    'clinic'        => 'Clinic settings',
+    'team'          => 'Team',
+    'notifications' => 'Notifications',
+    'integrations'  => 'Integrations',
+    'billing'       => 'Billing & data',
+];
+$tab = (string) ($activeTab ?? 'clinic');
+if (!isset($tabs[$tab])) {
+    $tab = 'clinic';
+}
+?>
 <div class="flex flex-wrap items-start justify-between gap-3">
   <div>
     <h1 class="text-2xl font-bold tracking-tight text-slate-900">Settings</h1>
@@ -23,8 +44,15 @@
   </div>
 <?php endif; ?>
 
-<div class="mt-5 grid gap-5 lg:grid-cols-[1.15fr_.85fr]">
-  <div class="space-y-5">
+<nav class="st-tabs mt-4" aria-label="Settings sections">
+  <?php foreach ($tabs as $key => $label): ?>
+    <a class="st-tab <?= $tab === $key ? 'is-active' : '' ?>" <?= $tab === $key ? 'aria-current="page"' : '' ?>
+       href="/settings?tab=<?= e((string) $key) ?>"><?= e((string) $label) ?></a>
+  <?php endforeach; ?>
+</nav>
+
+<div class="mt-5 space-y-5">
+  <?php if ($tab === 'clinic'): ?>
     <div class="card card-pad">
       <h2 class="text-sm font-bold text-slate-900">Clinic profile</h2>
       <p class="mt-1 text-xs text-slate-500">Shown on patient tracking pages and printed tokens.</p>
@@ -43,6 +71,32 @@
             <input class="input" id="city" name="city" value="<?= e((string) ($c['city'] ?? '')) ?>"></div>
           <div><label class="label" for="district">District</label>
             <input class="input" id="district" name="district" value="<?= e((string) ($c['district'] ?? '')) ?>"></div>
+
+          <?php /* Billing identity. Not patient data, but the invoice is a legal
+                   document and these are the fields an accountant needs. */ ?>
+          <div class="sm:col-span-2 pt-1">
+            <p class="text-[11px] font-bold uppercase tracking-wide text-slate-400">Invoice details</p>
+            <p class="mt-1 text-[11px] leading-relaxed text-slate-500">
+              Shown on every invoice. Leave the legal name blank to use the clinic name above.
+            </p>
+          </div>
+          <div class="sm:col-span-2"><label class="label" for="legal_name">Registered business name</label>
+            <input class="input" id="legal_name" name="legal_name" maxlength="160"
+                   value="<?= e((string) ($c['legal_name'] ?? '')) ?>"
+                   placeholder="<?= e((string) $c['name']) ?>"></div>
+          <div><label class="label" for="tax_id">VAT / TIN</label>
+            <input class="input" id="tax_id" name="tax_id" maxlength="64"
+                   value="<?= e((string) ($c['tax_id'] ?? '')) ?>"></div>
+          <div><label class="label" for="po_number">Purchase order</label>
+            <input class="input" id="po_number" name="po_number" maxlength="64"
+                   value="<?= e((string) ($c['po_number'] ?? '')) ?>"
+                   placeholder="If your accounts dept needs one">
+          </div>
+          <div class="sm:col-span-2"><label class="label" for="billing_email">Invoices to</label>
+            <input class="input" id="billing_email" name="billing_email" type="email" maxlength="160"
+                   value="<?= e((string) ($c['billing_email'] ?? '')) ?>"
+                   placeholder="accounts@yourclinic.lk — defaults to the clinic email">
+          </div>
           <div><label class="label" for="brand_color">Brand colour</label>
             <div class="flex gap-2">
               <input class="h-10 w-12 cursor-pointer rounded-lg border border-slate-300" type="color"
@@ -99,7 +153,9 @@
         <?php endif; ?>
       </form>
     </div>
+  <?php endif; ?>
 
+  <?php if ($tab === 'clinic'): ?>
     <?php $dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']; ?>
     <div class="card overflow-hidden">
       <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
@@ -148,7 +204,9 @@
         <?php endif; ?>
       </form>
     </div>
+  <?php endif; ?>
 
+  <?php if ($tab === 'team'): ?>
     <div class="card overflow-hidden">
       <div class="flex items-center justify-between border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
         <p class="text-xs font-semibold text-slate-600">Staff accounts</p>
@@ -219,9 +277,9 @@
         <?php endif; ?>
       <?php endif; ?>
     </div>
-  </div>
+  <?php endif; ?>
 
-  <div class="space-y-5">
+  <?php if ($tab === 'clinic'): ?>
     <div class="card card-pad">
       <h2 class="text-sm font-bold text-slate-900">Waiting-room display</h2>
       <p class="mt-1 text-xs leading-relaxed text-slate-500">
@@ -235,8 +293,15 @@
       <a href="/display" target="_blank" class="btn-secondary mt-3 w-full">
         <svg class="h-4 w-4"><use href="#i-monitor"/></svg> Open display mode
       </a>
+      <?php if (Auth::can('clinic.manage')): ?>
+        <a href="/settings/displays" class="btn-secondary mt-2 w-full">
+          <svg class="h-4 w-4"><use href="#i-settings"/></svg> Manage screens and keys
+        </a>
+      <?php endif; ?>
     </div>
+  <?php endif; ?>
 
+  <?php if ($tab === 'notifications'): ?>
     <div class="card card-pad">
       <h2 class="text-sm font-bold text-slate-900">Notifications</h2>
       <div class="mt-3 grid grid-cols-3 gap-2 text-center">
@@ -256,6 +321,23 @@
       <?php endif; ?>
     </div>
 
+  <?php endif; ?>
+  <?php if ($tab === 'integrations'): ?>
+    <?php if ($canManage): ?>
+      <div class="card card-pad">
+        <h2 class="text-sm font-bold text-slate-900">Integrations</h2>
+        <p class="mt-1 text-xs leading-relaxed text-slate-500">
+          Switch on the outside systems this clinic uses — SMS, email, accounting, the patient app
+          and webhooks.
+        </p>
+        <a href="/settings/integrations" class="btn-secondary mt-3 w-full text-xs">
+          Manage integrations →
+        </a>
+      </div>
+    <?php endif; ?>
+
+  <?php endif; ?>
+  <?php if ($tab === 'billing'): ?>
     <?php if ($canManage): ?>
       <div class="card card-pad">
         <h2 class="text-sm font-bold text-slate-900">Your data</h2>
@@ -272,7 +354,9 @@
         <a href="/settings/offline" class="btn-ghost mt-2 w-full text-xs">Offline desks →</a>
       </div>
     <?php endif; ?>
+  <?php endif; ?>
 
+  <?php if ($tab === 'clinic'): ?>
     <div class="card card-pad">
       <h2 class="text-sm font-bold text-slate-900">Language</h2>
       <p class="mt-1 text-xs text-slate-500">Interface language for your staff. Patients always see the clinic's default.</p>
@@ -286,10 +370,11 @@
         <button class="btn-secondary shrink-0">Apply</button>
       </form>
     </div>
-  </div>
 
+  <?php endif; ?>
+  <?php if ($tab === 'billing'): ?>
   <?php if ($canManage): ?>
-    <div class="card mt-5 overflow-hidden" id="account">
+    <div class="card overflow-hidden" id="account">
       <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-2.5">
         <p class="text-xs font-semibold text-slate-600">Account closure</p>
       </div>
@@ -303,7 +388,7 @@
         <details class="mt-3">
           <summary class="cursor-pointer text-xs font-semibold text-rose-600 hover:underline">Close this clinic…</summary>
           <form method="post" action="/settings/closure" class="mt-3 space-y-2"
-                onsubmit="return confirm('Sign out every staff member and close this clinic? There is a 90-day window to reverse it.')">
+                data-confirm-submit="Sign out every staff member and close this clinic? There is a 90-day window to reverse it." data-confirm-danger>
             <?= csrf_field() ?>
             <label class="label" for="confirm_name">Type <b><?= e($clinicRecord['name']) ?></b> to confirm</label>
             <input class="input" id="confirm_name" name="confirm_name" required autocomplete="off"
@@ -313,5 +398,6 @@
         </details>
       </div>
     </div>
+  <?php endif; ?>
   <?php endif; ?>
 </div>

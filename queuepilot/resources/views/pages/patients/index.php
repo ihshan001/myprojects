@@ -1,9 +1,50 @@
+<?php
+/**
+ * The clinic's patient register.
+ *
+ * @var array  $patients
+ * @var string $q
+ * @var int    $total
+ */
+use App\Core\Auth;
+?>
 <div class="flex flex-wrap items-start justify-between gap-3">
   <div>
     <h1 class="text-2xl font-bold tracking-tight text-slate-900">Patients</h1>
     <p class="mt-1 text-sm text-slate-500"><?= number_format($total) ?> records in this clinic · private to you</p>
   </div>
-  <a href="/queue/new" class="btn-primary"><svg class="h-4 w-4"><use href="#i-plus"/></svg>New patient</a>
+  <div class="flex flex-wrap items-center gap-2">
+    <?php if (Auth::can('queue.issue')): ?>
+      <a href="/queue/new" class="btn-primary"><svg class="h-4 w-4"><use href="#i-plus"/></svg>New patient &amp; token</a>
+    <?php endif; ?>
+    <button type="button" class="btn-secondary" data-open-add-patient>
+      <svg class="h-4 w-4"><use href="#i-user"/></svg>Add to register only
+    </button>
+  </div>
+</div>
+
+<!--
+  Registering a person is not the same act as queueing them. The token desk
+  does both at once for a walk-in; this is for the booking taken over the
+  phone, before there is anybody standing at the counter.
+-->
+<div id="add-patient-panel" class="card card-pad mt-4 hidden">
+  <form method="post" action="/patients" class="grid gap-3 sm:grid-cols-[2fr_1fr_auto] sm:items-end">
+    <?= csrf_field() ?>
+    <div>
+      <label class="label" for="ap-name">Full name</label>
+      <input class="input" id="ap-name" name="full_name" required minlength="2" placeholder="Kamala Perera">
+    </div>
+    <div>
+      <label class="label" for="ap-phone">Phone <span class="font-normal text-slate-400">(optional)</span></label>
+      <input class="input" id="ap-phone" name="phone" placeholder="07X XXX XXXX" inputmode="tel">
+      <p class="help">Used to find them again at the token desk.</p>
+    </div>
+    <div class="flex gap-2">
+      <button class="btn-primary">Add</button>
+      <button type="button" class="btn-ghost" data-close-add-patient>Cancel</button>
+    </div>
+  </form>
 </div>
 
 <form method="get" action="/patients" class="mt-5 flex gap-2">

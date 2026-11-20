@@ -122,13 +122,13 @@ final class FeatureService
         );
         if ($existing !== null) {
             Db::run(
-                'UPDATE clinic_features SET enabled = ?, updated_at = datetime("now") WHERE id = ?',
+                'UPDATE clinic_features SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
                 [$enabled ? 1 : 0, (int) $existing['id']]
             );
         } else {
             Db::insert(
                 'INSERT INTO clinic_features (clinic_id, feature, enabled, created_at, updated_at) '
-                . 'VALUES (?, ?, ?, datetime("now"), datetime("now"))',
+                . 'VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)',
                 [$clinicId, $feature, $enabled ? 1 : 0]
             );
         }
@@ -161,13 +161,13 @@ final class FeatureService
         );
         if ($row !== null) {
             Db::run(
-                'UPDATE sms_usage SET sent_count = sent_count + 1, updated_at = datetime("now") WHERE id = ?',
+                'UPDATE sms_usage SET sent_count = sent_count + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
                 [(int) $row['id']]
             );
         } else {
             Db::insert(
                 'INSERT INTO sms_usage (clinic_id, year, month, sent_count, created_at, updated_at) '
-                . 'VALUES (?, ?, ?, 1, datetime("now"), datetime("now"))',
+                . 'VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)',
                 [$clinicId, $year, $month]
             );
         }

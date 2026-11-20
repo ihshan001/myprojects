@@ -5,9 +5,11 @@ namespace App\Http\Controllers;
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Core\Request;
 use App\Core\Session;
 use App\Core\Str;
 use App\Services\AuditService;
+use App\Services\DisplayKeyService;
 use App\Services\KioskService;
 
 /**
@@ -60,26 +62,19 @@ final class DisplayController
         // A department display key is its own token, so this screen has to
         // recognise both kinds. Looking only at `display_token` made department
         // links 404 even though they had just been issued.
-        $clinicId = Db::scalar(
-            "SELECT owner_id FROM settings WHERE scope='clinic' AND key_name='display_token' AND value = ?",
-            [$key]
-        );
+        //
+        // Resolution now goes through the service, which handles per-screen
+        // keys and still honours the legacy `settings` values so a screen that
+        // has been running for a year does not go blank after a migration.
+        $resolved = (new DisplayKeyService())->resolve($key);
+        $clinicId = $resolved['clinic_id'] ?? null;
 
         $departmentName = null;
-        if (!$clinicId) {
-            $row = Db::one(
-                "SELECT owner_id, key_name FROM settings
-                  WHERE scope='clinic' AND key_name LIKE 'display.department.%' AND value = ?",
-                [$key]
+        if ($resolved !== null && $resolved['department_id'] !== null) {
+            $departmentName = Db::scalar(
+                'SELECT name FROM departments WHERE id = ? AND clinic_id = ?',
+                [$resolved['department_id'], $clinicId]
             );
-            if ($row) {
-                $clinicId = (int) $row['owner_id'];
-                $departmentId = (int) substr((string) $row['key_name'], strlen('display.department.'));
-                $departmentName = Db::scalar(
-                    'SELECT name FROM departments WHERE id = ? AND clinic_id = ?',
-                    [$departmentId, $clinicId]
-                );
-            }
         }
 
         if (!$clinicId) {
@@ -99,6 +94,77 @@ final class DisplayController
             'canRotate' => false,
             'publicScreen' => true,
             'departmentName' => $departmentName,
+        ], false);
+    }
+
+    /**
+     * "Where do I stand?" — read-only position lookup for one patient.
+     *
+     * The patient types the token printed on their slip. No sign-in, no
+     * phone, no tracking link: a slip is a piece of paper and a waiting room
+     * has a screen, and asking someone to tap a URL they were never given
+     * is not an answer.
+     *
+     * Keyed like the board, so it inherits the same bearer credential and the
+     * same revocation. It answers for one clinic (and one waiting area, if
+     * the screen is department-scoped) and returns no patient name and no
+     * track token — a token label is shouted across a room, so it must never
+     * be exchangeable for the private link that could cancel the visit.
+     */
+    public function position(string $key): void
+    {
+        $resolved = (new DisplayKeyService())->resolve($key);
+        $clinicId = $resolved['clinic_id'] ?? null;
+
+        $departmentId   = $resolved['department_id'] ?? null;
+        $departmentName = null;
+        if ($clinicId !== null && $departmentId !== null) {
+            $departmentName = Db::scalar(
+                'SELECT name FROM departments WHERE id = ? AND clinic_id = ?',
+                [$departmentId, $clinicId]
+            );
+        }
+
+        if (!$clinicId) {
+            abort(404, 'This screen link is not valid. Ask the clinic for a new one.');
+        }
+        $clinicId = (int) $clinicId;
+
+        $clinic = Db::one('SELECT * FROM clinics WHERE id = ?', [$clinicId]);
+        if (!$clinic) {
+            abort(404, 'This screen link is not valid.');
+        }
+
+        $display = new \App\Services\DisplayService();
+        $board   = $display->payload($clinicId, $departmentId);
+        $rooms   = $board['rooms'] ?? [];
+
+        $queueId = (int) Request::int('queue');
+        $token   = trim(Request::string('token'));
+
+        // A solo practice has one queue, so asking which doctor would be a
+        // question with a single answer.
+        if ($queueId === 0 && count($rooms) === 1) {
+            $queueId = (int) ($rooms[0]['queue_id'] ?? 0);
+        }
+
+        $result = null;
+        if ($token !== '' && $queueId > 0) {
+            $result = $display->myPosition($clinicId, $departmentId, $queueId, $token);
+        } elseif ($token !== '' && $queueId === 0) {
+            $result = ['ok' => false, 'error' => 'Choose which doctor you are seeing.'];
+        }
+
+        view('display/position', [
+            'title'          => 'Where do I stand?',
+            'key'            => $key,
+            'clinicRecord'   => $clinic,
+            'departmentName' => $departmentName,
+            'rooms'          => $rooms,
+            'solo'           => count($rooms) === 1,
+            'queueId'        => $queueId,
+            'token'          => $token,
+            'result'         => $result,
         ], false);
     }
 
@@ -148,25 +214,15 @@ final class DisplayController
      */
     public function live(string $key): void
     {
-        $clinicId = Db::scalar(
-            "SELECT owner_id FROM settings WHERE scope='clinic' AND key_name='display_token' AND value = ?",
-            [$key]
-        );
+        $resolved = (new DisplayKeyService())->resolve($key);
+        $clinicId = $resolved['clinic_id'] ?? null;
 
         $departmentName = null;
-        if (!$clinicId) {
-            $row = Db::one(
-                "SELECT owner_id, key_name FROM settings
-                  WHERE scope='clinic' AND key_name LIKE 'display.department.%' AND value = ?",
-                [$key]
+        if ($resolved !== null && $resolved['department_id'] !== null) {
+            $departmentName = Db::scalar(
+                'SELECT name FROM departments WHERE id = ? AND clinic_id = ?',
+                [$resolved['department_id'], $clinicId]
             );
-            if ($row) {
-                $clinicId = (int) $row['owner_id'];
-                $departmentName = Db::scalar(
-                    'SELECT name FROM departments WHERE id = ? AND clinic_id = ?',
-                    [(int) substr((string) $row['key_name'], strlen('display.department.')), $clinicId]
-                );
-            }
         }
 
         if (!$clinicId) {
@@ -199,6 +255,101 @@ final class DisplayController
         (new AuditService())->log($clinicId, 'display.key_rotated', 'setting', null);
         flash('success', 'Display key rotated. Any screen using the old link will stop updating.');
         redirect('/display');
+    }
+
+    /**
+     * Issue a key for one screen.
+     *
+     * Naming the screen is the point: "Reception TV" can be revoked on its
+     * own when the TV is moved, without every other screen in the clinic
+     * going dark.
+     */
+    public function issueKey(): void
+    {
+        $clinicId = Auth::clinicId();
+        if ($clinicId === null) {
+            abort(403, 'Not available.');
+            return;
+        }
+        if (!Auth::can('clinic.manage')) {
+            abort(403, 'Only a clinic owner can issue display keys.');
+            return;
+        }
+
+        $kind = Request::string('kind') === 'department' ? 'department' : 'waiting_room';
+        $departmentId = Request::int('department_id') ?: null;
+
+        try {
+            $issued = (new DisplayKeyService())->issue(
+                $clinicId,
+                Request::string('name'),
+                $kind,
+                $departmentId
+            );
+        } catch (\RuntimeException $e) {
+            flash('error', $e->getMessage());
+            redirect('/settings/displays');
+            return;
+        }
+
+        // Shown once, like a password. The list shows the screens, not their
+        // keys, so a shoulder-surfer at the desk cannot read one off the page.
+        Session::flash('issued_display_key', $issued);
+        flash('success', 'Key issued for ' . $issued['name'] . '. Copy it now — it is not shown again.');
+        // Back to the management page, not the TV. The TV is a wall-mounted
+        // screen and would consume the one-time key display.
+        redirect('/settings/displays');
+    }
+
+    /** Take one screen offline without touching the others. */
+    public function revokeKey(string $id): void
+    {
+        $clinicId = Auth::clinicId();
+        if ($clinicId === null) {
+            abort(403, 'Not available.');
+            return;
+        }
+        if (!Auth::can('clinic.manage')) {
+            abort(403, 'Only a clinic owner can revoke display keys.');
+            return;
+        }
+
+        $done = (new DisplayKeyService())->revoke($clinicId, (int) $id);
+        flash($done ? 'success' : 'warn', $done
+            ? 'Screen revoked. Any display using that link will stop updating.'
+            : 'That screen was already revoked.');
+        redirect('/settings/displays');
+    }
+
+    /**
+     * Manage the keys that open the public screens.
+     *
+     * Kept out of the TV view on purpose: /display is a wall-mounted screen
+     * read from six metres away, and a key list does not belong on it. The
+     * PDF is also clear that advanced configuration sits inside settings
+     * rather than on an everyday screen.
+     */
+    public function displays(): void
+    {
+        $clinicId = Auth::clinicId();
+        if ($clinicId === null) {
+            abort(403, 'Not available.');
+            return;
+        }
+
+        view('display/keys', [
+            'title' => 'Public screens',
+            'displayKeys' => (new DisplayKeyService())->forClinic($clinicId),
+            'departments' => Db::all(
+                'SELECT id, name FROM departments WHERE clinic_id = ? AND is_active = 1 ORDER BY name',
+                [$clinicId]
+            ),
+            'issuedKey' => Session::takeFlash('issued_display_key'),
+            'legacyKey' => (string) Db::scalar(
+                "SELECT value FROM settings WHERE scope='clinic' AND owner_id=? AND key_name='display_token'",
+                [$clinicId]
+            ),
+        ]);
     }
 
     private function ensureKey(int $clinicId): string

@@ -222,7 +222,7 @@ $tone = match ($s['status']) {
 
   <?php if ($s['status'] === 'waiting'): ?>
     <form method="post" action="/t/<?= e($token) ?>/cancel" class="mt-4"
-          onsubmit="return confirm('Cancel your visit and give up your place in the queue?');">
+          data-confirm-submit="Cancel your visit and give up your place in the queue?" data-confirm-danger>
       <?= csrf_field() ?>
       <button type="submit" class="btn w-full justify-center border border-slate-300 bg-white text-sm text-rose-700 hover:bg-rose-50">
         I can no longer come — cancel my visit

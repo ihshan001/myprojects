@@ -23,7 +23,7 @@ $statusCopy = (string) $appointment['status'] === 'checked_in'
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
-  <title><?= e($title) ?> · QueuePilot</title>
+  <title><?= e($title) ?> · <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?></title>
   <link rel="stylesheet" href="<?= e(asset('build/app.css')) ?>">
 </head>
 <body class="min-h-full bg-slate-100">
@@ -116,7 +116,7 @@ $statusCopy = (string) $appointment['status'] === 'checked_in'
         </details>
 
         <form method="post" action="/a/<?= e($token) ?>/cancel" class="mt-3"
-              onsubmit="return confirm('Cancel this appointment? The time goes back to the clinic.');">
+              data-confirm-submit="Cancel this appointment? The time goes back to the clinic." data-confirm-danger>
           <?= csrf_field() ?>
           <button type="submit" class="btn w-full justify-center border border-slate-300 bg-white text-xs text-rose-700 hover:bg-rose-50">
             I cannot come — cancel it

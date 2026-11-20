@@ -287,7 +287,7 @@ $positionLabel = $isWaiting
 
   <?php if ($s['status'] === 'waiting'): ?>
     <form method="post" action="/t/<?= e($token) ?>/cancel" class="mt-4"
-          onsubmit="return confirm('Cancel your visit and give up your place in the queue?');">
+          data-confirm="Cancel your visit and give up your place in the queue?">
       <?= csrf_field() ?>
       <button type="submit" class="btn w-full justify-center border border-hairline bg-white text-sm text-rose-700 hover:bg-rose-50">
         I can no longer come — cancel my visit

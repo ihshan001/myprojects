@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Services\DisplayKeyService;
 use App\Core\Env;
 use App\Core\Log;
 use App\Core\RateLimiter;
@@ -174,10 +175,23 @@ final class ApiController
         $ability = match ($action) {
             'call', 'recall' => 'queue.call',
             'start', 'complete' => 'queue.consult',
+            // It finishes a consultation *and* calls, so it needs both. A role
+            // with only one half of the pair must not be able to use it.
+            'complete_next' => 'queue.consult+queue.call',
             'priority' => 'queue.priority',
             default => 'queue.operate',
         };
-        if (!Auth::can('queue.operate') || !Auth::can($ability)) {
+        $required = $ability === 'queue.consult+queue.call'
+            ? ['queue.consult', 'queue.call']
+            : [$ability];
+
+        $denied = false;
+        foreach ($required as $need) {
+            if (!Auth::can($need)) {
+                $denied = true;
+            }
+        }
+        if (!Auth::can('queue.operate') || $denied) {
             json([
                 'ok' => false,
                 'error' => 'forbidden',
@@ -353,25 +367,15 @@ final class ApiController
         RateLimiter::enforce('display:key:' . $key, $perMin, 60);
         RateLimiter::enforce('display:ip:' . Request::ip(), $perMin * 2, 60);
 
-        $clinicId = Db::scalar(
-            "SELECT owner_id FROM settings WHERE scope='clinic' AND key_name='display_token' AND value = ?",
-            [$key]
-        );
+        // Per-screen keys first, then the legacy settings values. Both are
+        // bearer credentials on an unauthenticated URL, so both are resolved
+        // by the same code path and rate-limited identically above.
+        $resolved = (new DisplayKeyService())->resolve($key);
+        $clinicId = $resolved['clinic_id'] ?? null;
 
-        // A department display key is a token of its own rather than the clinic
-        // key plus a parameter. Try it when the clinic key misses, so a screen
-        // issued for one waiting area keeps working.
         $scopedDepartment = null;
-        if (!$clinicId) {
-            $row = Db::one(
-                "SELECT owner_id, key_name FROM settings
-                  WHERE scope='clinic' AND key_name LIKE 'display.department.%' AND value = ?",
-                [$key]
-            );
-            if ($row) {
-                $clinicId = (int) $row['owner_id'];
-                $scopedDepartment = (int) substr((string) $row['key_name'], strlen('display.department.'));
-            }
+        if ($resolved !== null && $resolved['department_id'] !== null) {
+            $scopedDepartment = $resolved['department_id'];
         }
         if (!$clinicId) {
             json(['ok' => false, 'error' => 'not_found'], 404);
@@ -391,101 +395,13 @@ final class ApiController
             $scopedDepartment = $this->departmentForKey($clinicId, $key);
         }
 
-        $queues = Db::all(
-            "SELECT * FROM queues WHERE clinic_id = ? AND session_date = ? AND status <> 'closed'"
-            . ($scopedDepartment !== null ? ' AND department_id = ?' : ''),
-            $scopedDepartment !== null
-                ? [$clinicId, Db::today(), (int) $scopedDepartment]
-                : [$clinicId, Db::today()]
-        );
-
-        // The header needs a name, not an id.
-        $departmentName = $scopedDepartment !== null
-            ? Db::scalar('SELECT name FROM departments WHERE id = ? AND clinic_id = ?', [(int) $scopedDepartment, $clinicId])
-            : null;
-
-        $serving = null;
-        $upcoming = [];
-        $delays = [];
-        foreach ($queues as $q) {
-            // An announced delay is public information and belongs on the TV.
-            if ((int) ($q['delay_minutes'] ?? 0) > 0) {
-                $delays[] = [
-                    'queue' => (string) $q['name'],
-                    'minutes' => (int) $q['delay_minutes'],
-                    'note' => (string) ($q['delay_note'] ?? ''),
-                ];
-            }
-            $now = Db::one(
-                "SELECT e.token_label, e.status, d.name AS doctor_name, r.name AS room_name
-                   FROM queue_entries e
-                   LEFT JOIN doctors d ON d.id = (SELECT doctor_id FROM queues WHERE id = e.queue_id)
-                   LEFT JOIN rooms r ON r.id = d.room_id
-                  WHERE e.queue_id = ? AND e.status IN ('called','in_consultation')
-                  ORDER BY CASE e.status WHEN 'called' THEN 0 ELSE 1 END, e.id DESC LIMIT 1",
-                [$q['id']]
-            );
-            if ($now && ($serving === null || $now['status'] === 'called')) {
-                $serving = [
-                    'token' => $now['token_label'],
-                    'room' => $now['room_name'] ?? $q['name'],
-                    'doctor' => $now['doctor_name'],
-                ];
-            }
-            $waiting = Db::all(
-                "SELECT e.token_label AS token, r.name AS room_name
-                   FROM queue_entries e
-                   LEFT JOIN queues q ON q.id = e.queue_id
-                   LEFT JOIN doctors d ON d.id = q.doctor_id
-                   LEFT JOIN rooms r ON r.id = d.room_id
-                  WHERE e.queue_id = ? AND e.status = 'waiting'
-                  ORDER BY e.priority DESC, e.sort_weight, e.id LIMIT 5",
-                [$q['id']]
-            );
-            foreach ($waiting as $w) {
-                $upcoming[] = ['token' => $w['token'], 'room' => $w['room_name'] ?? $q['name']];
-            }
-        }
-
-        $stats = (new \App\Services\ReportService())->daySummary($clinicId);
-
-        json([
-            'ok' => true,
-            'department' => $departmentName,
-            'now_serving' => $serving,
-            'upcoming' => array_slice($upcoming, 0, 6),
-            'delays' => $delays,
-            'paused' => array_values(array_map(
-                static fn (array $q): string => (string) $q['name'],
-                array_filter($queues, static fn (array $q): bool => ($q['status'] ?? '') === 'paused')
-            )),
-            'stats' => [
-                // The count must match the board above it. A department screen
-                // showing four tokens while the footer says nine is the kind of
-                // inconsistency that makes staff stop trusting the screen.
-                'waiting' => $scopedDepartment !== null
-                    ? (int) Db::scalar(
-                        "SELECT COUNT(*) FROM queue_entries e JOIN queues q ON q.id = e.queue_id
-                          WHERE e.clinic_id = ? AND e.status = 'waiting' AND q.session_date = ?
-                            AND q.department_id = ?",
-                        [$clinicId, Db::today(), (int) $scopedDepartment]
-                    )
-                    : (int) Db::scalar(
-                        "SELECT COUNT(*) FROM queue_entries e JOIN queues q ON q.id = e.queue_id
-                          WHERE e.clinic_id = ? AND e.status = 'waiting' AND q.session_date = ?",
-                        [$clinicId, Db::today()]
-                    ),
-                'completed' => $scopedDepartment !== null
-                    ? (int) Db::scalar(
-                        "SELECT COUNT(*) FROM queue_entries e JOIN queues q ON q.id = e.queue_id
-                          WHERE e.clinic_id = ? AND e.status = 'completed' AND q.session_date = ?
-                            AND q.department_id = ?",
-                        [$clinicId, Db::today(), (int) $scopedDepartment]
-                    )
-                    : (int) ($stats['completed'] ?? 0),
-            ],
-            'server_time' => date('h:i A'),
-        ]);
+        // One builder for the waiting-room payload.
+        //
+        // The board is server-rendered on first paint and then refreshed by
+        // the poller. When those two paths built their own arrays the poller
+        // silently overwrote the rendered markup with a narrower shape, so
+        // both now call DisplayService::payload() and cannot drift apart.
+        json((new \App\Services\DisplayService())->payload($clinicId, $scopedDepartment));
     }
 
     public function summary(): void

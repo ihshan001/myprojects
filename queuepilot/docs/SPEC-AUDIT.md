@@ -5,9 +5,9 @@ the Phase 1 / Phase 2 / Phase 3 brief and the "difficult part" table is listed
 below with its real status: **built and tested**, **built, not exercised**, or
 **not built**.
 
-Last verified: **157 automated checks passing**, 145 files lint-clean,
-`tools/healthcheck.php` green, and `/api/health` reporting `ok` on the demo
-data.
+Last verified: **382 automated checks**, 60 acceptance, 15 browser, 12 tool
+checks, 224 files lint-clean, `tools/healthcheck.php` green, `tools/host-drill.php`
+24/24, and `/api/health` reporting `ok`.
 
 Legend: ● built + tested · ◐ built, verified by hand but no automated test ·
 ○ not built
@@ -150,12 +150,13 @@ medical note. Verified by inspecting the live JSON.
 | Patient moves to another doctor | safe transfer, no duplicate token | ● atomic: closes original, issues new token in target, one live token |
 | Doctor takes a break | pause progression, communicate delay | ● pause + delay notice |
 
-**Still not built: a "notify everyone waiting" button for a pause.** Pausing
-stops new tokens and shows on the TV, but no SMS goes out to the line. The
-reason given in the first audit still holds — an automatic bulk send on every
-two-minute pause is worse than silence. It needs to be an explicit button, and
-it is not built yet. This is the one item from the "difficult part" table that
-remains a real gap.
+**"Notify everyone waiting" is now built, as a button.** The reasoning held —
+an automatic bulk send on every two-minute pause spends the clinic's SMS credit
+and teaches patients to ignore messages — so it is a deliberate control on the
+queue board, never a side effect of pausing. Three presets (doctor called away,
+running very late, session interrupted) plus free text. Deduped on the
+announcement text: pressing it twice does not text anyone twice, and a
+*different* announcement does reach them. Tested for all three properties.
 
 **Clinical safeguard:** the software never decides who deserves priority. It
 provides a controlled override that requires a reason, records who did it, and
@@ -235,7 +236,8 @@ this application.
 | Custom branding and patient pages | ◐ | brand colour, clinic name and phone flow to the tracking page, TV and booking form; no logo upload UI |
 | Subscription billing, invoices, plan limits | ● | `/billing`, `/admin/plans`, limit checks before creating doctors/staff/queues |
 | Payment verification | ◐ | manual "mark paid" by the clinic admin, audited. No gateway integration by design |
-| Hardware add-ons | ○ | no token printer / dedicated device integration; the browser TV mode covers the display case |
+| Token slip for a thermal printer | ● | `/queue/{id}/slip` (browser print dialog), `/queue/{id}/slip.escpos` (raw ESC/POS for a USB unit), `/queue/{id}/qr.png`. Covers an 80 mm receipt printer; no vendor SDK |
+| Hardware add-ons beyond that | ○ | no cash drawer, no medical-device integration. Deliberately out of scope |
 | Advanced analytics, configurable policies | ◐ | weights and grace period are configurable; no policy editor for more complex rules |
 
 ---
@@ -258,25 +260,96 @@ without that work.
 
 ## What I would build next, in order
 
-The previous list has been worked through. Items 1–4 and 6 are now built and
-tested; item 5 is the one that remains.
+Items 1–3 of the previous list are now built. What remains is not a gap in
+the brief — it is work that needs something the project does not have yet.
 
-1. **"Notify everyone waiting" button** for a pause or an abandoned session.
-   The only remaining item from the "difficult part" table. It should be a
-   deliberate button, not an automatic send.
-2. **Rehearse the runbook on a failing host.** `docs/OPERATIONS.md` describes
-   what to do; it has not been walked through against a host that is actually
-   broken.
-3. **Load-test the token allocator.** The correctness is tested (locked
-   allocation, unique index); the behaviour at hundreds of tokens per minute on
-   MySQL has not been measured.
-4. **Payment-gateway settlement.** Invoices are marked paid by hand today,
-   which is a deliberate choice, not an oversight.
-5. **Hardware integration** (thermal token printer, room-side call display).
-   The browser TV mode covers the display case; a printer does not.
-6. **Phase 3 vertical packs.** The queue engine is already vertical-neutral;
-   this needs a *service* entity (a dental procedure is not a consultation)
-   before the vocabulary can be generalised.
+1. ~~**"Notify everyone waiting" button.**~~ **Built.** A deliberate control on
+   the queue board with three presets and free text, deduped per announcement.
+2. ~~**Rehearse the runbook on a failing host.**~~ **Built as
+   `tools/host-drill.php`** — 24 checks across the six failures that are silent
+   on shared hosting, each printing its own fix. It found one real thing while
+   being written: `config.php` falls back to a **shared dev `APP_KEY` that is in
+   the repository**, so an install that forgot `APP_KEY` would encrypt 2FA
+   secrets with a publicly-known key. The drill now fails that case in
+   production.
+3. ~~**Load-test the token allocator.**~~ **Built as `tools/loadtest.php`.**
+   SQLite, this machine: 1,000 tokens in 1.48 s (**678/s**), 1,000 distinct
+   labels, zero duplicates, zero failures. **MySQL is still unmeasured** — it is
+   the production target and behaves differently under InnoDB row locks. Run
+   the tool on the real host before the first clinic.
+
+### Found by walking the actual customer journey
+
+Traced end to end — stranger → application → admin review → trial or paid
+activation → welcome email → invoice → payment → receipt — and five things were
+wrong in ways that would not have surfaced as errors:
+
+1. **Every pricing CTA linked to a bare `/register`.** The register form defaulted
+   to Professional, so a visitor who chose Starter was signed up to the middle
+   plan. The one decision they had already made for us was the one we discarded.
+   The CTA now carries `?plan=`, the form honours it, and an unknown code falls
+   back to Professional rather than to a code with no price row.
+2. **The welcome email printed the same URL twice.** It said "two addresses, and
+   they do different jobs" and then printed `siteUrl` and `opsUrl`, which are both
+   the bare host until `APP_DOMAIN` is set. The address a patient actually opens is
+   `/board/<key>` — the link the owner is told to put on a counter card — and it
+   was never in the email. Now printed first, with the ops host clearly marked
+   private.
+3. **No invoice email existed.** The only email in the product was the welcome
+   link, while the Subscription page told every customer "Automatic reminder by
+   email". `InvoiceMailer` now sends the invoice, the receipt, and a dated
+   arrears warning, and reports honestly when `MAIL_TRANSPORT=none` means nothing
+   left.
+4. **The grace clock started silently.** `beginGrace()` wrote `grace_until` and
+   told nobody. A working clinic could be switched off without ever being warned.
+   It now emails the actual stop date.
+5. **A first invoice billed a period before the clinic existed.** Approval sets
+   `renews_on` one cycle out; when that cycle closed, the arrears arithmetic
+   reached back a month — to before signup — at full price, on the customer's
+   first ever invoice. The period start is now clamped to the go-live date.
+
+And one structural gap: **a signup notified nobody.** The approval gate meant
+nothing to an admin who did not open `/admin/clinics`, so a Friday application
+could sit until Tuesday. Signup now sends an email to `COMPANY_ALERTS_EMAIL` and
+writes a `platform_notifications` row per admin, surfaced at the top of `/admin`.
+Payments claims do the same. The new table exists because `staff_notifications`
+has a NOT NULL foreign key to `clinics(id)` — filing "a clinic applied" under
+some other tenant's id would have leaked it into that clinic's bell.
+
+### Found while closing the list
+
+Two real defects surfaced from building the verification tools, which is the
+argument for building verification tools:
+
+1. **`config.php` fell back to an `APP_KEY` committed to this repository.** An
+   install that forgot to set it would boot happily and encrypt every TOTP
+   secret with a publicly-known key. The fallback still exists — a fresh clone
+   must boot — but `public/index.php` now refuses to start in production on it,
+   with an error that says exactly how to generate a real one.
+   `tools/host-drill.php` reports it too.
+2. **The MySQL migration above.** Caught by `tools/dialect-check.php`.
+
+### Real remaining gaps
+
+These are stated plainly because "no gaps" would be untrue.
+
+* **Nothing has run against MySQL.** Every check in this document was taken on
+  SQLite. One `php tools/migrate.php` plus one `php tools/loadtest.php` on the
+  target host converts it into a fact. Two things have narrowed the risk:
+  `tools/dialect-check.php` now compares every migration pair and found
+  **`0015_session_start.mysql.sql` calling SQLite's `datetime('now')`** — a
+  guaranteed failure on the production target that no other check could see,
+  because the suite only executes the SQLite half. It is fixed, and the tool now
+  guards the whole class.
+* **No payment gateway.** Deliberate: bank transfer with manual verification,
+  as specified. Invoices now carry a printable document, the seller's legal
+  entity, the clinic's VAT/TIN and PO reference, and the bank details.
+* **Phase 3 vertical packs.** The queue engine is vertical-neutral already; a
+  *service* entity (a dental procedure is not a consultation) has to be
+  modelled first. Out of scope for a clinic product.
+* **The company is not registered.** `COMPANY_LEGAL_NAME` defaults to a
+  placeholder that says so. Invoices printed before it is set are not
+  fileable.
 
 ### Bugs found by probing, not by reading
 

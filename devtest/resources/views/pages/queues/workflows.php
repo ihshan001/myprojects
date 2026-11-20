@@ -74,7 +74,7 @@
                 </p>
               </div>
               <form method="post" action="/queues/workflows/<?= (int) $step['id'] ?>/delete"
-                    onsubmit="return confirm('Remove this step? Visits that already passed it keep their record.')">
+                    data-confirm="Remove this step? Visits that already passed it keep their record.">
                 <?= csrf_field() ?>
                 <button class="btn-secondary btn-sm text-red-700" type="submit">Remove</button>
               </form>

@@ -72,7 +72,7 @@ final class EmailVerificationService
         );
         Db::run('UPDATE users SET verification_sent_at = ? WHERE id = ?', [Db::now(), (int) $user['id']]);
 
-        $url = rtrim((string) Env::get('app.url', ''), '/') . '/verify-email/' . $token;
+        $url = clinic_url((int) ($user['clinic_id'] ?? 0), '/verify-email/' . $token, 'ops');
         $clinic = Db::scalar('SELECT name FROM clinics WHERE id = ?', [(int) $user['clinic_id']]);
 
         (new MailService())->send(

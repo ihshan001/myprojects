@@ -204,6 +204,20 @@ require ${JSON.stringify(ROOT + '/public/index.php')};
     if (!Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')) {
       headers['Content-Type'] = 'text/html; charset=utf-8';
     }
+    // Response.php sends `X-Frame-Options: SAMEORIGIN` and CSP
+    // `frame-ancestors 'self'`. The live preview embeds this port in an iframe
+    // on a different origin, so those two headers render it BLANK — and the
+    // server still logs 200, so nothing looks wrong from here.
+    // Strip them in the TRANSPORT only, exactly as serve-landing.mjs does.
+    // app/Core/Response.php is untouched, so the app's own policy is unchanged;
+    // this build has no authentication at all and must never be public.
+    for (const key of Object.keys(headers)) {
+      const name = key.toLowerCase();
+      if (name === 'x-frame-options') delete headers[key];
+      else if (name === 'content-security-policy') {
+        headers[key] = String(headers[key]).replace(/frame-ancestors[^;]*(;|$)/gi, '');
+      }
+    }
     delete headers['Content-Length'];
     headers['Content-Length'] = Buffer.byteLength(payload);
     headers['Cache-Control'] = 'no-store, must-revalidate';

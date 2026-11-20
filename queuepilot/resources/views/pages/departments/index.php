@@ -53,7 +53,7 @@
               <?php endif; ?>
               <?php if ($canManage): ?>
                 <form method="post" action="/departments/<?= (int) $d['id'] ?>/display-key"
-                      onsubmit="return confirm('<?= $dkey !== null ? 'Replace the existing display link? Screens using the old one stop updating.' : 'Issue a display link for this department?' ?>')">
+                      data-confirm-submit="<?= $dkey !== null ? 'Replace the existing display link? Screens using the old one stop updating.' : 'Issue a display link for this department?' ?>" data-confirm-danger>
                   <?= csrf_field() ?>
                   <button class="text-[10px] font-medium text-slate-500 underline hover:text-slate-700">
                     <?= $dkey !== null ? 'rotate link' : 'issue link' ?>
@@ -96,7 +96,7 @@
               </details>
               <?php if ((int) $d['is_active'] === 1): ?>
                 <form method="post" action="/departments/<?= (int) $d['id'] ?>/deactivate"
-                      onsubmit="return confirm('Deactivate <?= e(addslashes((string) $d['name'])) ?>? Its queues and history stay intact.')">
+                      data-confirm-submit="Deactivate <?= e(addslashes((string) $d['name'])) ?>? Its queues and history stay intact." data-confirm-danger>
                   <?= csrf_field() ?>
                   <button class="btn-ghost btn-sm text-rose-600">Deactivate</button>
                 </form>

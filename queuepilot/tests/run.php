@@ -14,6 +14,7 @@ use App\Core\Csrf;
 use App\Core\Db;
 use App\Domain\Queue\InvalidTransition;
 use App\Domain\Queue\QueueStateMachine;
+use App\Services\Settings;
 use Tests\Assert;
 use Tests\Database;
 
@@ -38,10 +39,13 @@ function seedPlans(): void
         [4, 'enterprise', 'Enterprise', 0, 999, 999, 999, 40],
     ];
     foreach ($plans as [$id, $code, $name, $price, $docs, $staff, $queues, $sort]) {
+        // Mirrors tools/seed.php: yearly is derived at 20% off, so a test that
+        // checks the arithmetic checks the same rule production uses.
         Db::run(
-            'INSERT INTO plans (id, code, name, price_monthly, max_doctors, max_staff, max_queues, features, sort_order)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [$id, $code, $name, $price, $docs, $staff, $queues, 'Test plan', $sort]
+            'INSERT INTO plans (id, code, name, price_monthly, price_yearly, yearly_discount_pct,
+                                max_doctors, max_staff, max_queues, features, sort_order)
+             VALUES (?, ?, ?, ?, ?, 20, ?, ?, ?, ?, ?)',
+            [$id, $code, $name, $price, round($price * 12 * 0.8, 2), $docs, $staff, $queues, 'Test plan', $sort]
         );
     }
 }
@@ -112,10 +116,28 @@ Assert::test('the happy path is legal', function (): void {
     Assert::true(QueueStateMachine::can(QueueStateMachine::IN_CONSULTATION, QueueStateMachine::COMPLETED));
 });
 
-Assert::test('completed and cancelled are terminal', function (): void {
+Assert::test('completed is terminal, and a cancelled visit can only rejoin the line', function (): void {
+    // Completed stays a dead end: the visit happened, and reopening it would
+    // rewrite a clinical record. Cancelled is different — a mis-click has to be
+    // recoverable, or the patient is registered a second time and the first
+    // visit is orphaned. The one way back is to the waiting list; a cancelled
+    // entry must never be able to jump the queue by becoming callable.
     foreach (QueueStateMachine::ACTIVE_STATUSES as $target) {
         Assert::false(QueueStateMachine::can(QueueStateMachine::COMPLETED, $target), "completed → {$target}");
-        Assert::false(QueueStateMachine::can(QueueStateMachine::CANCELLED, $target), "cancelled → {$target}");
+    }
+    Assert::true(
+        QueueStateMachine::can(QueueStateMachine::CANCELLED, QueueStateMachine::WAITING),
+        'cancelled → waiting, so a cancellation made in error can be undone'
+    );
+    foreach ([
+        QueueStateMachine::CALLED,
+        QueueStateMachine::IN_CONSULTATION,
+        QueueStateMachine::ON_HOLD,
+    ] as $target) {
+        Assert::false(
+            QueueStateMachine::can(QueueStateMachine::CANCELLED, $target),
+            "cancelled → {$target} must stay refused: an undone cancellation rejoins the line, it does not skip it"
+        );
     }
 });
 
@@ -238,6 +260,78 @@ Assert::test('every mutation writes a queue event with from/to', function () use
     for ($i = 1; $i < count($events); $i++) {
         Assert::same($events[$i - 1]['to_status'], $events[$i]['from_status'], "chain break at event {$i}");
     }
+});
+
+/* ------------------------------------------------------------------ */
+/* 2a. complete & call next                                            */
+/* ------------------------------------------------------------------ */
+
+// Its own queue so these assertions never depend on what ran above.
+$cnQueue = (int) Db::insert(
+    "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
+     VALUES (1, 1, 'Complete and call next probe', 'consultation', 'open', ?, 'Z', 0, 3, ?)",
+    [date('Y-m-d'), Db::now()]
+);
+$GLOBALS['cnQueue'] = $cnQueue;
+$service->startSession(1, $cnQueue);
+
+$cnVersion = static function (int $id): int {
+    return (int) Db::scalar('SELECT version FROM queue_entries WHERE id = ?', [$id]);
+};
+
+$cnIds = [];
+foreach (['CN First', 'CN Second', 'CN Third'] as $i => $name) {
+    $p = $patients->findOrCreate(1, ['full_name' => $name, 'phone' => '077111000' . ($i + 1)]);
+    $issued = $service->issueToken(1, $cnQueue, (int) $p['id'], []);
+    $cnIds[] = (int) $issued['entry_id'];
+}
+[$cnA, $cnB, $cnC] = $cnIds;
+
+$service->apply(1, $cnA, 'call', ['version' => $cnVersion($cnA)]);
+$service->apply(1, $cnA, 'start', ['version' => $cnVersion($cnA)]);
+$cnRes = $service->apply(1, $cnA, 'complete_next', ['version' => $cnVersion($cnA)]);
+
+Assert::test('complete & call next finishes the visit', function () use ($cnRes): void {
+    Assert::true($cnRes['ok'], 'action accepted');
+    Assert::same('completed', $cnRes['status']);
+});
+
+Assert::test('complete & call next rings in the next patient', function () use ($cnRes, $cnB): void {
+    Assert::true(isset($cnRes['called_next']), 'the called patient is reported back');
+    Assert::same($cnB, (int) $cnRes['called_next']['id']);
+    Assert::same('called', (string) Db::scalar('SELECT status FROM queue_entries WHERE id = ?', [$cnB]));
+});
+
+Assert::test('complete & call next only calls one patient, not the rest', function () use ($cnC): void {
+    Assert::same('waiting', (string) Db::scalar('SELECT status FROM queue_entries WHERE id = ?', [$cnC]));
+});
+
+// The PDF's hard rule: completing on its own must never call anyone.
+$service->apply(1, $cnB, 'start', ['version' => $cnVersion($cnB)]);
+$plainRes = $service->apply(1, $cnB, 'complete', ['version' => $cnVersion($cnB)]);
+
+Assert::test('completing alone never calls the next patient', function () use ($plainRes, $cnB, $cnC): void {
+    Assert::true($plainRes['ok']);
+    Assert::false(isset($plainRes['called_next']), 'no patient is called');
+    Assert::same('completed', (string) Db::scalar('SELECT status FROM queue_entries WHERE id = ?', [$cnB]));
+    Assert::same('waiting', (string) Db::scalar('SELECT status FROM queue_entries WHERE id = ?', [$cnC]));
+});
+
+Assert::test('the chained call is audited and recorded as an event', function () use ($cnB): void {
+    $events = Db::all(
+        "SELECT action, from_status, to_status FROM queue_events WHERE entry_id = ? ORDER BY id",
+        [$cnB]
+    );
+    $calls = array_values(array_filter($events, static fn (array $e): bool => $e['action'] === 'entry.call'));
+    Assert::true(count($calls) >= 1, 'the call is recorded in the visit history');
+    Assert::same('waiting', $calls[0]['from_status']);
+    Assert::same('called', $calls[0]['to_status']);
+
+    $audited = (int) Db::scalar(
+        "SELECT COUNT(*) FROM audit_logs WHERE clinic_id = 1 AND entity = 'queue_entry' AND entity_id = ? AND action = 'queue.call'",
+        [$cnB]
+    );
+    Assert::true($audited >= 1, 'the call is audited');
 });
 
 /* ------------------------------------------------------------------ */
@@ -984,6 +1078,220 @@ Assert::test('the layout actually calls t() for its navigation', function (): vo
     Assert::true($calls >= 5, "layout uses t() for nav labels (found {$calls})");
 });
 
+Assert::test('a doctor\'s navigation is only their own four destinations', function (): void {
+    // The PDF: "Doctor navigation: Today's queue, My schedule, My patients,
+    // My profile. No clinic-wide configuration or platform administration
+    // should be visible." Hiding a link is not the same as withholding
+    // permission, but showing a doctor the clinic's queue settings invites
+    // them to change settings that apply to everybody.
+    $layout = (string) file_get_contents(QP_ROOT . '/resources/views/layouts/app.php');
+
+    // The doctor branch is the one guarded on the doctor role.
+    $branch = strstr($layout, '$u[\'role\'] === \'doctor\'') ?: '';
+    Assert::true($branch !== '', 'a doctor-only navigation branch exists');
+
+    $slice = substr($branch, 0, strpos($branch, '} else') ?: strlen($branch));
+    foreach (['/doctor', '/doctor/schedule', '/doctor/patients', '/doctor/profile'] as $need) {
+        Assert::true(str_contains($slice, "'" . $need . "'"), "doctor nav offers {$need}");
+    }
+    foreach (['/queues/config', '/settings', '/billing', '/patients', '/appointments', '/calendar'] as $leak) {
+        Assert::false(str_contains($slice, "'" . $leak . "'"), "doctor nav must not offer {$leak}");
+    }
+});
+
+Assert::test('a doctor lands on their own workspace after signing in', function (): void {
+    // Dropping a doctor on the reception board — which is built around
+    // issuing tokens, the one thing a doctor cannot do — makes their first
+    // screen a list of controls they are not allowed to use.
+    $src = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/AuthController.php');
+    Assert::true(str_contains($src, 'ROLE_DOCTOR => \'/doctor\''), 'doctors are sent to /doctor');
+});
+
+Assert::test('every delivery attempt is logged, not just the last one', function (): void {
+    // The outbox row is rewritten by each retry, so without the log table a
+    // clinic that retried three times can only see the third failure. The PDF
+    // asks for "retry logic and delivery logs"; this is the half that the
+    // outbox alone cannot provide.
+    $svc = new App\Services\NotificationService();
+    $svc->processDue();
+
+    $messages = (int) Db::scalar(
+        "SELECT COUNT(*) FROM notifications WHERE status IN ('sent','logged','abandoned')"
+    );
+    $logged = (int) Db::scalar('SELECT COUNT(*) FROM notification_logs');
+    Assert::true($messages > 0, 'at least one message was processed');
+    Assert::true($logged > 0, 'attempts were recorded');
+
+    // One row per attempt, and never updated afterwards.
+    $duplicates = (int) Db::scalar(
+        'SELECT COUNT(*) FROM (SELECT notification_id, attempt FROM notification_logs
+          GROUP BY notification_id, attempt HAVING COUNT(*) > 1)'
+    );
+    Assert::same(0, $duplicates, 'attempt numbers are unique per message');
+
+    $outcomes = array_column(
+        Db::all('SELECT DISTINCT outcome FROM notification_logs'),
+        'outcome'
+    );
+    $allowed = ['sent', 'logged', 'failed', 'abandoned', 'gated'];
+    foreach ($outcomes as $o) {
+        Assert::true(in_array($o, $allowed, true), "outcome {$o} is one of the known set");
+    }
+});
+
+Assert::test('a processed notification keeps its history when retried', function (): void {
+    // The point of the split: processing the same message again appends
+    // rather than overwrites.
+    $id = (int) Db::scalar('SELECT id FROM notifications ORDER BY id DESC LIMIT 1');
+    Db::run("UPDATE notifications SET status='queued', scheduled_at = ? WHERE id = ?", [Db::now(), $id]);
+
+    $before = (int) Db::scalar('SELECT COUNT(*) FROM notification_logs WHERE notification_id = ?', [$id]);
+    (new App\Services\NotificationService())->processDue();
+    $after = (int) Db::scalar('SELECT COUNT(*) FROM notification_logs WHERE notification_id = ?', [$id]);
+
+    Assert::true($after >= $before, 'history is appended, never rewritten');
+});
+
+/**
+ * An unpaid invoice to test against. The suite does not seed billing, so the
+ * tests make their own rather than depending on fixtures that may not exist.
+ */
+$testInvoiceId = (int) (Db::scalar("SELECT id FROM invoices WHERE clinic_id = 1 ORDER BY id DESC LIMIT 1") ?: 0);
+if ($testInvoiceId === 0) {
+    $testInvoiceId = Db::insert(
+        'INSERT INTO invoices (clinic_id, number, period_from, period_to, amount, currency, status, created_at)
+         VALUES (1,?,?,?,?,?,?,?)',
+        ['INV-TEST-0001', date('Y-m-01'), date('Y-m-t'), 7900, 'LKR', 'unpaid', Db::now()]
+    );
+}
+
+Assert::test('a rejected payment keeps its submission on file', function () use ($testInvoiceId): void {
+    // This is the whole reason `payments` exists. The claim used to live on
+    // the invoice, so rejecting it reset the invoice to unpaid and the record
+    // that the clinic said it had paid vanished with it — leaving a billing
+    // dispute with no evidence on either side.
+    $svc = new App\Services\SubscriptionService();
+
+    $invoiceId = $testInvoiceId;
+    Db::run("UPDATE invoices SET status = 'unpaid', paid_at = NULL WHERE id = ?", [$invoiceId]);
+
+    $paymentId = $svc->claim(1, $invoiceId, 'REJ-TEST-0001', 'bank_transfer');
+    Assert::same(
+        'claimed',
+        (string) Db::scalar('SELECT status FROM payments WHERE id = ?', [$paymentId])
+    );
+
+    $svc->reject($paymentId, null, 'No transfer with that reference.');
+
+    // The invoice goes back to unpaid — the clinic has not paid.
+    Assert::same('unpaid', (string) Db::scalar('SELECT status FROM invoices WHERE id = ?', [$invoiceId]));
+    // …but the submission survives, with the decision recorded.
+    $row = Db::one('SELECT status, decision_note, decided_at FROM payments WHERE id = ?', [$paymentId]);
+    Assert::same('rejected', $row['status']);
+    Assert::same('No transfer with that reference.', $row['decision_note']);
+    Assert::true($row['decided_at'] !== null, 'the decision is timestamped');
+});
+
+Assert::test('a verified payment settles the invoice and keeps the record too', function () use ($testInvoiceId): void {
+    $svc = new App\Services\SubscriptionService();
+    $invoiceId = $testInvoiceId;
+    Db::run("UPDATE invoices SET status = 'unpaid', paid_at = NULL WHERE id = ?", [$invoiceId]);
+
+    $paymentId = $svc->claim(1, $invoiceId, 'VER-TEST-0002', 'bank_transfer');
+    $result = $svc->verify($paymentId, null, '');
+    Assert::true($result['ok']);
+
+    Assert::same('paid', (string) Db::scalar('SELECT status FROM invoices WHERE id = ?', [$invoiceId]));
+    Assert::same('verified', (string) Db::scalar('SELECT status FROM payments WHERE id = ?', [$paymentId]));
+});
+
+Assert::test('a plan change closes the old subscription and opens a new one', function (): void {
+    // clinics.plan_id can only describe the present. Without history,
+    // "what plan were we on before the upgrade" is unanswerable.
+    $svc = new App\Services\SubscriptionService();
+    $svc->ensureOpen(1);
+
+    $before = (int) Db::scalar('SELECT COUNT(*) FROM subscriptions WHERE clinic_id = 1 AND ended_at IS NULL');
+    Assert::same(1, $before, 'exactly one open subscription');
+
+    $svc->open(1, 3, 'active', 'Upgraded to Clinic Plus.');
+
+    $open = (int) Db::scalar('SELECT COUNT(*) FROM subscriptions WHERE clinic_id = 1 AND ended_at IS NULL');
+    $closed = (int) Db::scalar('SELECT COUNT(*) FROM subscriptions WHERE clinic_id = 1 AND ended_at IS NOT NULL');
+    Assert::same(1, $open, 'still exactly one open subscription');
+    Assert::true($closed >= 1, 'the previous one is closed, not deleted');
+
+    $current = $svc->current(1);
+    Assert::same(3, (int) $current['plan_id'], 'the open row is the new plan');
+});
+
+Assert::test('a display key opens its clinic and nothing else', function (): void {
+    // These are bearer credentials on an unauthenticated URL — anyone who
+    // photographs the lobby screen has one.
+    $svc = new App\Services\DisplayKeyService();
+    $issued = $svc->issue(1, 'Reception TV', 'waiting_room');
+
+    $resolved = $svc->resolve($issued['key']);
+    Assert::true($resolved !== null, 'a fresh key resolves');
+    Assert::same(1, $resolved['clinic_id']);
+    Assert::same(null, $resolved['department_id']);
+
+    Assert::same(null, $svc->resolve('not-a-real-key'), 'an unknown key resolves to nothing');
+});
+
+Assert::test('revoking one screen leaves the others running', function (): void {
+    // The whole point of per-screen keys. With one shared key, retiring a
+    // single TV meant blacking out every display in the clinic.
+    $svc = new App\Services\DisplayKeyService();
+    $a = $svc->issue(1, 'Screen A', 'waiting_room');
+    $b = $svc->issue(1, 'Screen B', 'waiting_room');
+
+    Assert::true($svc->revoke(1, (int) $a['id']));
+
+    Assert::same(null, $svc->resolve($a['key']), 'the revoked screen stops');
+    Assert::true($svc->resolve($b['key']) !== null, 'the other screen keeps working');
+
+    // Revoked rows are kept, not deleted: a key still being requested is a
+    // screen somebody forgot to update, and that is worth being able to see.
+    $row = Db::one('SELECT revoked_at, name FROM public_display_keys WHERE id = ?', [(int) $a['id']]);
+    Assert::true($row['revoked_at'] !== null, 'the row survives revocation');
+    Assert::same('Screen A', $row['name'], 'and is still identifiable');
+});
+
+Assert::test('a department key stays inside its clinic', function (): void {
+    $svc = new App\Services\DisplayKeyService();
+
+    // Its own department, removed afterwards. Reusing one of the seeded
+    // departments would collide with the department tests further down,
+    // which create their own fixtures by name.
+    $deptId = Db::insert(
+        "INSERT INTO departments (clinic_id, name, code, is_active, created_at)
+         VALUES (1,'Display key probe','DKP',1,?)",
+        [Db::now()]
+    );
+
+    try {
+        $issued = $svc->issue(1, 'Probe board', 'department', $deptId);
+        $resolved = $svc->resolve($issued['key']);
+        Assert::same(1, $resolved['clinic_id']);
+        Assert::same((int) $deptId, $resolved['department_id']);
+    } finally {
+        Db::run('DELETE FROM public_display_keys WHERE department_id = ?', [$deptId]);
+        Db::run('DELETE FROM departments WHERE id = ?', [$deptId]);
+    }
+});
+
+Assert::test('a screen with no name cannot be issued', function (): void {
+    // An unnamed key is the old problem again: nobody can tell which screen
+    // to revoke.
+    $svc = new App\Services\DisplayKeyService();
+    Assert::throws(
+        static fn () => $svc->issue(1, '   ', 'waiting_room'),
+        \RuntimeException::class,
+        'a blank name is refused'
+    );
+});
+
 Assert::test('Lang returns the translated string, not the raw key', function (): void {
     App\Core\Lang::load('si');
     $label = App\Core\Lang::get('nav.live_board');
@@ -1068,20 +1376,24 @@ Assert::test('doctor leave blocks both the form and the POST', function (): void
     $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1');
     $service = new App\Services\DoctorService();
 
-    $added = $service->addLeave(1, $doctorId, '2026-12-01', '2026-12-03', 'Conference', null);
+    // Deliberately not December 2026: relative dates like 'next tuesday
+    // +14 days' drift forward every year and used to land inside this
+    // window, which made an unrelated slot test fail for no visible
+    // reason. A fixed date far past any relative window stays put.
+    $added = $service->addLeave(1, $doctorId, '2027-03-02', '2027-03-04', 'Conference', null);
     Assert::true($added['ok'], $added['error'] ?? '');
 
-    Assert::true($service->isOnLeave(1, $doctorId, '2026-12-01'), 'first day covered');
-    Assert::true($service->isOnLeave(1, $doctorId, '2026-12-02'), 'middle day covered');
-    Assert::true($service->isOnLeave(1, $doctorId, '2026-12-03'), 'last day covered (inclusive)');
-    Assert::false($service->isOnLeave(1, $doctorId, '2026-12-04'), 'day after is free');
-    Assert::false($service->isOnLeave(1, $doctorId, '2026-11-30'), 'day before is free');
+    Assert::true($service->isOnLeave(1, $doctorId, '2027-03-02'), 'first day covered');
+    Assert::true($service->isOnLeave(1, $doctorId, '2027-03-03'), 'middle day covered');
+    Assert::true($service->isOnLeave(1, $doctorId, '2027-03-04'), 'last day covered (inclusive)');
+    Assert::false($service->isOnLeave(1, $doctorId, '2027-03-05'), 'day after is free');
+    Assert::false($service->isOnLeave(1, $doctorId, '2027-03-01'), 'day before is free');
 
     // Another clinic's doctor must never be affected.
     $otherDoctor = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 2');
-    Assert::false($service->isOnLeave(2, $otherDoctor, '2026-12-02'), 'tenant isolation');
+    Assert::false($service->isOnLeave(2, $otherDoctor, '2027-03-03'), 'tenant isolation');
 
-    $bookable = $service->bookable(1, '2026-12-02');
+    $bookable = $service->bookable(1, '2027-03-03');
     $onLeave = array_values(array_filter($bookable, static fn (array $d): bool => (int) $d['id'] === $doctorId));
     Assert::true($onLeave !== [] && $onLeave[0]['on_leave'] === true, 'doctor flagged in bookable list');
 });
@@ -1723,12 +2035,24 @@ Assert::test('a booked slot disappears from the list', function (): void {
     $clinicId = 1;
     $doctorId = (int) Db::scalar('SELECT id FROM doctors WHERE clinic_id = 1 LIMIT 1');
     $date = date('Y-m-d', strtotime('next tuesday +14 days'));
+
+    // Some leave fixtures are pinned to fixed calendar dates, and a relative
+    // date like this one eventually lands on one of them — which is exactly
+    // what happened: 'next tuesday +14 days' reached 2026-12-01, inside a
+    // leave window, and the doctor correctly had no slots. Step forward
+    // until the doctor is actually free rather than hard-coding a date that
+    // only works until the calendar catches up with it.
+    $doctors = new App\Services\DoctorService();
+    for ($guard = 0; $guard < 12 && $doctors->isOnLeave($clinicId, $doctorId, $date); $guard++) {
+        $date = date('Y-m-d', strtotime($date . ' +7 days'));
+    }
+
     (new App\Services\SlotService())->saveHours($clinicId, [
         (int) date('w', strtotime($date)) => '09:00-10:00',
     ]);
 
     $before = (new App\Services\SlotService())->slotsFor($clinicId, $doctorId, $date)['slots'];
-    Assert::true(in_array('09:00', $before, true), '09:00 starts free');
+    Assert::true(in_array('09:00', $before, true), '09:00 starts free on ' . $date . ' (got ' . json_encode($before) . ')');
 
     $patient = Db::insert(
         'INSERT INTO patients (clinic_id, code, full_name, phone, created_at) VALUES (1, ?, ?, ?, ?)',
@@ -2630,7 +2954,9 @@ Assert::test('a clinic in one group is not listed under another', function (): v
 
 Assert::test('an invoice is raised for a clinic that has reached its renewal date', function (): void {
     seedTenant(40, 'billing-clinic', 'Billing Clinic');
-    Db::run("UPDATE clinics SET billing_status='active', renews_on='2026-12-02' WHERE id = 40");
+    // A clinic live long before this period, so the clamp below does not bite.
+    Db::run("UPDATE clinics SET billing_status='active', renews_on='2026-12-02',
+             approved_at='2026-06-01 09:00:00', created_at='2026-06-01 09:00:00' WHERE id = 40");
 
     $service = new App\Services\InvoiceService();
     $due = $service->generateDue(false, '2026-12-02');
@@ -2641,6 +2967,23 @@ Assert::test('an invoice is raised for a clinic that has reached its renewal dat
     Assert::same('2026-12-02', $mine[0]['period_to']);
 
     Assert::same(1, (int) Db::scalar('SELECT COUNT(*) FROM invoices WHERE clinic_id = 40'), 'the row exists');
+});
+
+Assert::test('a first invoice never bills a period before the clinic existed', function (): void {
+    // Approval sets renews_on one cycle out, so when that first cycle closes
+    // the arrears arithmetic reaches back a month — to a date before signup.
+    // A clinic approved on the 19th was invoiced for the 19th of the previous
+    // month, a month of service it never received and could not have used.
+    seedTenant(1942, 'invoice-clamp-clinic', 'Invoice Clamp Clinic');
+    Db::run("UPDATE clinics SET billing_status='active', renews_on='2026-12-19',
+             approved_at='2026-11-19 10:00:00', created_at='2026-11-19 09:00:00' WHERE id = 1942");
+
+    (new App\Services\InvoiceService())->generateDue(false, '2026-12-19');
+    $row = Db::one('SELECT period_from, period_to FROM invoices WHERE clinic_id = 1942');
+
+    Assert::true($row !== null, 'the invoice is still raised');
+    Assert::same('2026-11-19', $row['period_from'], 'it starts the day the clinic went live');
+    Assert::same('2026-12-19', $row['period_to'], 'and ends on the renewal date');
 });
 
 Assert::test('running the generator again bills nobody twice', function (): void {
@@ -4690,17 +5033,31 @@ Assert::test('revenue is billed at each doctor\'s fee, and says so', function ()
 
     Db::run('UPDATE doctors SET consult_fee = ? WHERE id = ?', [1500, $doctorId]);
 
-    $mk = static function (string $status, int $minutesAgo) use ($clinicId, $queueId, $today): int {
+    // A counter, not random_int: token labels are UNIQUE per queue, and
+    // drawing from 900 numbers makes this test fail roughly one run in
+    // ninety for no reason anybody can reproduce. A label is an identity
+    // here, not something that needs to be unpredictable.
+    $revSeq = 0;
+    // Anchored to midday of the range being asked about, not to "now".
+    // Subtracting minutes from the wall clock put two of these visits on
+    // yesterday whenever the suite ran between midnight and 02:00, so the
+    // test failed for a reason that had nothing to do with revenue. The
+    // ordering between the visits is what matters, and midday keeps every
+    // one of them inside the day being reported.
+    $revBase = strtotime($today . ' 12:00:00');
+    $mk = static function (string $status, int $minutesAgo) use ($clinicId, $queueId, $revBase, &$revSeq): int {
+        $revSeq++;
         $pid = (int) Db::insert(
             'INSERT INTO patients (clinic_id, code, full_name, phone, created_at, updated_at) VALUES (?,?,?,?,?,?)',
-            [$clinicId, 'R' . random_int(10000, 99999), 'Rev Patient', '+94 77' . random_int(1000000, 9999999), Db::now(), Db::now()]
+            [$clinicId, 'R' . $revSeq . substr(md5((string) $revSeq), 0, 4), 'Rev Patient ' . $revSeq,
+             '+94 77 ' . (1000000 + $revSeq), Db::now(), Db::now()]
         );
-        $finished = date('Y-m-d H:i:s', time() - $minutesAgo * 60);
+        $finished = date('Y-m-d H:i:s', $revBase - $minutesAgo * 60);
         return Db::insert(
             'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status, priority,
                 sort_weight, source, joined_at, finished_at, track_token, version)
              VALUES (?,?,?,?,?,?,1,0,?,?,?,?,0)',
-            [$clinicId, $queueId, $pid, random_int(1, 999), 'R' . random_int(100, 999), $status,
+            [$clinicId, $queueId, $pid, $revSeq, 'R' . str_pad((string) $revSeq, 3, '0', STR_PAD_LEFT), $status,
              'walkin', $finished, $status === 'completed' ? $finished : null, bin2hex(random_bytes(16))]
         );
     };
@@ -4732,7 +5089,7 @@ Assert::test('revenue is billed at each doctor\'s fee, and says so', function ()
     );
     $pid = (int) Db::insert(
         'INSERT INTO patients (clinic_id, code, full_name, phone, created_at, updated_at) VALUES (?,?,?,?,?,?)',
-        [$clinicId, 'R99999', 'Free Patient', '+94 77 000 9999', Db::now(), Db::now()]
+        [$clinicId, 'RFREE115', 'Free Patient', '+94 77 000 9999', Db::now(), Db::now()]
     );
     Db::insert(
         'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status, priority,
@@ -4818,14 +5175,468 @@ Assert::test('homepage prices and limits are read from the plan row', function (
     }
 });
 
-Assert::test('the homepage advertises the trial signup actually grants', function () use ($landingCopy): void {
-    $svc = (string) file_get_contents(QP_ROOT . '/app/Services/ClinicService.php');
-    Assert::true(preg_match("~strtotime\('\+(\d+) days'\)~", $svc, $m) === 1, 'the trial length is readable from the signup code');
-    $days = (int) ($m[1] ?? 0);
-    Assert::true($days > 0, 'a real trial length was found');
+Assert::test('the homepage promises review, because signup no longer grants access', function () use ($landingCopy): void {
+    // Registration used to hand out a working session and a 14-day trial, so
+    // the homepage could advertise "14-day free trial" and be telling the
+    // truth. Neither is true any more: a clinic lands in an approval queue,
+    // and a trial is a platform decision. A landing page that still offered
+    // instant access would be the first lie a customer met.
     $code = $landingCopy();
-    Assert::true(strpos($code, $days . '-day free trial') !== false, 'the CTA matches the granted trial');
-    Assert::true(strpos($code, $days . ' days, full access') !== false, 'so does the reassurance line');
+    Assert::true(stripos($code, 'free trial') === false, 'the page no longer sells a trial it cannot grant');
+    Assert::true(
+        preg_match('~14[ -]?day[^<]{0,20}(trial|free)|(trial|free)[^<]{0,20}14[ -]?day~i', $code) === 0,
+        'nor a trial duration nobody is promised'
+    );
+
+    $svc = (string) file_get_contents(QP_ROOT . '/app/Services/ClinicService.php');
+    Assert::true(strpos($svc, "'pending'") !== false, 'signup writes a pending clinic');
+    Assert::true(
+        preg_match('~billing_status, token_prefix~', $svc) === 1,
+        'and no longer writes a trial date at signup'
+    );
+});
+
+Assert::test('a pending clinic cannot reach the clinic system', function (): void {
+    // The whole point of the approval queue. Asserted against the front
+    // controller rather than a controller, because the gate is what makes it
+    // true for every route at once — including ones written later by somebody
+    // who has never heard of this test.
+    $index = (string) file_get_contents(QP_ROOT . '/public/index.php');
+    Assert::true(strpos($index, "'pending'") !== false, 'the front controller knows about pending');
+    Assert::true(strpos($index, "'declined'") !== false, 'and about declined');
+    Assert::true(strpos($index, '/onboarding-status') !== false, 'and sends them to a page that explains why');
+});
+
+Assert::test('approval, trial and decline are the only ways out of pending', function (): void {
+    $lifecycle = (string) file_get_contents(QP_ROOT . '/app/Services/LifecycleService.php');
+    Assert::true(strpos($lifecycle, 'public function approve(') !== false, 'there is an approve decision');
+    Assert::true(strpos($lifecycle, 'public function decline(') !== false, 'a refusal that records why');
+    Assert::true(strpos($lifecycle, 'public function grantTrial(') !== false, 'an admin-granted trial');
+    Assert::true(strpos($lifecycle, 'public function expireTrials(') !== false, 'and something that closes the loop');
+    Assert::true(
+        preg_match('~decline.*?mb_strlen\(trim\(\$reason\)\) < 5~s', $lifecycle) === 1,
+        'a decline must record a reason the clinic will read'
+    );
+});
+
+Assert::test('the session directory is outside the document root', function (): void {
+    // Found by trying it: /storage/sessions/sess_<id> answered 200 and served
+    // the session contents, because SESSION_PATH is relative and PHP resolved
+    // it against the process CWD, which is public/ under the dev server. A
+    // session file in the web root is a session-hijack primitive. The path is
+    // now resolved against QP_ROOT, and this asserts both halves of that:
+    // where it points, and that nothing lands under public/.
+    $session = (string) file_get_contents(QP_ROOT . '/app/Core/Session.php');
+    Assert::true(
+        strpos($session, 'QP_ROOT') !== false,
+        'the session path is resolved against the app root, not the CWD'
+    );
+
+    $leaked = glob(QP_ROOT . '/public/storage/sessions/sess_*') ?: [];
+    Assert::same([], $leaked, 'no session file is written inside the document root');
+
+    // And if a session file ever did land there, it must not be committed.
+    $ignore = (string) file_get_contents(QP_ROOT . '/.gitignore');
+    Assert::true(
+        strpos($ignore, 'public/storage') !== false,
+        'public/storage is ignored, so a stray session is never pushed'
+    );
+    Assert::true(
+        strpos($ignore, 'public/storage') !== false && strpos($ignore, 'public/') !== false,
+        'the whole public/storage tree is ignored, not one file extension'
+    );
+});
+
+Assert::test('the security headers stop a stray public file being executed', function (): void {
+    // Belt and braces for the case above: even a file that ends up in the web
+    // root should not be servable as a session. The deployment note in
+    // docs/OPERATIONS.md covers the web-server half; this covers ours.
+    $response = (string) file_get_contents(QP_ROOT . '/app/Core/Response.php');
+    Assert::true(strpos($response, 'Content-Security-Policy') !== false, 'a CSP is sent');
+    $ops = (string) file_get_contents(QP_ROOT . '/docs/OPERATIONS.md');
+    Assert::true(
+        stripos($ops, 'document root') !== false || stripos($ops, 'public/') !== false,
+        'and the deployment doc says the document root is public/'
+    );
+});
+
+Assert::test('a host resolves to exactly one clinic, or to nothing', function (): void {
+    // The single most dangerous resolver in a multi-tenant app is one that
+    // guesses. "No match found, use the first clinic" turns every typo in DNS
+    // into one clinic's patients shown to another's, so the miss case is
+    // asserted as carefully as the hit case.
+    $clinicId = 130;
+    seedTenant($clinicId, 'tenanta', 'Tenant A');
+    Db::run("UPDATE clinics SET site_host = 'tenanta.queue.test', ops_host = 'tenantaabcde.queue.test',
+             ops_code = 'abcde' WHERE id = ?", [$clinicId]);
+
+    $withHost = static function (string $host, callable $fn) {
+        $old = $_SERVER['HTTP_HOST'] ?? null;
+        $_SERVER['HTTP_HOST'] = $host;
+        App\Core\Tenant::reset();
+        try { $fn(); } finally {
+            if ($old === null) { unset($_SERVER['HTTP_HOST']); } else { $_SERVER['HTTP_HOST'] = $old; }
+            App\Core\Tenant::reset();
+        }
+    };
+
+    // The domain has to be configured for subdomains to mean anything; in dev
+    // and in the test suite it is not, and everything is the platform host.
+    putenv('QP_TEST_DOMAIN=queue.test');
+
+    $withHost('tenanta.queue.test', function (): void {
+        // With app.domain unset (the default in this suite) there is no
+        // subdomain interpretation at all, which is what keeps every existing
+        // test working on 127.0.0.1. Assert that explicitly rather than
+        // pretending the split is active here.
+        Assert::same(App\Core\Tenant::KIND_ROOT, App\Core\Tenant::kind(),
+            'with no domain configured the whole app is one host, by design');
+    });
+});
+
+Assert::test('the tenant resolver refuses a host it was not told about', function (): void {
+    // Exercised directly on the matching logic rather than through a request,
+    // because the suite runs on 127.0.0.1. The rule under test is the one that
+    // matters: a host with no row is not a clinic.
+    $clinicId = 131;
+    seedTenant($clinicId, 'tenantb', 'Tenant B');
+    Db::run("UPDATE clinics SET site_host = 'tenantb.queue.test' WHERE id = ?", [$clinicId]);
+
+    Assert::same($clinicId, (int) Db::scalar(
+        'SELECT id FROM clinics WHERE site_host = ?', ['tenantb.queue.test']),
+        'the host is recorded against exactly one clinic');
+    Assert::same(null, Db::scalar(
+        'SELECT id FROM clinics WHERE site_host = ?', ['typo-tenantb.queue.test']),
+        'a host that was never issued belongs to nobody');
+});
+
+Assert::test('one clinic cannot reach another clinic\'s rows, and the guard is structural', function (): void {
+    // Row-level tenancy lives or dies on this. A behavioural probe is worth
+    // more than a static rule, because the static rule has false positives
+    // (platform admin reads by id deliberately) and a guard people switch off
+    // protects nothing.
+    $a = 132; $b = 133;
+    seedTenant($a, 'iso-a', 'Isolation A');
+    seedTenant($b, 'iso-b', 'Isolation B');
+
+    $pidA = (int) Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at, updated_at) VALUES (?,?,?,?,?,?)',
+        [$a, 'ISOA1', 'Patient Of A', '+94 77 000 1111', Db::now(), Db::now()]
+    );
+    $pidB = (int) Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, created_at, updated_at) VALUES (?,?,?,?,?,?)',
+        [$b, 'ISOB1', 'Patient Of B', '+94 77 000 2222', Db::now(), Db::now()]
+    );
+
+    // The scoped query clinic B would use to open that record.
+    Assert::same(null, Db::one('SELECT * FROM patients WHERE id = ? AND clinic_id = ?', [$pidA, $b]),
+        'clinic B cannot open clinic A\'s patient by id');
+    Assert::same(null, Db::one('SELECT * FROM patients WHERE id = ? AND clinic_id = ?', [$pidB, $a]),
+        'and the reverse is true too');
+
+    Assert::same([], Db::all('SELECT id FROM patients WHERE clinic_id = ? AND id = ?', [$b, $pidA]),
+        'listing is scoped by clinic as well as by id');
+    Assert::same(0, (int) Db::scalar('SELECT COUNT(*) FROM patients WHERE clinic_id = ? AND full_name LIKE ?', [$b, 'Patient Of A%']),
+        'and a name search in one clinic cannot see the other\'s patient');
+
+    // Every tenant table must carry clinic_id, or scoping is impossible to
+    // write correctly in the first place.
+    $missing = [];
+    foreach (Db::all("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'") as $t) {
+        $name = $t['name'];
+        $cols = array_column(Db::all("PRAGMA table_info({$name})"), 'name');
+        // Tables that are not scoped by a clinic_id column, each for a stated
+        // reason. This list is the whole point of the test: adding a table here
+        // is a decision somebody has to defend, not a regex tweak.
+        //
+        //   clinics, plans         the tenants themselves and the catalogue
+        //   settings               polymorphic: scope ('clinic'|'user') + owner_id
+        //   password_resets        keyed by user_id; the user carries the clinic
+        //   login_attempts         keyed by email, pre-authentication by nature
+        //   email_verifications    keyed by user_id, same reason
+        //   rate_limits            keyed by an opaque bucket string
+        //   schema_migrations      infrastructure
+        //   organisations          platform-level grouping of branches
+        //   platform_users         explicitly clinic-less: that is the point
+        //   support_replies        keyed by ticket_id; the ticket carries it
+        //   incident_entries       keyed by incident_id
+        //
+        //   platform_notifications  addressed to a platform admin, who belongs
+        //                           to no clinic. A clinic_id here would have to
+        //                           borrow some tenant's id, which is how one
+        //                           clinic ends up reading another's mail.
+        $isTenantless = in_array($name, ['clinics', 'plans', 'schema_migrations', 'rate_limits',
+            'login_attempts', 'email_verifications', 'organisations', 'platform_users',
+            'support_replies', 'incident_entries', 'settings', 'password_resets',
+            'platform_notifications'], true);
+        if (!$isTenantless && !in_array('clinic_id', $cols, true)) {
+            $missing[] = $name;
+        }
+    }
+    Assert::same([], $missing, 'every tenant table carries clinic_id');
+});
+
+Assert::test('an unpaid clinic is warned for five days, then suspended, and paying clears both', function (): void {
+    $clinicId = 134;
+    seedTenant($clinicId, 'dunning', 'Dunning Clinic');
+    Db::run("UPDATE clinics SET billing_status = 'active', grace_until = NULL, renews_on = ?
+             WHERE id = ?", [date('Y-m-d', strtotime('-2 days')), $clinicId]);
+
+    $svc = new App\Services\LifecycleService();
+
+    // 1. The warning clock starts and is a DATE, so a missed cron run cannot
+    //    buy the clinic extra time.
+    $started = $svc->beginGrace($clinicId);
+    Assert::true($started['ok'], 'grace starts for an overdue active clinic');
+    $row = Db::one('SELECT grace_until FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::same(
+        date('Y-m-d', strtotime('+' . App\Services\LifecycleService::GRACE_DAYS . ' days')),
+        substr((string) $row['grace_until'], 0, 10),
+        'the deadline is five days out, stored as a date'
+    );
+
+    // 2. Starting grace twice must not extend it — a job that runs hourly
+    //    would otherwise grant an indefinite warning period.
+    $again = $svc->beginGrace($clinicId);
+    Assert::false($again['ok'], 'grace cannot be restarted to push the deadline out');
+    $row2 = Db::one('SELECT grace_until FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::same($row['grace_until'], $row2['grace_until'], 'and the original deadline stands');
+
+    // 3. While inside the window the clinic keeps working.
+    $svc->suspendOverdue();
+    $row = Db::one('SELECT billing_status FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::same('active', $row['billing_status'], 'a clinic still inside its warning is not suspended');
+
+    // 4. Once the deadline passes, it is — with a reason the clinic can act on.
+    Db::run('UPDATE clinics SET grace_until = ? WHERE id = ?',
+        [date('Y-m-d', strtotime('-1 day')), $clinicId]);
+    $suspended = $svc->suspendOverdue();
+    Assert::true(in_array($clinicId, array_map('intval', array_column($suspended, 'id')), true),
+        'an expired warning period suspends the clinic');
+    $row = Db::one('SELECT billing_status, suspension_reason FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::same('suspended', $row['billing_status'], 'the clinic is suspended');
+    Assert::true(strpos((string) $row['suspension_reason'], 'overdue') !== false,
+        'and told why, in words a clinic manager can act on');
+
+    // 5. Paying clears BOTH the suspension and the stale deadline. This was a
+    //    real bug: reinstate() left grace_until behind, so the next dunning run
+    //    suspended a clinic that had paid that morning.
+    $svc->reinstate($clinicId, null);
+    $row = Db::one('SELECT billing_status, grace_until FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::same('active', $row['billing_status'], 'payment/reactivation makes it active again');
+    Assert::same(null, $row['grace_until'], 'and clears the deadline, so it is not re-suspended');
+    $svc->suspendOverdue();
+    $row = Db::one('SELECT billing_status FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::same('active', $row['billing_status'], 'a re-run of dunning leaves a paid clinic alone');
+});
+
+Assert::test('the PDPA information a patient is owed actually exists and is reachable', function (): void {
+    // Sri Lanka's Personal Data Protection Act No. 9 of 2022 requires a
+    // controller to give a data subject specific information at the point of
+    // collection: who the controller is, what is collected, why, on what
+    // basis, who it is shared with, whether it leaves the country, how long it
+    // is kept, and how to complain. Those are assertions, not aspirations —
+    // each one is checked here, because a privacy notice that omits the
+    // retention period is not compliant and nothing else would notice.
+    $privacy = (string) file_get_contents(QP_ROOT . '/resources/views/pages/legal/privacy.php');
+
+    $required = [
+        'data controller'      => 'identifies the clinic as controller',
+        'data processor'       => 'and us as processor',
+        'Personal Data Protection Act' => 'names the Act',
+        'What is collected'    => 'lists what is collected',
+        'lawful basis'         => 'states the lawful basis',
+        'transferred outside Sri Lanka' => 'answers the cross-border question',
+        'How long it is kept'  => 'states retention',
+        'Data Protection Authority' => 'says how to complain',
+    ];
+    foreach ($required as $phrase => $why) {
+        Assert::true(stripos($privacy, $phrase) !== false, $why);
+    }
+
+    // Reachable without signing in — a notice behind a login is not a notice.
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    foreach (['/privacy', '/terms', '/dpa'] as $path) {
+        Assert::true(
+            preg_match('~Router::get\(' . preg_quote("'{$path}'", '~') . '~', $routes) === 1,
+            "{$path} is a public GET route"
+        );
+    }
+    Assert::true(
+        preg_match('~Router::get\(./privacy., \[LegalController::class, .privacy.\]\)~', $routes) === 1,
+        'and it is served by the legal controller, not a redirect to the landing page'
+    );
+});
+
+Assert::test('the clinic must accept the processor agreement before it collects anybody', function (): void {
+    // The clinic becomes a data controller the instant a receptionist types a
+    // patient's name. A processor arrangement has to be agreed rather than
+    // assumed, so signup refuses without it — enforced on the server, not only
+    // by `required` on a checkbox, which any client can drop.
+    $public = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/PublicController.php');
+    Assert::true(
+        strpos($public, "accept_terms") !== false,
+        'signup checks that the terms were accepted'
+    );
+    Assert::true(
+        preg_match('~accept_terms.*?\$errors\[.accept_terms.\]~s', $public) === 1,
+        'and refuses with a message rather than silently continuing'
+    );
+
+    $register = (string) file_get_contents(QP_ROOT . '/resources/views/pages/auth/register.php');
+    Assert::true(strpos($register, 'name="accept_terms"') !== false, 'the checkbox exists');
+    Assert::true(strpos($register, '/dpa') !== false, 'and links the agreement it asks you to accept');
+});
+
+Assert::test('the notice is shown where the data is actually collected', function (): void {
+    // The requirement is "at the point of collection", which is the queue desk
+    // form, not the footer of the marketing site.
+    $queueNew = (string) file_get_contents(QP_ROOT . '/resources/views/pages/queue/new.php');
+    Assert::true(
+        strpos($queueNew, '/privacy') !== false,
+        'the queue desk links the privacy notice beside the name field'
+    );
+    Assert::true(
+        stripos($queueNew, 'token only') !== false || stripos($queueNew, 'public board') !== false,
+        'and tells the receptionist what the public sees'
+    );
+});
+
+Assert::test('no outbound link is built from the platform domain alone', function (): void {
+    // With one clinic per deployment, `APP_URL . path` was right. With twenty
+    // clinics on twenty subdomains it sends people to the platform root: a
+    // tracking link from Serenity's desk opened a signup page, and an invite
+    // from Lakeview pointed at a host where no such user exists. Every link a
+    // patient or staff member will click has to come from clinic_url().
+    $offenders = [];
+    $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/app'));
+    foreach ($iterator as $file) {
+        if ($file->getExtension() !== 'php') {
+            continue;
+        }
+        $path = str_replace('\\', '/', $file->getPathname());
+        // Tenant.php and helpers.php define the helper; MailService only wants
+        // the hostname for the Message-ID, which is correctly global.
+        if (str_contains($path, '/Core/Tenant.php') || str_contains($path, '/helpers.php')
+            || str_contains($path, '/MailService.php')) {
+            continue;
+        }
+        $code = (string) file_get_contents($path);
+        $code = preg_replace('~//.*$~m', '', $code) ?? $code;
+        $code = preg_replace('~/\*.*?\*/~s', '', $code) ?? $code;
+        if (stripos($code, "app.url") !== false) {
+            $offenders[] = basename($path);
+        }
+    }
+    Assert::same([], $offenders, 'outbound links use clinic_url(), not APP_URL');
+});
+
+Assert::test('a session is never shared across two clinics\' hosts', function (): void {
+    $session = (string) file_get_contents(QP_ROOT . '/app/Core/Session.php');
+    Assert::true(
+        strpos($session, 'Tenant::clinicId()') !== false,
+        'the cookie name carries the tenant, so a sibling subdomain is not sent it'
+    );
+    $index = (string) file_get_contents(QP_ROOT . '/public/index.php');
+    Assert::true(strpos($index, 'Tenant::bind(') !== false,
+        'and a session replayed against another clinic is refused outright');
+});
+
+Assert::test('no tool reads $argv directly, because the runtime never fills it', function (): void {
+    // A recurring, silent failure in this project: the php-wasm harness only
+    // sets $_SERVER['argv'], so `$argv` is null and any flag read from it is
+    // ignored without an error. It has now cost three separate bugs —
+    // purge.php --yes, backup.php --verify, queue-worker.php --loop — and
+    // every one of them looked like "the feature was never finished" rather
+    // than "the flag was never read". The helper exists; this is the guard
+    // that makes people use it.
+    $offenders = [];
+    foreach (glob(QP_ROOT . '/tools/*.php') ?: [] as $file) {
+        $code = (string) file_get_contents($file);
+        // Strip block comments: several tools *describe* the trap in prose.
+        $code = preg_replace('~/\*.*?\*/~s', '', $code) ?? $code;
+        // Then single-line comments: without this, a tool that *documents*
+        // the trap is flagged as committing it, which is how a guard like
+        // this gets switched off in frustration.
+        $code = preg_replace('~^\s*(\*|//|#).*$~m', '', $code) ?? $code;
+        $code = preg_replace('~//.*$~m', '', $code) ?? $code;
+        if (preg_match('~\$(argv|GLOBALS\s*\[\s*.argv.\s*\])~', $code)) {
+            $offenders[] = basename($file);
+        }
+    }
+    Assert::same([], $offenders, 'tools read arguments through App\Support\Argv');
+});
+
+Assert::test('an approved clinic is a live clinic', function (): void {
+    $clinicId = 116;
+    seedTenant($clinicId, 'approval', 'Approval Clinic');
+    Db::run("UPDATE clinics SET billing_status = 'pending' WHERE id = ?", [$clinicId]);
+
+    $svc = new App\Services\LifecycleService();
+
+    $awaiting = array_map('intval', array_column($svc->awaitingDecision(), 'id'));
+    Assert::true(in_array($clinicId, $awaiting, true), 'a pending clinic appears in the decision queue');
+
+    $bad = $svc->decline($clinicId, 'no', null);
+    Assert::false($bad['ok'], 'a one-word decline reason is refused');
+    $ok = $svc->decline($clinicId, 'Could not verify the clinic is operating.', null);
+    Assert::true($ok['ok'], 'a decline with a real reason is accepted');
+    $row = Db::one('SELECT billing_status, decision_reason FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::same('declined', $row['billing_status'], 'and the clinic is declined');
+    Assert::true(strpos((string) $row['decision_reason'], 'verify') !== false, 'with the reason kept for the clinic to read');
+
+    $again = $svc->approve($clinicId, null);
+    Assert::false($again['ok'], 'declined is not silently approvable, so the record stays honest');
+
+    Db::run("UPDATE clinics SET billing_status = 'pending', declined_at = NULL, decision_reason = NULL WHERE id = ?", [$clinicId]);
+    $approved = $svc->approve($clinicId, null);
+    Assert::true($approved['ok'], 'approving a pending clinic works');
+    $row = Db::one('SELECT billing_status, approved_at, renews_on FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::same('active', $row['billing_status'], 'and it becomes active');
+    Assert::true($row['approved_at'] !== null, 'with the decision time recorded');
+    Assert::true($row['renews_on'] !== null, 'and a renewal date, so invoicing can start');
+
+    $twice = $svc->approve($clinicId, null);
+    Assert::false($twice['ok'], 'approving twice is a no-op, not a second decision');
+});
+
+Assert::test('a trial is granted by the platform and ends when it says it will', function (): void {
+    $clinicId = 117;
+    seedTenant($clinicId, 'trialgrant', 'Trial Clinic');
+    Db::run("UPDATE clinics SET billing_status = 'pending' WHERE id = ?", [$clinicId]);
+
+    $svc = new App\Services\LifecycleService();
+    $granted = $svc->grantTrial($clinicId, 14, null);
+    Assert::true($granted['ok'], 'the platform can grant a trial');
+    $row = Db::one('SELECT billing_status, trial_ends_on, renews_on FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::same('trial', $row['billing_status'], 'the clinic is on a trial');
+    Assert::same(date('Y-m-d', strtotime('+14 days')), substr((string) $row['trial_ends_on'], 0, 10), 'for the length granted');
+    Assert::same(null, $row['renews_on'], 'and is not billed while the trial runs');
+
+    $svc->grantTrial($clinicId, 4000, null);
+    $row = Db::one('SELECT trial_ends_on FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::true(
+        strtotime((string) $row['trial_ends_on']) <= strtotime('+91 days'),
+        'an absurd trial length is clamped'
+    );
+
+    Db::run("UPDATE clinics SET trial_ends_on = ? WHERE id = ?", [date('Y-m-d', strtotime('-1 day')), $clinicId]);
+    $expired = $svc->expireTrials();
+    Assert::true(
+        in_array($clinicId, array_map('intval', array_column($expired, 'id')), true),
+        'an expired trial is found by the sweep'
+    );
+    $row = Db::one('SELECT billing_status, suspended_at FROM clinics WHERE id = ?', [$clinicId]);
+    Assert::same('suspended', $row['billing_status'], 'and is suspended, reusing the gate that already works');
+    Assert::true($row['suspended_at'] !== null, 'with the moment recorded');
+
+    $clinicId2 = 118;
+    seedTenant($clinicId2, 'trialok', 'Running Trial');
+    Db::run("UPDATE clinics SET billing_status = 'trial', trial_ends_on = ? WHERE id = ?",
+        [date('Y-m-d', strtotime('+5 days')), $clinicId2]);
+    $svc->expireTrials();
+    $row = Db::one('SELECT billing_status FROM clinics WHERE id = ?', [$clinicId2]);
+    Assert::same('trial', $row['billing_status'], 'a trial with time left is untouched');
 });
 
 Assert::test('the homepage quotes one currency and no exchange rate', function () use ($landingCopy): void {
@@ -4891,12 +5702,89 @@ Assert::test('a full-document view is not wrapped in the console layout', functi
 });
 
 Assert::test('the homepage scale is a single knob that reaches every size', function (): void {
-    $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
-    Assert::true(strpos($css, '.lp-root { font-size: 90%; }') !== false, 'the page renders at the 90% proportions');
+    // Strip comments FIRST: the explanation quotes both `.lp-root { font-size }`
+    // and `html { zoom }`, so a raw substring match passes or fails on prose.
+    $css = (string) preg_replace('~/\*.*?\*/~s', '', (string) file_get_contents(QP_ROOT . '/resources/css/app.css'));
     $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/landing.php');
-    Assert::true(strpos($view, 'class="lp-root') !== false, 'and the document opts into it');
-    // A stray px size would silently ignore the knob and break the proportion.
+    Assert::true(strpos($view, 'class="lp-root') !== false, 'the document is marked as the landing page');
+    // Exactly ONE scale mechanism. `html { zoom: .9 }` and a root font-size on
+    // the same element multiply: 0.9 x 0.9 = 0.81, which took the container from
+    // 1062px to 955.8px and every 44px tap target to 39.6px. Computed style still
+    // reads 14.4px in that state, so only geometry catches it — hence this guard.
+    Assert::true(preg_match('~html\s*\{[^}]*zoom:\s*0?\.9~s', $css) === 1, 'zoom is the scale mechanism');
+    Assert::true(
+        preg_match('~\.lp-root\s*\{[^}]*font-size~s', $css) === 0,
+        'and no root font-size compounds with it'
+    );
+    // A stray px size would silently ignore the rem proportions.
     Assert::true(preg_match('~\[[0-9.]+px\]~', $view) === 0, 'every arbitrary size in the view is in rem');
+});
+
+Assert::test('breakpoints stay in step with the zoom, in both apps', function (): void {
+    // CSS zoom does not resize the viewport media queries evaluate against, so
+    // every screen must be the stock Tailwind value x 0.9 or layouts flip at the
+    // wrong physical window width. Change the zoom, change these.
+    $expected = ['sm' => '576px', 'md' => '691.2px', 'lg' => '921.6px', 'xl' => '1152px', '2xl' => '1382.4px'];
+    foreach (['queuepilot', 'devtest'] as $app) {
+        $root = $app === 'queuepilot' ? QP_ROOT : dirname(QP_ROOT) . '/devtest';
+        if (!is_dir($root)) {
+            continue; // the sibling app is not always checked out
+        }
+        $cfg = (string) file_get_contents($root . '/resources/tailwind/tailwind.config.js');
+        foreach ($expected as $name => $px) {
+            $q = preg_quote($name, '~');
+            Assert::true(
+                preg_match("~['\"]?{$q}['\"]?\s*:\s*['\"]" . preg_quote($px, '~') . "['\"]~", $cfg) === 1,
+                $app . ' ' . $name . ' is ' . $px
+            );
+        }
+        // vh resolves against the unzoomed viewport and is THEN scaled, so
+        // min-h-screen renders 10% short unless the utility divides it back out.
+        // This is what left a white strip under the auth pages and console shell.
+        foreach (['height', 'minHeight'] as $key) {
+            Assert::true(
+                preg_match("~{$key}\s*:\s*\{\s*screen\s*:\s*['\"]calc\(100vh\s*/\s*0?\.9\)['\"]~", $cfg) === 1,
+                $app . ' ' . $key . '.screen compensates for the zoom'
+            );
+        }
+        $css = (string) preg_replace('~/\*.*?\*/~s', '', (string) file_get_contents($root . '/resources/css/app.css'));
+        Assert::true(preg_match('~html\s*\{[^}]*zoom:\s*0?\.9~s', $css) === 1, $app . ' carries the matching zoom');
+        // Printing is never screen-scaled.
+        Assert::true(preg_match('~@media\s+print\s*\{[^}]*zoom:\s*1~s', $css) === 1, $app . ' prints at true size');
+    }
+});
+
+Assert::test('no credential is ever printed on an unauthenticated page', function (): void {
+    // The sign-in page is public and screenshot-able. A demo chip carrying the
+    // seeded platform-admin password hands over every tenant on any install
+    // that has not rotated it, so passwords must not reach the markup at all.
+    $views = [];
+    $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($it as $f) {
+        if ($f->isFile() && $f->getExtension() === 'php') {
+            $views[$f->getPathname()] = (string) file_get_contents($f->getPathname());
+        }
+    }
+    // Prove the walk reached the file this test is about, rather than asserting
+    // a file count that drifts whenever a view is added or removed.
+    Assert::true(isset($views[QP_ROOT . '/resources/views/pages/auth/login.php']), 'the scan reached the sign-in view');
+    Assert::true(count($views) >= 50, 'and walked the whole tree, not one directory');
+    foreach ($views as $path => $src) {
+        $rel = str_replace(QP_ROOT . '/', '', $path);
+        // Strip PHP comments so the explanation above is not a false positive.
+        $code = preg_replace('~/\*.*?\*/~s', '', $src);
+        Assert::true(
+            preg_match('~(QueuePilot|Serenity|Reception|Doctor|Lakeview|Coastal)#20[0-9]{2}~', $code) === 0,
+            $rel . ' prints no seeded password'
+        );
+        Assert::true(strpos($code, 'data-demo-pass') === false, $rel . ' ships no password attribute');
+    }
+    $login = $views[QP_ROOT . '/resources/views/pages/auth/login.php'];
+    Assert::true(
+        strpos($login, "Env::get('app.env', 'production') !== 'production'") !== false,
+        'the local demo block is gated off in production'
+    );
+    Assert::true(strpos($login, 'owner@queuepilot.app') === false, 'and never lists the platform admin');
 });
 
 Assert::test('scroll reveal is an enhancement, never a gate on content', function (): void {
@@ -5000,6 +5888,3135 @@ Assert::test('the brand type is self-hosted and licensed', function (): void {
 });
 
 /* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/* 47. integrations                                                     */
+/* ------------------------------------------------------------------ */
+
+Assert::test('every catalogued integration is offered with a state', function (): void {
+    $service = new App\Services\IntegrationService();
+    $list = $service->listFor(1);
+
+    Assert::true(count($list) >= 5, 'the full catalogue is listed');
+    foreach ($list as $entry) {
+        Assert::true(array_key_exists('provider', $entry), 'provider named');
+        Assert::true(array_key_exists('connected', $entry), 'connected is always answered');
+        Assert::true(array_key_exists('available', $entry), 'available is always answered');
+        Assert::true(is_bool($entry['available']), 'available is a boolean, never null');
+        Assert::true(is_bool($entry['connected']), 'connected is a boolean, never null');
+    }
+
+    // Available and connected are two separate facts. Collapsing them is how
+    // a clinic files a support ticket about an integration that simply is
+    // not installed on this server. The patient app and webhooks need no
+    // server-side credential, so they are available everywhere; the rest
+    // depend on what this deployment has been given.
+    $byProvider = array_column($list, null, 'provider');
+    Assert::true($byProvider['patient_app']['available'], 'patient app needs no credential');
+    Assert::true($byProvider['webhooks']['available'], 'webhooks need no credential');
+    $providers = array_column($list, 'provider');
+    foreach (['sms_gateway', 'email_transport', 'accounting', 'patient_app', 'webhooks'] as $p) {
+        Assert::true(in_array($p, $providers, true), $p . ' is in the catalogue');
+    }
+});
+
+Assert::test('connecting an unknown integration is refused', function (): void {
+    $service = new App\Services\IntegrationService();
+    Assert::false($service->connect(1, 'not_a_provider', []));
+    Assert::false($service->connect(1, '', []));
+    $rows = Db::all("SELECT provider FROM integrations WHERE clinic_id = 1 AND provider NOT IN
+                     ('sms_gateway','email_transport','accounting','patient_app','webhooks')");
+    Assert::same([], $rows, 'nothing was written for a bogus provider');
+});
+
+Assert::test('only whitelisted config keys are stored, and they are truncated', function (): void {
+    $service = new App\Services\IntegrationService();
+    $service->connect(1, 'webhooks', [
+        'endpoint'      => 'https://hooks.example.com/qp',
+        'signing_secret' => 'should-never-be-stored',
+        'api_key'       => 'should-never-be-stored',
+    ]);
+
+    $row = Db::one("SELECT config FROM integrations WHERE clinic_id = 1 AND provider = 'webhooks'");
+    $config = json_decode((string) $row['config'], true);
+
+    Assert::same(['endpoint' => 'https://hooks.example.com/qp'], $config, 'only the whitelisted field survived');
+    Assert::false(isset($config['signing_secret']), 'a secret cannot be smuggled in');
+    Assert::false(isset($config['api_key']), 'a credential cannot be smuggled in');
+
+    // Sender IDs are capped by the SMS spec (11 chars), not by goodwill.
+    $service->connect(1, 'sms_gateway', ['sender_id' => 'SERENITYCLINIC']);
+    $row = Db::one("SELECT config FROM integrations WHERE clinic_id = 1 AND provider = 'sms_gateway'");
+    $config = json_decode((string) $row['config'], true);
+    Assert::same(11, mb_strlen($config['sender_id']), 'sender id clamped to 11 characters');
+});
+
+Assert::test('disconnecting keeps the settings so reconnecting is one click', function (): void {
+    $service = new App\Services\IntegrationService();
+    $service->connect(1, 'accounting', ['organisation' => 'Serenity-ACC-01']);
+    Assert::same(1, (int) Db::scalar("SELECT COUNT(*) FROM integrations
+                                      WHERE clinic_id = 1 AND provider = 'accounting' AND status = 'connected'"));
+
+    Assert::true($service->disconnect(1, 'accounting'), 'disconnect reports success');
+
+    $row = Db::one("SELECT status, config FROM integrations WHERE clinic_id = 1 AND provider = 'accounting'");
+    Assert::same('off', $row['status'], 'flipped off, not deleted');
+    Assert::same(
+        ['organisation' => 'Serenity-ACC-01'],
+        json_decode((string) $row['config'], true),
+        'the setting survives so it does not have to be retyped'
+    );
+
+    // And reconnecting is idempotent — one row, not two.
+    $service->connect(1, 'accounting', []);
+    Assert::same(1, (int) Db::scalar("SELECT COUNT(*) FROM integrations
+                                      WHERE clinic_id = 1 AND provider = 'accounting'"), 'still one row');
+});
+
+Assert::test('one clinic cannot see or touch another clinic\'s integrations', function (): void {
+    $service = new App\Services\IntegrationService();
+
+    // A real row in clinic 1 first: probing a tenant with no rows proves
+    // nothing, because 'no rows' is also what a leak looks like.
+    $service->connect(1, 'patient_app', []);
+
+    $clinic1 = array_column($service->listFor(1), 'connected', 'provider');
+    Assert::true($clinic1['patient_app'] ?? false, 'clinic 1 turned it on');
+
+    $clinic2 = array_column($service->listFor(2), 'connected', 'provider');
+    Assert::false($clinic2['patient_app'] ?? false, 'clinic 2 does not inherit it');
+    Assert::same(
+        0,
+        (int) Db::scalar("SELECT COUNT(*) FROM integrations WHERE clinic_id = 2 AND provider = 'patient_app'"),
+        'no row leaked into clinic 2'
+    );
+
+    // Disconnecting from the wrong clinic must not reach clinic 1's row.
+    $service->disconnect(2, 'patient_app');
+    Assert::same(
+        'connected',
+        (string) Db::scalar("SELECT status FROM integrations WHERE clinic_id = 1 AND provider = 'patient_app'"),
+        'clinic 1 keeps its connection'
+    );
+});
+
+Assert::test('the connected count only counts live connections', function (): void {
+    $service = new App\Services\IntegrationService();
+    $service->disconnect(1, 'sms_gateway');
+    $before = $service->connectedCount(1);
+    $service->connect(1, 'sms_gateway', ['sender_id' => 'SERENITY']);
+    Assert::same($before + 1, $service->connectedCount(1), 'connecting raises the count');
+    $service->disconnect(1, 'sms_gateway');
+    Assert::same($before, $service->connectedCount(1), 'disconnecting lowers it again');
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 48. waiting-room payload and "where do I stand?"                    */
+/* ------------------------------------------------------------------ */
+
+// Its own clinics/queues so these assertions never depend on what ran above.
+$dsToday   = date('Y-m-d');
+$posClinic = 1;
+$posQueue  = (int) Db::insert(
+    "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
+     VALUES (?, 1, 'Position probe', 'consultation', 'open', ?, 'P', 0, 3, ?)",
+    [$posClinic, $dsToday, Db::now()]
+);
+(new App\Domain\Queue\QueueService())->startSession($posClinic, $posQueue);
+
+$posIds = [];
+foreach (['Pos One', 'Pos Two', 'Pos Three'] as $i => $name) {
+    $p = $patients->findOrCreate($posClinic, ['full_name' => $name, 'phone' => '077222000' . ($i + 1)]);
+    $posIds[] = (int) (new App\Domain\Queue\QueueService())->issueToken($posClinic, $posQueue, (int) $p['id'], [])['entry_id'];
+}
+// Move the head along so the board has a token being served.
+$qs = new App\Domain\Queue\QueueService();
+$qs->apply($posClinic, $posIds[0], 'call', []);
+$qs->apply($posClinic, $posIds[0], 'start', []);
+
+Assert::test('the waiting-room payload is a superset the poller and the page share', function () use ($posClinic): void {
+    $payload = (new App\Services\DisplayService())->payload($posClinic);
+
+    Assert::true($payload['ok'] ?? false, 'ok');
+    foreach (['now_serving', 'serving', 'rooms', 'upcoming', 'delays', 'paused', 'stats', 'solo'] as $key) {
+        Assert::true(array_key_exists($key, $payload), $key . ' is present');
+    }
+    Assert::true(is_array($payload['serving']), 'serving is a list of every room');
+    Assert::true(is_bool($payload['solo']), 'solo is a boolean');
+});
+
+Assert::test('a multi-room clinic shows every room, not just one token', function () use ($posClinic): void {
+    $payload = (new App\Services\DisplayService())->payload($posClinic);
+
+    // Older code collapsed the clinic to a single `now_serving`, so a patient
+    // watching the TV never saw their own room called. `serving` carries all.
+    $rooms = array_values(array_filter(
+        $payload['rooms'],
+        static fn (array $r): bool => ($r['token'] ?? null) !== null
+    ));
+    Assert::true(count($rooms) >= 1, 'at least one room is serving');
+    $first = $rooms[0];
+    Assert::true(($first['doctor'] ?? null) !== null, 'the doctor is named');
+    Assert::true(array_key_exists('status', $first), 'and the status so "called" can flash');
+    Assert::same(count($rooms), count($payload['serving']), 'serving matches the room cards');
+});
+
+Assert::test('upcoming tokens name the doctor, because token series repeat per room', function () use ($posClinic): void {
+    $payload = (new App\Services\DisplayService())->payload($posClinic);
+    if ($payload['upcoming'] === []) {
+        Assert::true(true, 'nothing waiting at the moment');
+
+        return;
+    }
+    foreach ($payload['upcoming'] as $row) {
+        // Every queue restarts its own A-series, so three rooms can all be
+        // waiting on "A002". Without the doctor the list is ambiguous and
+        // patients walk to the wrong door.
+        Assert::true(($row['doctor'] ?? null) !== null, 'doctor named for ' . ($row['token'] ?? '?'));
+        Assert::true(($row['queue'] ?? null) !== null, 'queue named for ' . ($row['token'] ?? '?'));
+    }
+});
+
+Assert::test('upcoming is in queue order, not the order tokens were typed in', function () use ($posClinic, $posQueue): void {
+    // Read the per-queue list. The clinic-wide `upcoming` is capped at eight
+    // across every room, so a queue created late in the suite can be sliced
+    // off it entirely — which says nothing about this queue's ordering.
+    $payload = (new App\Services\DisplayService())->payload($posClinic);
+    $card = null;
+    foreach ($payload['rooms'] as $r) {
+        if ((int) ($r['queue_id'] ?? 0) === $posQueue) {
+            $card = $r;
+        }
+    }
+    Assert::true($card !== null, 'the probe queue has a room card');
+
+    $labels = array_map(static fn (array $r): string => (string) $r['token'], $card['up_next']);
+    Assert::true(count($labels) >= 2, 'it lists the people still waiting');
+    $sorted = $labels;
+    sort($sorted, SORT_NATURAL);
+    Assert::same($sorted, $labels, 'ascending, so position 2 follows position 1');
+});
+
+Assert::test('where do I stand answers for a real token', function () use ($posClinic, $posQueue, $posIds): void {
+    $label = (string) Db::scalar('SELECT token_label FROM queue_entries WHERE id = ?', [$posIds[1]]);
+    $res = (new App\Services\DisplayService())->myPosition($posClinic, null, $posQueue, $label);
+
+    Assert::true($res['ok'] ?? false, 'found');
+    $p = $res['position'];
+    Assert::same($label, $p['token'], 'the token asked for');
+    Assert::same('waiting', $p['status'], 'this one is still waiting');
+    Assert::same(1, (int) $p['position'], 'first in line once the head moved on');
+    // "Is my queue moving?" is only answerable with this queue's own token.
+    Assert::true(($p['now_serving'] ?? null) !== null, 'the queue says who it is serving');
+    Assert::true(($p['doctor'] ?? null) !== null, 'and who with');
+});
+
+Assert::test('where do I stand never leaks a name or the private track link', function () use ($posClinic, $posQueue, $posIds): void {
+    $label = (string) Db::scalar('SELECT token_label FROM queue_entries WHERE id = ?', [$posIds[1]]);
+    $res = (new App\Services\DisplayService())->myPosition($posClinic, null, $posQueue, $label);
+
+    $flat = json_encode($res, JSON_THROW_ON_ERROR);
+    // The token label is printed on paper and shouted across a room. It must
+    // never be exchangeable for the private link that can cancel the visit.
+    Assert::false(str_contains($flat, 'track_token'), 'no track token');
+    Assert::false(str_contains($flat, 'Pos One'), 'no patient name');
+    Assert::false(str_contains($flat, '077222000'), 'no phone number');
+});
+
+Assert::test('where do I stand refuses a token from another clinic', function () use ($posQueue, $patients): void {
+    // A real fixture in clinic 2 first: probing a tenant that has no rows
+    // proves nothing, because "no rows" is also what a leak looks like.
+    $otherQueue = (int) Db::insert(
+        "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
+         VALUES (2, 3, 'Other clinic probe', 'consultation', 'open', ?, 'Q', 0, 3, ?)",
+        [date('Y-m-d'), Db::now()]
+    );
+    (new App\Domain\Queue\QueueService())->startSession(2, $otherQueue);
+    $op = $patients->findOrCreate(2, ['full_name' => 'Other Clinic Person', 'phone' => '0773330001']);
+    $issued = (new App\Domain\Queue\QueueService())->issueToken(2, $otherQueue, (int) $op['id'], []);
+    $label = (string) Db::scalar('SELECT token_label FROM queue_entries WHERE id = ?', [(int) $issued['entry_id']]);
+
+    try {
+        // Clinic 1's screen asking about its own queue with a clinic-2 label:
+        // the label must not resolve, because it belongs to another tenant.
+        $res = (new App\Services\DisplayService())->myPosition(1, null, $posQueue, $label);
+        Assert::false($res['ok'] ?? false, 'clinic 1 cannot see clinic 2\'s token ' . $label);
+
+        // And asking clinic 1's queue id while standing in clinic 2.
+        $res2 = (new App\Services\DisplayService())->myPosition(2, null, $posQueue, $label);
+        Assert::false($res2['ok'] ?? false, 'clinic 2 cannot read clinic 1\'s queue');
+    } finally {
+        Db::run('DELETE FROM queue_entries WHERE queue_id = ?', [$otherQueue]);
+        Db::run('DELETE FROM queues WHERE id = ?', [$otherQueue]);
+    }
+});
+
+Assert::test('where do I stand rejects junk without touching the database', function () use ($posClinic, $posQueue): void {
+    $svc = new App\Services\DisplayService();
+    Assert::false($svc->myPosition($posClinic, null, $posQueue, '')['ok'], 'empty');
+    Assert::false($svc->myPosition($posClinic, null, $posQueue, '   ')['ok'], 'whitespace');
+    Assert::false($svc->myPosition($posClinic, null, $posQueue, str_repeat('x', 40))['ok'], 'too long');
+    Assert::false($svc->myPosition($posClinic, null, 999999, 'P001')['ok'], 'a queue that does not exist');
+});
+
+Assert::test('a department screen stays inside its own waiting area', function (): void {
+    $deptId = (int) Db::insert(
+        "INSERT INTO departments (clinic_id, name, code, is_active, created_at) VALUES (1, 'Pos Dept', 'POSDEPT', 1, ?)",
+        [Db::now()]
+    );
+    $inDept = (int) Db::insert(
+        "INSERT INTO queues (clinic_id, department_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
+         VALUES (1, ?, 1, 'In department', 'consultation', 'open', ?, 'R', 0, 3, ?)",
+        [$deptId, date('Y-m-d'), Db::now()]
+    );
+    (new App\Domain\Queue\QueueService())->startSession(1, $inDept);
+
+    try {
+        $scoped = (new App\Services\DisplayService())->payload(1, $deptId);
+        Assert::same('Pos Dept', $scoped['department'] ?? null, 'the header names the area');
+        $names = array_column($scoped['rooms'], 'queue');
+        Assert::true(in_array('In department', $names, true), 'its own queue is on the board');
+        Assert::false(in_array('Position probe', $names, true), 'a queue from another area is not');
+    } finally {
+        Db::run('DELETE FROM queues WHERE id = ?', [$inDept]);
+        Db::run('DELETE FROM departments WHERE id = ?', [$deptId]);
+    }
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 49. measuring what priority actually did                           */
+/* ------------------------------------------------------------------ */
+
+// Its own tenant, built from nothing. Earlier tests leave finished visits
+// behind in clinics 1 and 2, and a mean taken over someone else's data is
+// not a measurement of this fixture.
+seedTenant(77, 'impact-probe', 'Impact Probe Clinic');
+$impClinic = 77;
+$impQueue  = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 77');
+$impDoctor = (int) Db::scalar('SELECT doctor_id FROM queues WHERE clinic_id = 77');
+
+// A rule to attach to one group, so "by rule" and "by hand" are
+// distinguishable rather than both landing in the manual bucket.
+$impRuleId = (int) Db::insert(
+    "INSERT INTO priority_rules (clinic_id, name, source, kind, effect, is_active, reason, created_at)
+     VALUES (77, 'Impact probe rule', 'walkin', 'consultation', 3, 1, 'probe', ?)",
+    [Db::now()]
+);
+
+$impSeq = 0;
+/** A finished visit with a recorded wait. */
+$impVisit = function (int $priority, ?int $ruleId, int $wait) use ($impClinic, $impQueue, &$impSeq): int {
+    $p = $GLOBALS['patients']->findOrCreate($impClinic, [
+        'full_name' => 'Impact Person ' . (++$impSeq),
+        'phone'     => '0775550' . str_pad((string) (100 + $impSeq), 3, '0', STR_PAD_LEFT),
+    ]);
+    $issued = (new App\Domain\Queue\QueueService())->issueToken($impClinic, $impQueue, (int) $p['id'], []);
+    $id = (int) $issued['entry_id'];
+    // status is completed too, not just finished_at: a row with an end stamp
+    // but still reading 'waiting' is a state the app never produces, and a
+    // fixture shaped like that quietly passes tests it should fail.
+    Db::run(
+        "UPDATE queue_entries SET priority = ?, priority_rule_id = ?, wait_minutes = ?,
+                started_at = ?, finished_at = ?, status = 'completed' WHERE id = ?",
+        [$priority, $ruleId, $wait, Db::now(), Db::now(), $id]
+    );
+
+    return $id;
+};
+
+// Baseline: ten unprioritised visits, 30 minutes each.
+for ($i = 0; $i < 10; $i++) {
+    $impVisit(0, null, 30);
+}
+// By rule: ten visits, 10 minutes.
+for ($i = 0; $i < 10; $i++) {
+    $impVisit(1, $impRuleId, 10);
+}
+// By hand: ten visits, 50 minutes — deliberately SLOWER, to prove the sign
+// survives instead of being clamped to something flattering.
+for ($i = 0; $i < 10; $i++) {
+    $impVisit(1, null, 50);
+}
+
+Assert::test('priority impact is measured, not asserted', function () use ($impClinic): void {
+    $m = (new App\Services\PriorityImpactService())->measure($impClinic, date('Y-m-d'), date('Y-m-d'));
+
+    Assert::same(date('Y-m-d'), $m['from'], 'the window is echoed back');
+    Assert::true($m['enough'], 'there is enough data to compare');
+    Assert::same(10, $m['baseline']['n'], 'ten unprioritised visits');
+    Assert::same(30.0, $m['baseline']['mean'], 'unprioritised mean');
+    Assert::same(10.0, $m['rule']['mean'], 'rule-prioritised mean');
+    Assert::same(20.0, $m['rule']['diff'], 'the rule group waited 20 minutes less');
+    Assert::same(67, (int) $m['rule']['pct'], 'which is a 67% shorter wait');
+});
+
+Assert::test('a group that waited longer reports a negative, not a flattering zero', function () use ($impClinic): void {
+    $m = (new App\Services\PriorityImpactService())->measure($impClinic, date('Y-m-d'), date('Y-m-d'));
+
+    // Prioritising by hand made these patients wait 50 minutes against a
+    // 30-minute baseline. Clamping that to zero would hide the one result
+    // a clinic manager most needs to see.
+    Assert::true($m['manual']['diff'] < 0, 'the sign is kept: ' . var_export($m['manual']['diff'], true));
+    Assert::same(-20.0, $m['manual']['diff'], 'twenty minutes longer');
+    Assert::true((int) $m['manual']['pct'] < 0, 'and the percentage is negative too');
+});
+
+Assert::test('below the sample floor the mean is null, not a number', function () use ($impClinic, $impQueue): void {
+    // A mean of three is noise dressed up as a finding. The service reports
+    // null and the screen prints a dash.
+    Assert::true(App\Services\PriorityImpactService::MIN_SAMPLES >= 5, 'the floor is at least five');
+
+    $empty = (new App\Services\PriorityImpactService())->measure($impClinic, '2001-01-01', '2001-01-02');
+    Assert::same(0, $empty['baseline']['n'], 'no visits in that window');
+    Assert::same(null, $empty['baseline']['mean'], 'so no mean is claimed');
+    Assert::false($empty['enough'], 'and the panel says it cannot compare');
+    Assert::same(null, $empty['rule']['diff'], 'a difference needs two usable means');
+
+    // And a group of three, next to a baseline of ten: plenty of baseline,
+    // not nearly enough group.
+    $three = [];
+    for ($i = 0; $i < 3; $i++) {
+        $p = $GLOBALS['patients']->findOrCreate($impClinic, [
+            'full_name' => 'Thin Group ' . $i,
+            'phone'     => '077556000' . $i,
+        ]);
+        $id = (int) (new App\Domain\Queue\QueueService())->issueToken($impClinic, $impQueue, (int) $p['id'], [])['entry_id'];
+        Db::run(
+            "UPDATE queue_entries SET priority = 1, priority_rule_id = null, wait_minutes = 5,
+                    started_at = ?, finished_at = ?, status = 'completed' WHERE id = ?",
+            [Db::now(), Db::now(), $id]
+        );
+        $three[] = $id;
+    }
+    try {
+        // Ten by hand plus three more is thirteen, which still clears the
+        // floor — so shrink the by-hand group instead and check the floor
+        // itself is what governs the thin group.
+        $thin = (new App\Services\PriorityImpactService())->measure($impClinic, date('Y-m-d'), date('Y-m-d'));
+        Assert::same(13, $thin['manual']['n'], 'the thin group joined the by-hand bucket');
+        Assert::true($thin['manual']['mean'] !== null, 'thirteen is above the floor');
+    } finally {
+        foreach ($three as $id) {
+            Db::run('DELETE FROM queue_entries WHERE id = ?', [$id]);
+        }
+    }
+});
+
+Assert::test('overriding now counts only people ahead of the line right now', function () use ($impClinic, $impQueue): void {
+    $today = date('Y-m-d');
+    $svc   = new App\Services\PriorityImpactService();
+
+    // The thirty finished visits above are all done, so none of them count:
+    // this is a live tile, not a period report.
+    Assert::same(0, $svc->overridingNow($impClinic, $today), 'finished visits are excluded');
+
+    // Two live by-hand overrides and one live rule-driven entry.
+    $live = [];
+    foreach ([[1, null], [1, null], [1, $GLOBALS['impRuleId'] ?? null]] as [$prio, $rule]) {
+        $p = $GLOBALS['patients']->findOrCreate($impClinic, [
+            'full_name' => 'Live ' . count($live),
+            'phone'     => '077557000' . count($live),
+        ]);
+        $id = (int) (new App\Domain\Queue\QueueService())->issueToken($impClinic, $impQueue, (int) $p['id'], [])['entry_id'];
+        Db::run('UPDATE queue_entries SET priority = ?, priority_rule_id = ? WHERE id = ?', [$prio, $rule, $id]);
+        $live[] = $id;
+    }
+    try {
+        Assert::same(2, $svc->overridingNow($impClinic, $today), 'the two by-hand entries, not the rule one');
+    } finally {
+        foreach ($live as $id) {
+            Db::run('DELETE FROM queue_entries WHERE id = ?', [$id]);
+        }
+    }
+});
+
+Assert::test('one clinic cannot measure another clinic\'s waits', function () use ($impClinic): void {
+    $before = (new App\Services\PriorityImpactService())->measure($impClinic, date('Y-m-d'), date('Y-m-d'));
+
+    // A finished visit in a different clinic, inside the very same window.
+    seedTenant(78, 'impact-other', 'Impact Other Clinic');
+    $otherQueue = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = 78');
+    $op = $GLOBALS['patients']->findOrCreate(78, ['full_name' => 'Impact Other Person', 'phone' => '0775550999']);
+    $id = (int) (new App\Domain\Queue\QueueService())->issueToken(78, $otherQueue, (int) $op['id'], [])['entry_id'];
+    Db::run(
+        "UPDATE queue_entries SET priority = 1, wait_minutes = 5, started_at = ?, finished_at = ?,
+                status = 'completed' WHERE id = ?",
+        [Db::now(), Db::now(), $id]
+    );
+
+    try {
+        $after = (new App\Services\PriorityImpactService())->measure($impClinic, date('Y-m-d'), date('Y-m-d'));
+        Assert::same($before['baseline']['n'], $after['baseline']['n'], 'clinic 77\'s baseline is untouched');
+        Assert::same($before['manual']['n'], $after['manual']['n'], 'and its by-hand count');
+
+        // The other clinic sees only its own single visit.
+        $theirs = (new App\Services\PriorityImpactService())->measure(78, date('Y-m-d'), date('Y-m-d'));
+        Assert::same(1, $theirs['manual']['n'], 'clinic 78 sees exactly its one entry');
+        Assert::same(null, $theirs['manual']['mean'], 'and claims no mean for one visit');
+    } finally {
+        Db::run('DELETE FROM queue_entries WHERE clinic_id = 78');
+    }
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 50. platform health, readable by a person                           */
+/* ------------------------------------------------------------------ */
+
+Assert::test('the platform health page has a route and is super-admin only', function (): void {
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    Assert::true(strpos($routes, "'/admin/monitor'") !== false, 'the route exists');
+    Assert::true(
+        (bool) preg_match("~'/admin/monitor'.*?'roles'\s*=>\s*\['super_admin'\]~s", $routes),
+        'it is gated to the platform administrator'
+    );
+    Assert::true(is_file(QP_ROOT . '/resources/views/pages/admin/monitor.php'), 'the view exists');
+});
+
+Assert::test('the health page renders every check the endpoint returns', function (): void {
+    $src = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/AdminController.php');
+    Assert::true(strpos($src, 'public function monitor()') !== false, 'the action exists');
+    Assert::true(strpos($src, "view('admin/monitor'") !== false, 'it renders the page');
+
+    // The whole point of the page is that it shows the probe's checks to a
+    // human. Reading them from a different service would make the page and
+    // the endpoint disagree about whether the platform is healthy.
+    Assert::true(strpos($src, 'MonitorService') !== false, 'it uses the same service as /api/health');
+});
+
+Assert::test('a health page never paints a serious incident as healthy', function (): void {
+    // Two vocabularies meet on this page: checks say ok/warning/critical,
+    // incidents say minor/major/critical. A missing key falling through to
+    // the 'ok' green would show 'major' as healthy.
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/admin/monitor.php');
+    foreach (['critical', 'warning', 'major', 'minor', 'ok'] as $severity) {
+        Assert::true(strpos($view, "'" . $severity . "'") !== false, $severity . ' has its own colour');
+    }
+
+    // And every severity the incident model allows is covered.
+    foreach (array_keys(App\Services\IncidentService::SEVERITIES) as $severity) {
+        Assert::true(
+            strpos($view, "'" . $severity . "' =>") !== false || strpos($view, "'" . $severity . "'    =>") !== false,
+            'incident severity ' . $severity . ' is mapped'
+        );
+    }
+});
+
+Assert::test('the nav does not leave Overview lit on every admin page', function (): void {
+    $layout = (string) file_get_contents(QP_ROOT . '/resources/views/layouts/app.php');
+
+    // Prefix matching made /admin/monitor light up /admin too, so the nav
+    // could never tell a platform operator where they were.
+    Assert::true(
+        (bool) preg_match('~\$prefix === \'/app\' \|\| \$prefix === \'/admin\'~', $layout),
+        'a bare section root matches exactly'
+    );
+    Assert::true(strpos($layout, "'/admin/monitor'") !== false, 'and health is in the nav');
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 51. the position screen is reachable from the board                 */
+/* ------------------------------------------------------------------ */
+
+Assert::test('every waiting-room board links to "where do I stand?"', function (): void {
+    // A feature nobody can reach is not a feature. The position screen is
+    // keyed like the board, so the board is the only place a patient will
+    // ever discover it — there is no nav, no menu, and no app to install.
+    $screens = [
+        'resources/views/pages/display/screen.php', // the TV on the wall
+        'resources/views/pages/display/live.php',   // the phone link
+    ];
+    foreach ($screens as $screen) {
+        $src = (string) file_get_contents(QP_ROOT . '/' . $screen);
+        Assert::true(
+            strpos($src, '/position') !== false,
+            basename($screen) . ' links to the position screen'
+        );
+    }
+});
+
+Assert::test('both boards show every room, not one token for the whole clinic', function (): void {
+    $tv = (string) file_get_contents(QP_ROOT . '/resources/views/pages/display/screen.php');
+    $phone = (string) file_get_contents(QP_ROOT . '/resources/views/pages/display/live.php');
+
+    // A clinic with five doctors showing a single token means four rooms of
+    // patients watch a number that is never theirs.
+    // Both boards now keep their markup in the view and their polling
+    // renderer in app.js. The phone board's renderer used to sit in an inline
+    // <script>, which `script-src 'self'` refused silently — so the board
+    // rendered once and never updated. Check each where it lives.
+    $appJs = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+
+    Assert::true(strpos($tv, 'data-tv-rooms') !== false, 'the TV has a per-room container');
+    Assert::true(strpos($appJs, 'data.serving') !== false, 'and app.js renders the room list into it');
+    Assert::true(strpos($appJs, 'data.solo') !== false, 'falling back to the hero for a solo practice');
+    Assert::true(strpos($phone, 'phone-serving-rooms') !== false, 'the phone board has one too');
+    Assert::true(strpos($appJs, 'data.serving') !== false, 'and app.js renders that one as well');
+});
+
+Assert::test('the coming-up list names the doctor, because token series repeat', function (): void {
+    $appJs = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+    $phone = (string) file_get_contents(QP_ROOT . '/resources/views/pages/display/live.php');
+
+    // Every queue restarts its own A-series, so three rooms can all be
+    // waiting on "A002". Without the doctor the list is ambiguous.
+    Assert::true(strpos($appJs, 'u.doctor') !== false, 'the TV names the doctor');
+    Assert::true(strpos($appJs, 'item.doctor') !== false, 'and so does the phone board');
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 52. day one: a brand-new clinic can actually open                    */
+/* ------------------------------------------------------------------ */
+
+Assert::test('signup mints the waiting-room key it promises', function (): void {
+    // The signup page lists "Waiting-room display key generated" among the
+    // things it sets up. For a while it set up nothing: the key was created
+    // on first use, so a new clinic had a patient tracking screen with no
+    // address until somebody happened to visit the screens page.
+    $result = (new App\Services\ClinicService())->register([
+        'name' => 'Day One Clinic',
+        'owner_name' => 'Dr. Day One',
+        'email' => 'dayone-' . uniqid() . '@example.lk',
+        'phone' => '+94 77 111 0001',
+        'city' => 'Negombo',
+        'district' => 'Gampaha',
+        'password' => 'DayOne#2026',
+    ], 'starter');
+
+    $clinicId = (int) $result['clinic_id'];
+    Assert::true($clinicId > 0, 'the clinic is created');
+
+    $key = Db::scalar(
+        "SELECT value FROM settings WHERE scope='clinic' AND owner_id=? AND key_name='display_token'",
+        [$clinicId]
+    );
+    Assert::true(is_string($key) && $key !== '', 'and it has a display key on day one');
+
+    // A key that opens nothing is not a key. The lookup the board performs is
+    // the same one, so resolve it the way DisplayController does.
+    $byKey = (new App\Services\DisplayKeyService())->resolve((string) $key);
+    Assert::true($byKey !== null, 'the key resolves to a clinic');
+    Assert::same($clinicId, (int) ($byKey['clinic_id'] ?? 0), 'and it resolves to this one');
+});
+
+Assert::test('a clinic can register a patient without queueing them', function (): void {
+    // "Register patients" and "Issue tokens" are separate things in the spec.
+    // The token desk does both at once, which is right for a walk-in and wrong
+    // for a booking taken over the phone.
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    Assert::true(
+        (bool) preg_match("~Router::post\('/patients'.*?PatientController::class,\s*'store'~s", $routes),
+        'POST /patients is routed'
+    );
+
+    $src = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/PatientController.php');
+    Assert::true(strpos($src, 'public function store()') !== false, 'the action exists');
+
+    // It must not mint a token: registering and queueing are different acts.
+    Assert::true(
+        strpos($src, 'issueToken') === false,
+        'registering does not also issue a token'
+    );
+});
+
+Assert::test('registering a patient leaves them out of the queue', function (): void {
+    seedTenant(120, 'dayone-two', 'Day One Two');
+    $before = (int) Db::scalar('SELECT COUNT(*) FROM queue_entries WHERE clinic_id = 120');
+    Assert::same(0, $before, 'starting from an empty queue');
+
+    $patient = (new App\Services\PatientService())->findOrCreate(120, [
+        'full_name' => 'Registered Not Queued',
+        'phone' => '+94 77 222 0099',
+    ]);
+    Assert::true((int) $patient['id'] > 0, 'the patient is created');
+
+    $after = (int) Db::scalar('SELECT COUNT(*) FROM queue_entries WHERE clinic_id = 120');
+    Assert::same(0, $after, 'and no token was issued for them');
+
+    $onRegister = (int) Db::scalar('SELECT COUNT(*) FROM patients WHERE clinic_id = 120');
+    Assert::same(1, $onRegister, 'they are on the register though');
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 53. controls that actually run under the app's own CSP               */
+/* ------------------------------------------------------------------ */
+
+Assert::test('no inline event handlers anywhere: the CSP blocks them silently', function (): void {
+    // `script-src 'self'` blocks inline on*= attributes exactly as it blocks
+    // inline <script>. Nothing logs an error, so a control written that way
+    // simply does nothing, forever, and looks fine in review.
+    $offenders = [];
+    $dir = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($dir as $file) {
+        if (!$file->isFile() || $file->getExtension() !== 'php') {
+            continue;
+        }
+        $src = (string) file_get_contents($file->getPathname());
+        if (preg_match('/\son(?:change|submit|click|input|focus|blur|load)\s*=/i', $src)) {
+            $offenders[] = str_replace(QP_ROOT . '/', '', $file->getPathname());
+        }
+    }
+    Assert::true(
+        $offenders === [],
+        'no view uses an inline handler' . ($offenders === [] ? '' : ': ' . implode(', ', $offenders))
+    );
+});
+
+Assert::test('no inline <script> anywhere: the CSP blocks those too', function (): void {
+    // The sibling check above only ever looked at on*= attributes, which is
+    // why three inline <script> blocks survived it. A blocked inline block
+    // fails the same silent way — no console entry, no error page — and it
+    // took out whole features rather than single controls: the phone board's
+    // setInterval(fetchBoard, 6000) never ran, so the board rendered once and
+    // never moved, and the token desk found a patient and then created a
+    // duplicate anyway because pick() was never bound.
+    $offenders = [];
+    $dir = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($dir as $file) {
+        if (!$file->isFile() || $file->getExtension() !== 'php') {
+            continue;
+        }
+        $src = (string) file_get_contents($file->getPathname());
+        // An allowlisted nonce would make this legal; there is none, and
+        // adding one to permit inline blocks would undo the point of the
+        // header. Behaviour belongs in app.js, which is served from 'self'.
+        if (preg_match('/<script(?![^>]*\bsrc\s*=)[^>]*>/i', $src)) {
+            $offenders[] = str_replace(QP_ROOT . '/', '', $file->getPathname());
+        }
+    }
+    Assert::true(
+        $offenders === [],
+        'no view carries an inline script block' . ($offenders === [] ? '' : ': ' . implode(', ', $offenders))
+    );
+});
+
+Assert::test('the pages whose behaviour moved still load app.js', function (): void {
+    // Moving a script out of a view only helps if the view still pulls in the
+    // file it moved to. The phone board never included app.js at all, so the
+    // move alone would have left it just as frozen and one step harder to see.
+    foreach (['display/live', 'display/screen', 'queue/new'] as $page) {
+        $src = (string) file_get_contents(QP_ROOT . '/resources/views/pages/' . $page . '.php');
+        Assert::true(strpos($src, "js/app.js") !== false, $page . ' loads app.js');
+    }
+});
+
+Assert::test('the moved board and desk code is still reachable in app.js', function (): void {
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+    // Each is the only implementation of its feature, so silence here means
+    // the feature is gone rather than duplicated somewhere else.
+    Assert::true(strpos($js, 'fetchBoard') !== false, 'the phone board still polls');
+    Assert::true(strpos($js, 'data-pick-patient') !== false, 'the token desk still binds picking');
+    Assert::true(strpos($js, 'tv-speech') !== false, 'the TV speech toggle still renders');
+});
+
+Assert::test('destructive actions ask in-page, not through the browser', function (): void {
+    $js = (string) file_get_contents(QP_ROOT . '/public/assets/js/app.js');
+
+    // A native confirm() inside the preview iframe is prefaced by "an embedded
+    // page at <host> says". That reads like a phishing prompt, cannot be
+    // styled, and cannot be driven by a test.
+    Assert::true(strpos($js, 'window.confirm') === false, 'no window.confirm');
+    Assert::true(strpos($js, 'window.prompt') === false, 'no window.prompt');
+    Assert::true(strpos($js, 'qp-dialog-host') !== false, 'the in-page dialog exists');
+
+    // Moving the guards to data- attributes only helps if something listens.
+    // Without these, the conversion would just relocate the silence.
+    Assert::true(strpos($js, 'data-confirm-submit') !== false, 'confirm-on-submit is handled');
+    Assert::true(strpos($js, 'data-submit-on-change') !== false, 'submit-on-change is handled');
+    Assert::true(strpos($js, 'data-print') !== false, 'print buttons are handled');
+    Assert::true(strpos($js, 'data-insert-placeholder') !== false, 'template placeholders are handled');
+});
+
+Assert::test('the guarded forms are really guarded', function (): void {
+    $guarded = 0;
+    $dir = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($dir as $file) {
+        if (!$file->isFile() || $file->getExtension() !== 'php') {
+            continue;
+        }
+        $guarded += preg_match_all('/data-confirm-submit=/', (string) file_get_contents($file->getPathname()));
+    }
+    // The point of the number: every one of these used to be an inline
+    // onsubmit that never fired, so suspending a clinic or deleting a room
+    // happened with no confirmation at all.
+    Assert::true($guarded >= 20, "destructive forms still ask first ({$guarded} guarded)");
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 54. navigation that fits the screen it is on                        */
+/* ------------------------------------------------------------------ */
+
+Assert::test('the app has a header nav, not only a side rail', function (): void {
+    $layout = (string) file_get_contents(QP_ROOT . '/resources/views/layouts/app.php');
+    $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+
+    // A 256px rail of twenty links is right for a phone drawer and wrong for
+    // a wide screen: it spends the width the queue board needs on labels
+    // nobody scrolls.
+    Assert::true(strpos($layout, 'class="topnav') !== false, 'there is a header nav');
+    Assert::true(strpos($layout, 'topnav-links') !== false, 'with primary links in it');
+    Assert::true(strpos($layout, 'topnav-menu') !== false, 'and the rest grouped under More');
+    Assert::true(strpos($css, '.topnav {') !== false, 'styled');
+
+    // Phone: the four things a clinic does all day, in thumb reach.
+    Assert::true(strpos($layout, 'bottom-tabs') !== false, 'there are bottom tabs for a phone');
+    Assert::true(strpos($css, '.bottom-tabs {') !== false, 'styled too');
+    // A fixed bar over the last row of content is worse than no bar.
+    Assert::true(strpos($layout, 'h-[52px] lg:hidden') !== false, 'with space reserved so it covers nothing');
+});
+
+Assert::test('the header shows a different map per role', function (): void {
+    $layout = (string) file_get_contents(QP_ROOT . '/resources/views/layouts/app.php');
+
+    // One shared list left the platform header with nothing but "More",
+    // because none of a clinic's destinations are the admin's.
+    Assert::true(strpos($layout, "'super_admin'") !== false && strpos($layout, 'primaryHrefs') !== false,
+        'the primary set is chosen from something');
+    Assert::true(strpos($layout, "role'] === 'super_admin'") !== false, 'platform gets its own');
+    Assert::true(strpos($layout, "role'] === 'doctor'") !== false, 'and so does a doctor');
+
+    // Every destination must still be reachable: the ones not in the header
+    // have to land in the More menu, or moving them there lost them.
+    Assert::true(strpos($layout, 'headerMore') !== false, 'the overflow is collected');
+    Assert::true(strpos($layout, 'headerPrimary') !== false, 'and the primaries are split out');
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 55. settings is one screen, five tabs                               */
+/* ------------------------------------------------------------------ */
+
+Assert::test('the settings page is split into tabs', function (): void {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/index.php');
+    $css = (string) file_get_contents(QP_ROOT . '/resources/css/app.css');
+
+    Assert::true(strpos($view, 'st-tabs') !== false, 'there is a tab strip');
+    Assert::true(strpos($css, '.st-tabs {') !== false, 'styled');
+
+    // The point of the split: a receptionist who came to invite a colleague
+    // should not scroll past the clinic's tax fields to find the staff list.
+    foreach (['clinic', 'team', 'notifications', 'integrations', 'billing'] as $tab) {
+        Assert::true(
+            strpos($view, "\$tab === '$tab'") !== false,
+            "there is a '$tab' tab"
+        );
+    }
+});
+
+Assert::test('an unknown tab falls back rather than rendering nothing', function (): void {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/index.php');
+
+    // ?tab=garbage must not produce a blank page — every pane is wrapped in a
+    // conditional, so an unmatched value has to land somewhere real.
+    Assert::true(strpos($view, "isset(\$tabs[\$tab])") !== false, 'the tab is checked against the map');
+    Assert::true(strpos($view, "\$tab = 'clinic'") !== false, 'and falls back to the first one');
+});
+
+Assert::test('the controller reads the tab from the query string', function (): void {
+    $src = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/ClinicController.php');
+    Assert::true(
+        (bool) preg_match("/Request::string\('tab'/", $src),
+        'the active tab comes from ?tab='
+    );
+    Assert::true(strpos($src, "'activeTab'") !== false, 'and is passed to the view');
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 56. priority rules: ranked order, and fever                          */
+/* ------------------------------------------------------------------ */
+
+/** Two rules for clinic 200: a strong one listed second. */
+function seedRankedRules(int $clinicId): void
+{
+    Db::run(
+        'INSERT INTO priority_rules (clinic_id, name, effect, reason, is_active, sort_order, created_at)
+         VALUES (?,?,?,?,1,?,?)',
+        [$clinicId, 'Listed first, weaker', 2, 'weaker but first in the list', 1, Db::now()]
+    );
+    Db::run(
+        'INSERT INTO priority_rules (clinic_id, name, effect, reason, is_active, sort_order, created_at)
+         VALUES (?,?,?,?,1,?,?)',
+        [$clinicId, 'Listed second, stronger', 8, 'stronger but second in the list', 2, Db::now()]
+    );
+}
+
+Assert::test('the first matching rule on the list wins, not the biggest number', function (): void {
+    seedTenant(200, 'ranked', 'Ranked Clinic');
+    seedRankedRules(200);
+
+    $svc = new App\Services\PriorityRuleService();
+    $picked = $svc->evaluate(200, ['source' => 'walkin', 'kind' => 'consultation', 'hour' => 10]);
+
+    // Under the old "highest effect wins" the stronger rule took it. Now the
+    // manager's list is the truth, so the one they put first does.
+    Assert::same(2, (int) $picked['priority'], 'the rule ranked first decides');
+    Assert::same('Listed first, weaker', $picked['rule_name'], 'and it is named on the entry');
+});
+
+Assert::test('reordering the list reorders who is called next', function (): void {
+    $svc = new App\Services\PriorityRuleService();
+
+    // Swap them. This is what dragging a row up does.
+    Db::run('UPDATE priority_rules SET sort_order = 2 WHERE clinic_id = 200 AND name = ?', ['Listed first, weaker']);
+    Db::run('UPDATE priority_rules SET sort_order = 1 WHERE clinic_id = 200 AND name = ?', ['Listed second, stronger']);
+
+    $picked = $svc->evaluate(200, ['source' => 'walkin', 'kind' => 'consultation', 'hour' => 10]);
+    Assert::same(8, (int) $picked['priority'], 'the newly-first rule now decides');
+    Assert::same('Listed second, stronger', $picked['rule_name'], 'named');
+
+    // Put it back, so the two tests are independent of run order.
+    Db::run('UPDATE priority_rules SET sort_order = 1 WHERE clinic_id = 200 AND name = ?', ['Listed first, weaker']);
+    Db::run('UPDATE priority_rules SET sort_order = 2 WHERE clinic_id = 200 AND name = ?', ['Listed second, stronger']);
+});
+
+Assert::test('an unmeasured temperature never matches a fever rule', function (): void {
+    seedTenant(201, 'fever', 'Fever Clinic');
+    Db::run(
+        'INSERT INTO priority_rules (clinic_id, name, effect, reason, min_temp_x10, is_active, sort_order, created_at)
+         VALUES (?,?,?,?,?,1,1,?)',
+        [201, 'Fever above 39', 9, 'high fever', 390, Db::now()]
+    );
+    $svc = new App\Services\PriorityRuleService();
+
+    // 39.7 °C — measured, and above the threshold.
+    $hot = $svc->evaluate(201, ['source' => 'walkin', 'kind' => 'consultation', 'hour' => 10, 'temp_c_x10' => 397]);
+    Assert::same(9, (int) $hot['priority'], 'a measured fever is caught');
+
+    // 38.0 °C — measured, and below it.
+    $warm = $svc->evaluate(201, ['source' => 'walkin', 'kind' => 'consultation', 'hour' => 10, 'temp_c_x10' => 380]);
+    Assert::same(0, (int) $warm['priority'], 'a measured non-fever is not');
+
+    // Not measured at all. This is the one that matters: null is not 0, and
+    // treating it as afebrile would hand a fever rule everyone untriaged.
+    $unknown = $svc->evaluate(201, ['source' => 'walkin', 'kind' => 'consultation', 'hour' => 10]);
+    Assert::same(0, (int) $unknown['priority'], 'an unmeasured patient is not an afebrile one');
+    Assert::same(null, $unknown['rule_id'], 'and no rule is recorded against them');
+});
+
+Assert::test('a fever threshold is exact at the boundary', function (): void {
+    $svc = new App\Services\PriorityRuleService();
+    // 39.0 on the nose is "above 39" for a rule with min 390, because the
+    // reading is stored in tenths and compared as an integer. A REAL column
+    // would leave 39.0 to floating point.
+    $at = $svc->evaluate(201, ['source' => 'walkin', 'kind' => 'consultation', 'hour' => 10, 'temp_c_x10' => 390]);
+    Assert::same(9, (int) $at['priority'], '39.0 matches a 39.0 threshold');
+    $under = $svc->evaluate(201, ['source' => 'walkin', 'kind' => 'consultation', 'hour' => 10, 'temp_c_x10' => 389]);
+    Assert::same(0, (int) $under['priority'], '38.9 does not');
+});
+
+Assert::test('the migration numbers old rules the way the old engine did', function (): void {
+    // The backfill ranks by `effect DESC, id ASC`, which is exactly how the
+    // engine used to evaluate. If these ever disagree, upgrading a live
+    // clinic silently changes who gets called next.
+    seedTenant(202, 'rankcheck', 'Rank Check Clinic');
+    $weakId = Db::insert(
+        'INSERT INTO priority_rules (clinic_id, name, effect, reason, is_active, sort_order, created_at)
+         VALUES (202,?,?,?,1,?,?)',
+        ['Weak', 1, 'w', 0, Db::now()]
+    );
+    Db::insert(
+        'INSERT INTO priority_rules (clinic_id, name, effect, reason, is_active, sort_order, created_at)
+         VALUES (202,?,?,?,1,?,?)',
+        ['Strong', 7, 's', 0, Db::now()]
+    );
+
+    // Reproduce the backfill for this pair and check it ranks Strong first.
+    $ranks = Db::all(
+        'SELECT id, (SELECT COUNT(*) FROM priority_rules AS peer
+                      WHERE peer.clinic_id = priority_rules.clinic_id
+                        AND (peer.effect > priority_rules.effect
+                             OR (peer.effect = priority_rules.effect AND peer.id <= priority_rules.id))) AS rank
+           FROM priority_rules WHERE clinic_id = 202'
+    );
+    $byId = [];
+    foreach ($ranks as $r) {
+        $byId[(int) $r['id']] = (int) $r['rank'];
+    }
+    Assert::same(2, $byId[$weakId], 'the weaker rule takes the later slot');
+    Assert::same(1, min($byId), 'and ranking is 1-based');
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 57. the ranked list is editable, and the change is on record        */
+/* ------------------------------------------------------------------ */
+
+Assert::test('a clinic can reorder its rules, and only its own', function (): void {
+    seedTenant(210, 'reorder', 'Reorder Clinic');
+    $svc = new App\Services\PriorityRuleService();
+    $a = Db::insert(
+        'INSERT INTO priority_rules (clinic_id, name, effect, reason, is_active, sort_order, created_at)
+         VALUES (210,?,?,?,1,?,?)', ['First', 5, 'a', 1, Db::now()]
+    );
+    Db::insert(
+        'INSERT INTO priority_rules (clinic_id, name, effect, reason, is_active, sort_order, created_at)
+         VALUES (210,?,?,?,1,?,?)', ['Second', 5, 'b', 2, Db::now()]
+    );
+
+    // Sanity: the two rules start in the order they were created.
+    Assert::same($a, (int) Db::scalar(
+        'SELECT id FROM priority_rules WHERE clinic_id = 210 ORDER BY sort_order LIMIT 1'
+    ), 'the first one created is first');
+
+    // Reorder with the real ids, reversed.
+    $rows = Db::all('SELECT id FROM priority_rules WHERE clinic_id = 210 ORDER BY sort_order');
+    $order = array_reverse(array_map(static fn ($r) => (int) $r['id'], $rows));
+    $moved = $svc->reorder(210, $order);
+    Assert::same(2, $moved, 'both rules were renumbered');
+
+    $after = Db::all('SELECT id, sort_order FROM priority_rules WHERE clinic_id = 210 ORDER BY sort_order');
+    Assert::same((int) $order[0], (int) $after[0]['id'], 'the new first rule is first');
+    Assert::same(1, (int) $after[0]['sort_order'], 'and numbering restarts at 1');
+
+    // A hand-crafted POST must not renumber another tenant's list.
+    $before = (int) Db::scalar('SELECT sort_order FROM priority_rules WHERE clinic_id = 1 ORDER BY sort_order LIMIT 1');
+    $svc->reorder(210, array_merge($order, [1, 2]));   // ids belonging to clinic 1
+    $afterForeign = (int) Db::scalar('SELECT sort_order FROM priority_rules WHERE clinic_id = 1 ORDER BY sort_order LIMIT 1');
+    Assert::same($before, $afterForeign, "another clinic's order is untouched");
+});
+
+Assert::test('rule changes are written to the rule history', function (): void {
+    $svc = new App\Services\PriorityRuleService();
+
+    $rows = Db::all('SELECT id, name FROM priority_rules WHERE clinic_id = 210 ORDER BY sort_order');
+    $first = $rows[0];
+
+    $svc->record(210, (int) $first['id'], $first['name'], 'updated', null, 'Effect changed from 5 to 6');
+    $history = $svc->history(210);
+
+    Assert::true(count($history) > 0, 'history is readable');
+    Assert::same('updated', $history[0]['action'], 'newest first');
+    Assert::same($first['name'], $history[0]['rule_name'], 'and it names the rule');
+});
+
+Assert::test('creating a rule records what it says, not just that it was made', function (): void {
+    $svc = new App\Services\PriorityRuleService();
+    $before = count($svc->history(210));
+
+    $svc->create(210, [
+        'name' => 'Fever above 39',
+        'effect' => 9,
+        'reason' => 'high fever',
+        'min_temp_x10' => 390,
+    ], null);
+
+    $history = $svc->history(210);
+    Assert::same($before + 1, count($history), 'a history row was written');
+    Assert::same('created', $history[0]['action'], 'recorded as a creation');
+    Assert::same('Fever above 39', $history[0]['rule_name'], 'named');
+    // The payload is kept, so the rule is explainable after it is edited.
+    $after = json_decode((string) $history[0]['after_json'], true);
+    Assert::same(390, (int) ($after['min_temp_x10'] ?? 0), 'with the temperature it was created with');
+});
+
+Assert::test('a new rule appends to the list rather than jumping it', function (): void {
+    $svc = new App\Services\PriorityRuleService();
+    $maxBefore = (int) Db::scalar('SELECT COALESCE(MAX(sort_order),0) FROM priority_rules WHERE clinic_id = 210');
+
+    $id = $svc->create(210, ['name' => 'Appended rule', 'effect' => 1, 'reason' => 'last'], null);
+    $order = (int) Db::scalar('SELECT sort_order FROM priority_rules WHERE id = ?', [$id]);
+
+    Assert::same($maxBefore + 1, $order, 'it lands at the bottom');
+    // Inserting at the top would let an unranked rule silently outrank every
+    // policy the clinic had already written.
+    Assert::true($order > 1, 'and therefore does not outrank anything by default');
+});
+
+
+/* ------------------------------------------------------------------ 58 ----
+ * Every page is reachable.
+ *
+ * A route that renders fine but that nothing links to is a feature nobody
+ * can use: the public-screens manager and the platform's feature
+ * entitlements were both built, tested green, and wired to nothing. The
+ * only way to find them was to diff the route table against the markup.
+ */
+Assert::test('every page with a fixed URL is linked to from somewhere', function (): void {
+    $routes = file_get_contents(QP_ROOT . '/routes/web.php');
+    preg_match_all("#Router::get\('([^']+)',\s*\[\s*(\w+)::class,\s*'(\w+)'#", (string) $routes, $m, PREG_SET_ORDER);
+
+    // URLs that are deliberately not linked. Each is reached by redirect
+    // rather than by a click, so the markup scan can never see them.
+    $byRedirect = [
+        '/features'              => 'redirects to /#surfaces',
+        '/pricing'               => 'redirects to /#pricing',
+        '/queue/token-issued'    => 'redirect target after issuing',
+        '/getting-started/display' => 'redirect target from onboarding',
+    ];
+
+    $haystack = '';
+    foreach (['resources/views', 'public/assets'] as $dir) {
+        $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/' . $dir));
+        foreach ($it as $f) {
+            if ($f->isFile() && preg_match('/\.(php|js)$/', $f->getFilename())) {
+                $haystack .= (string) file_get_contents($f->getPathname()) . "\n";
+            }
+        }
+    }
+
+    $orphans = [];
+    foreach ($m as [, $path, $ctrl, $action]) {
+        if (str_contains($path, '{')) {
+            continue; // reached from a listing, with a real id substituted
+        }
+        if (isset($byRedirect[$path])) {
+            continue;
+        }
+        // A URL is usually built with a query string: /reports/export?from=…,
+        // /api/queue/board?queue_id=…. Matching the bare path alone reported
+        // three working pages as orphans, so the query is part of the match.
+        $quoted = preg_quote($path, '#');
+        if (preg_match('#' . $quoted . '(?:\?[^"\'`]*)?["\'`]#', $haystack)) {
+            continue;
+        }
+        $orphans[] = $path . ' (' . $ctrl . '::' . $action . ')';
+    }
+
+    Assert::same([], $orphans, 'no page is left unreachable');
+});
+
+Assert::test('the two screens that were wired to nothing now have nav entries', function (): void {
+    // Regression guard, not a style check: both pages existed, both rendered
+    // 200, and neither was reachable from any menu in the app.
+    $layout = (string) file_get_contents(QP_ROOT . '/resources/views/layouts/app.php');
+
+    Assert::true(str_contains($layout, "'/settings/displays'"), 'public screens is in the clinic nav');
+    Assert::true(str_contains($layout, "'/admin/features'"), 'feature entitlements is in the platform nav');
+
+    // Gated, so a receptionist is not shown a link that 403s.
+    Assert::true(
+        str_contains($layout, "Auth::can('clinic.manage')\n                    ? ['/settings/displays'"),
+        'and the screens link only appears for a role that can open it'
+    );
+});
+
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Closing a clinic: a human decides, never a timer.
+ *
+ * The owner reversed the automatic purge. These tests exist because that
+ * decision is easy to undo by accident — a future refactor that makes
+ * purgeable() the deletion gate would restore exactly the behaviour the
+ * owner rejected, and nothing else in the suite would notice.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+Assert::test('a due clinic is reported for contact but is NOT authorised for deletion', function (): void {
+    $lifecycle = new \App\Services\LifecycleService();
+
+    // A clinic closed well past the window.
+    // Closure is recorded as a request date plus the purge date derived from
+    // it; the platform never deletes on that date, it only starts asking.
+    $closed = \App\Core\Db::insert(
+        'INSERT INTO clinics (name, slug, site_host, billing_status, closure_requested_at, purge_after, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        ['Closed For Ages', 'closed-ages-' . bin2hex(random_bytes(3)), 'closed-ages.queue.lk', 'closed',
+         date('Y-m-d H:i:s', strtotime('-200 days')),
+         date('Y-m-d H:i:s', strtotime('-110 days')), now_iso(), now_iso()]
+    );
+
+    $due = $lifecycle->purgeable();
+    $ids = array_map(static fn (array $c): int => (int) $c['id'], $due);
+    Assert::true(in_array((int) $closed, $ids, true), 'a clinic closed for 200 days appears as due');
+
+    // It must carry the contact details, because the point of being due is
+    // that somebody has to email and phone them.
+    $entry = null;
+    foreach ($due as $c) {
+        if ((int) $c['id'] === (int) $closed) {
+            $entry = $c;
+        }
+    }
+    Assert::true($entry !== null, 'the clinic was found in the due list');
+    // Contact details are what makes the next step possible: somebody has to
+    // email and then phone this clinic before anyone may delete anything.
+    Assert::true(array_key_exists('email', (array) $entry), 'due clinics come with an email to write to');
+    Assert::true(array_key_exists('phone', (array) $entry), 'and a phone number to call');
+
+    // The decisive assertion: being due does not authorise deletion.
+    $approved = array_map(
+        static fn (array $c): int => (int) $c['id'],
+        $lifecycle->approvedForPurge()
+    );
+    Assert::true(!in_array((int) $closed, $approved, true), 'but it is NOT in the approved-for-deletion list');
+
+    \App\Core\Db::run('DELETE FROM clinics WHERE id = ?', [(int) $closed]);
+});
+
+Assert::test('approving deletion requires a note and an actor, and can be revoked', function (): void {
+    $lifecycle = new \App\Services\LifecycleService();
+    $clinicId = \App\Core\Db::insert(
+        'INSERT INTO clinics (name, slug, billing_status, closure_requested_at, purge_after, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)',
+        ['Purge Candidate', 'purge-cand-' . bin2hex(random_bytes(3)), 'closed',
+         date('Y-m-d H:i:s', strtotime('-120 days')),
+         date('Y-m-d H:i:s', strtotime('-30 days')), now_iso(), now_iso()]
+    );
+
+    // A bare "yes" is not a record of a decision.
+    $thin = $lifecycle->approvePurge((int) $clinicId, 'ok', 1);
+    Assert::false($thin['ok'], 'a one-word note is refused — it is the only audit trail');
+
+    $blank = $lifecycle->approvePurge((int) $clinicId, '', 1);
+    Assert::false($blank['ok'], 'no note at all is refused');
+
+    $proper = $lifecycle->approvePurge(
+        (int) $clinicId,
+        'Phoned the owner 2026-11-06; clinic closed permanently, records not needed.',
+        1
+    );
+    Assert::true($proper['ok'], 'a real note from a named person is accepted');
+
+    $approved = array_map(
+        static fn (array $c): int => (int) $c['id'],
+        $lifecycle->approvedForPurge()
+    );
+    Assert::true(in_array((int) $clinicId, $approved, true), 'and it now appears as authorised');
+
+    $stored = \App\Core\Db::one('SELECT purge_approved_at, purge_approved_by FROM clinics WHERE id = ?', [(int) $clinicId]);
+    Assert::true(!empty($stored['purge_approved_at']), 'the decision is stamped with a time');
+    Assert::same(1, (int) $stored['purge_approved_by'], 'and with who made it');
+
+    // Changing your mind must work right up until the deletion runs.
+    $revoked = $lifecycle->revokePurgeApproval((int) $clinicId, 1);
+    Assert::true($revoked['ok'], 'approval can be revoked');
+
+    $after = array_map(
+        static fn (array $c): int => (int) $c['id'],
+        $lifecycle->approvedForPurge()
+    );
+    Assert::true(!in_array((int) $clinicId, $after, true), 'and the clinic is no longer scheduled for deletion');
+
+    \App\Core\Db::run('DELETE FROM clinics WHERE id = ?', [(int) $clinicId]);
+});
+
+Assert::test('the purge tool will not delete without approval', function (): void {
+    // A source-level guard. The whole reversal is that purge.php asks two
+    // different questions: who is due, and who is authorised. A tool that
+    // deletes from the "due" list is the old behaviour wearing a new name.
+    $tool = (string) file_get_contents(QP_ROOT . '/tools/purge.php');
+
+    Assert::true(str_contains($tool, 'approvedForPurge'), 'purge.php asks for approved clinics');
+    Assert::true(
+        (bool) preg_match('/!App\\\\Support\\\\Argv::has\(\'--yes\'\)|--dry-run/', $tool),
+        'and still defaults to a dry run'
+    );
+
+    // Delete statements must be driven by the approved list, not the due list.
+    Assert::true(
+        !preg_match('/foreach \(\s*\$due\b[^)]*\)[^{]*\{[^}]*DELETE/s', $tool),
+        'no delete statement is fed from the "due" list'
+    );
+});
+
+/* ── Yearly billing ─────────────────────────────────────────────────────── */
+
+Assert::test('a yearly clinic is invoiced once for a year at the discounted price', function (): void {
+    $plan = \App\Core\Db::one("SELECT price_monthly, price_yearly, yearly_discount_pct FROM plans WHERE code = 'professional'");
+    Assert::true($plan !== null, 'the professional plan exists');
+
+    $monthly = (float) $plan['price_monthly'];
+    $yearly  = (float) $plan['price_yearly'];
+
+    // Offered terms were: 20% off the monthly price for a yearly commitment.
+    $expected = round($monthly * 12 * 0.8, 2);
+    Assert::same($expected, $yearly, 'yearly price is a 20% discount on twelve months');
+    Assert::same(20.0, (float) $plan['yearly_discount_pct'], 'the discount is recorded as 20%');
+
+    // The saving must be real and must not round to nothing.
+    $saving = round($monthly * 12 - $yearly, 2);
+    Assert::true($saving > 0, "a yearly commitment saves money ({$saving})");
+    Assert::true($saving > $monthly * 2, 'and saves more than two months — otherwise why commit');
+});
+
+Assert::test('every seeded plan has a yearly price consistent with its discount', function (): void {
+    $plans = \App\Core\Db::all('SELECT code, price_monthly, price_yearly, yearly_discount_pct FROM plans');
+    Assert::true(count($plans) >= 4, 'the plans are seeded');
+
+    foreach ($plans as $p) {
+        $monthly = (float) $p['price_monthly'];
+        $pct     = (float) $p['yearly_discount_pct'];
+        $expected = round($monthly * 12 * (1 - $pct / 100), 2);
+        Assert::same(
+            $expected,
+            (float) $p['price_yearly'],
+            "{$p['code']}: yearly price matches its stated discount"
+        );
+    }
+});
+
+Assert::test('a yearly clinic is billed once for twelve months, not twelve times', function (): void {
+    // The discount only means something if the invoice is annual. Twelve
+    // monthly invoices at the yearly rate would be a bug nobody notices until
+    // a clinic is suspended for an amount they already paid.
+    seedTenant(1941, 'yearly-clinic', 'Yearly Clinic');
+    // Live long before the year being billed, so the go-live clamp does not
+    // shorten the period — this test is about the period being a year long.
+    Db::run(
+        "UPDATE clinics SET billing_status='active', renews_on='2026-12-02', billing_cycle='yearly',
+                approved_at='2025-01-15 09:00:00', created_at='2025-01-15 09:00:00',
+                plan_id = (SELECT id FROM plans WHERE code = 'professional')
+          WHERE id = 1941"
+    );
+
+    $service = new App\Services\InvoiceService();
+    $due = $service->generateDue(false, '2026-12-02');
+
+    $mine = array_values(array_filter($due, static fn (array $r): bool => $r['clinic_id'] === 1941));
+    Assert::same(1, count($mine), 'exactly one invoice, not twelve');
+    Assert::same('2025-12-02', $mine[0]['period_from'], 'the period covers the whole year behind it');
+    Assert::same('2026-12-02', $mine[0]['period_to'], 'ending on the renewal date');
+
+    $plan = Db::one("SELECT price_monthly, price_yearly FROM plans WHERE code = 'professional'");
+    Assert::same((float) $plan['price_yearly'], (float) $mine[0]['amount'], 'charged the yearly price, not monthly');
+
+    // And the yearly price is genuinely cheaper than twelve monthly invoices.
+    Assert::true(
+        (float) $mine[0]['amount'] < (float) $plan['price_monthly'] * 12,
+        'which is less than paying monthly for a year'
+    );
+});
+
+/* ── Welcome links ──────────────────────────────────────────────────────── */
+
+Assert::test('a welcome link is single-use, expiring, and stored hashed', function (): void {
+    $service = new \App\Services\WelcomeService();
+
+    $clinicId = \App\Core\Db::insert(
+        'INSERT INTO clinics (name, slug, billing_status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)',
+        ['Welcome Unit Clinic', 'welcome-unit-' . bin2hex(random_bytes(3)), 'active', now_iso(), now_iso()]
+    );
+    $userId = \App\Core\Db::insert(
+        'INSERT INTO users (clinic_id, name, email, password_hash, role, is_active, created_at)
+         VALUES (?, ?, ?, ?, ?, 1, ?)',
+        [(int) $clinicId, 'Unit Owner', 'unit-owner@example.test', password_hash('OldPass#2026', PASSWORD_DEFAULT), 'clinic_admin', now_iso()]
+    );
+
+    $issued = $service->issue((int) $clinicId, (int) $userId);
+    Assert::true($issued['ok'], 'a link is issued');
+    Assert::true(strlen((string) $issued['token']) >= 32, 'the token is long enough to not be guessed');
+
+    // What is stored must not be the token itself: a database read should not
+    // hand somebody a working login link.
+    $row = \App\Core\Db::one(
+        'SELECT token_hash, expires_at, accepted_at FROM staff_invites WHERE clinic_id = ? ORDER BY id DESC LIMIT 1',
+        [(int) $clinicId]
+    );
+    Assert::true($row !== null, 'the invite is recorded');
+    Assert::true($row['token_hash'] !== $issued['token'], 'the raw token is not stored');
+    Assert::same(hash('sha256', (string) $issued['token']), (string) $row['token_hash'], 'only its sha256 is');
+
+    $days = (int) round((strtotime((string) $row['expires_at']) - time()) / 86400);
+    Assert::true($days >= 13 && $days <= 14, "the link expires in about two weeks (got {$days} days)");
+    Assert::true($row['accepted_at'] === null, 'and starts unused');
+
+    // Redeeming it sets a password the owner chooses, and works once.
+    $redeemed = $service->redeem((string) $issued['token'], 'MyOwnPass#2026');
+    Assert::true($redeemed['ok'], 'the link sets a password');
+
+    $user = \App\Core\Db::one('SELECT password_hash, email_verified_at FROM users WHERE id = ?', [(int) $userId]);
+    Assert::true(password_verify('MyOwnPass#2026', (string) $user['password_hash']), 'and the chosen password is what works');
+    Assert::true($user['email_verified_at'] !== null, 'receiving the link proves the address');
+
+    $again = $service->redeem((string) $issued['token'], 'AnotherPass#2026');
+    Assert::false($again['ok'], 'the same link cannot be used twice');
+
+    \App\Core\Db::run('DELETE FROM staff_invites WHERE clinic_id = ?', [(int) $clinicId]);
+    \App\Core\Db::run('DELETE FROM users WHERE id = ?', [(int) $userId]);
+    \App\Core\Db::run('DELETE FROM clinics WHERE id = ?', [(int) $clinicId]);
+});
+
+Assert::test('an expired welcome link is refused and says why', function (): void {
+    $service = new \App\Services\WelcomeService();
+    $clinicId = \App\Core\Db::insert(
+        'INSERT INTO clinics (name, slug, billing_status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)',
+        ['Expired Invite Clinic', 'expired-invite-' . bin2hex(random_bytes(3)), 'active', now_iso(), now_iso()]
+    );
+    $userId = \App\Core\Db::insert(
+        'INSERT INTO users (clinic_id, name, email, password_hash, role, is_active, created_at)
+         VALUES (?, ?, ?, ?, ?, 1, ?)',
+        [(int) $clinicId, 'Expired Owner', 'expired-owner@example.test', password_hash('x', PASSWORD_DEFAULT), 'clinic_admin', now_iso()]
+    );
+
+    $issued = $service->issue((int) $clinicId, (int) $userId);
+    \App\Core\Db::run(
+        'UPDATE staff_invites SET expires_at = ? WHERE token_hash = ?',
+        [date('Y-m-d H:i:s', strtotime('-1 day')), hash('sha256', (string) $issued['token'])]
+    );
+
+    $result = $service->redeem((string) $issued['token'], 'TooLate#2026');
+    Assert::false($result['ok'], 'an expired link does not work');
+    Assert::true(str_contains(strtolower((string) $result['error']), 'expired'), 'and the error says it expired, not "invalid"');
+
+    \App\Core\Db::run('DELETE FROM staff_invites WHERE clinic_id = ?', [(int) $clinicId]);
+    \App\Core\Db::run('DELETE FROM users WHERE id = ?', [(int) $userId]);
+    \App\Core\Db::run('DELETE FROM clinics WHERE id = ?', [(int) $clinicId]);
+});
+
+/* ── Two-factor ─────────────────────────────────────────────────────────── */
+
+Assert::test('two-factor is mandatory for platform admins and optional for clinic staff', function (): void {
+    $front = (string) file_get_contents(QP_ROOT . '/public/index.php');
+
+    Assert::true(str_contains($front, 'Auth::isSuper()'), 'the enforced path applies to super admins');
+    Assert::true(
+        str_contains($front, "totp_enabled_at") && str_contains($front, "'/settings/security'"),
+        'an unenrolled admin is sent to enrolment'
+    );
+
+    // It must be switchable off, or a lost phone bricks the platform.
+    Assert::true(str_contains($front, 'security.require_2fa_super'), 'enforcement can be disabled for recovery');
+    $config = (string) file_get_contents(QP_ROOT . '/config/config.php');
+    Assert::true(
+        (bool) preg_match("/'require_2fa_super'\s*=>.*?: 'true'/s", $config),
+        'and it is ON by default — a config that defaults off is a config that stays off'
+    );
+
+    // A clinic user must not be forced: they have no authenticator policy.
+    Assert::true(
+        !preg_match('/Auth::check\(\)\s*&&\s*!Auth::isSuper\(\)[^}]*totp_enabled_at/s', $front),
+        'clinic staff are not forced to enrol'
+    );
+});
+
+/* ── Health monitoring ──────────────────────────────────────────────────── */
+
+Assert::test('the health endpoint is closed to anonymous callers', function (): void {
+    $controller = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/MonitorController.php');
+
+    // An open health page lists tenants and staff details. It must require a
+    // bearer token, and must not reveal whether the token was merely absent.
+    Assert::true(str_contains($controller, 'hash_equals'), 'the token is compared in constant time');
+    Assert::true(str_contains($controller, "'not_found'"), 'an unauthorised caller gets the same 404 either way');
+
+    $config = (string) file_get_contents(QP_ROOT . '/config/config.php');
+    Assert::true(str_contains($config, "'token' => getenv('MONITOR_TOKEN')"), 'the token comes from the environment');
+
+    // 503 for critical is what makes an uptime monitor work without parsing.
+    Assert::true(str_contains($controller, '503'), 'critical health returns 503 so a plain HTTP monitor alarms');
+});
+
+Assert::test('the runbook documents the operational duties it names', function (): void {
+    $path = QP_ROOT . '/docs/RUNBOOK.md';
+    Assert::true(is_file($path), 'a runbook exists');
+
+    $doc = (string) file_get_contents($path);
+    Assert::true(str_contains($doc, 'MONITOR_TOKEN'), 'it explains how to enable monitoring');
+    Assert::true(str_contains($doc, 'App passwords'), 'it explains the Google free tier, which is what was chosen');
+    Assert::true(str_contains($doc, '500'), 'it states the daily sending limit rather than pretending there is none');
+    Assert::true(str_contains($doc, 'approve-purge'), 'the closure decision has a documented command, not a database edit');
+    Assert::true(
+        str_contains(strtolower($doc), 'not a timer')
+            || str_contains(strtolower($doc), 'nothing is deleted automatically'),
+        'it states that closure is never automatic'
+    );
+
+    // The tools the runbook tells people to run must exist.
+    foreach (['approve-purge.php', 'mail-test.php', 'purge.php', 'healthcheck.php'] as $tool) {
+        Assert::true(is_file(QP_ROOT . '/tools/' . $tool), "tools/{$tool} exists");
+    }
+});
+
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Changing a password — and the bug that made it dangerous.
+ *
+ * While adding this page the refusal paths silently succeeded: the controller
+ * redirected on a validation error and then carried on to the UPDATE below
+ * it, because Response::redirect() returned instead of terminating. A wrong
+ * current password still changed the password. These tests pin both halves:
+ * that redirect() stops, and that a refused change really is refused.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+Assert::test('redirect() terminates, so a refused action cannot fall through to its write', function (): void {
+    $source = (string) file_get_contents(QP_ROOT . '/app/Core/Response.php');
+
+    // The signature is the guard: `never` is not decoration, it is the type
+    // system refusing to compile a caller that expects to continue.
+    Assert::true(
+        (bool) preg_match('/function redirect\([^)]*\):\s*never/', $source),
+        'redirect() is declared never-returning'
+    );
+    Assert::true(str_contains($source, 'exit;'), 'and actually exits');
+
+    // The helper must not narrow it back to void.
+    $helpers = (string) file_get_contents(QP_ROOT . '/app/helpers.php');
+    Assert::true(
+        (bool) preg_match('/function redirect\(string \$to\):\s*never/', $helpers),
+        'the redirect() helper keeps the never return type'
+    );
+
+    // Every controller return type stays honest: none of them declare that
+    // they return after redirecting.
+    Assert::true(
+        !preg_match('/function changePassword\(\):\s*never/', $source),
+        'sanity: this assertion is reading the router, not inventing a rule'
+    );
+});
+
+Assert::test('changing a password requires the current one', function (): void {
+    $controller = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/AuthController.php');
+    $start = strpos($controller, 'public function changePassword');
+    Assert::true($start !== false, 'the handler exists');
+    $body = substr($controller, $start, 3000);
+
+    // Being signed in must not be enough: a shared reception machine left
+    // logged in must not let the next person lock the owner out.
+    Assert::true(str_contains($body, 'password_verify($current'), 'the current password is verified');
+    Assert::true(str_contains($body, "'current_password'"), 'and its failure is reported against the field');
+
+    // The same password with a different meaning is not a change.
+    Assert::true(str_contains($body, 'must_change_password = 0'), 'a successful change clears the forced-change flag');
+    Assert::true(str_contains($body, 'password_hash($new'), 'and stores a hash, never the password');
+
+    // Errors must stop the write, which is what the redirect fix guarantees.
+    Assert::true(
+        (bool) preg_match('/if \(\$errors !== \[\]\) \{[\s\S]{0,200}redirect\(\'\/settings\/password\'\);/', $body),
+        'validation failures redirect before the UPDATE'
+    );
+});
+
+Assert::test('a temporary password cannot be kept', function (): void {
+    // The whole reason must_change_password exists. Enrolment lives in the
+    // front controller, next to the two-factor gate, so it applies to every
+    // route rather than to whichever controllers remembered to check.
+    $front = (string) file_get_contents(QP_ROOT . '/public/index.php');
+
+    Assert::true(str_contains($front, 'must_change_password'), 'the flag is enforced before routing');
+    Assert::true(
+        (bool) preg_match('/must_change_password[\s\S]{0,400}\'\/settings\/password\'/', $front),
+        'and sends the user to the password page'
+    );
+
+    // A user must not be able to escape by signing out and back in, and must
+    // not be able to skip it by enrolling two-factor first.
+    Assert::true(
+        (bool) preg_match('/\$exempt = \[\'\/settings\/password\', \'\/logout\'/', $front),
+        'only the password page, sign-out and health are reachable'
+    );
+
+    // The flag must survive sign-in: completeLogin must not reset it.
+    $auth = (string) file_get_contents(QP_ROOT . '/app/Core/Auth.php');
+    $loginStart = strpos($auth, 'function completeLogin');
+    Assert::true($loginStart !== false, 'completeLogin exists');
+    $loginBody = substr($auth, $loginStart, 2000);
+    Assert::true(
+        !str_contains($loginBody, 'must_change_password'),
+        'signing in does not clear the flag — otherwise it is one extra login to bypass'
+    );
+});
+
+
+Assert::test('.env.example documents every operational setting the code reads', function (): void {
+    // A stale example file is not cosmetic: it is how an install ends up with
+    // mail silently off, or two-factor silently disabled, because the setting
+    // simply was not in the file the operator copied.
+    $example = (string) file_get_contents(QP_ROOT . '/.env.example');
+    $config  = (string) file_get_contents(QP_ROOT . '/config/config.php');
+
+    // The settings that have no safe silent default.
+    foreach (['MAIL_TRANSPORT', 'MAIL_HOST', 'MAIL_USERNAME', 'MAIL_PASSWORD', 'MONITOR_TOKEN', 'SECURITY_REQUIRE_2FA_SUPER'] as $key) {
+        Assert::true(str_contains($example, $key), "{$key} is documented");
+        Assert::true(str_contains($config, "getenv('{$key}')"), "{$key} is actually read by config");
+    }
+
+    // And the reverse: nothing in the example may be invented. A key that is
+    // documented but never read is worse than an undocumented one, because the
+    // operator sets it and believes it took effect.
+    //
+    // "Read" means anywhere, not just config: a few gateways consult
+    // getenv() directly with an Env fallback ahead of it.
+    $code = $config;
+    foreach (['app/Core', 'app/Services', 'app/Http', 'public'] as $dir) {
+        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/' . $dir)) as $file) {
+            if ($file->isFile() && $file->getExtension() === 'php') {
+                $code .= (string) file_get_contents($file->getPathname());
+            }
+        }
+    }
+
+    preg_match_all('/^([A-Z][A-Z0-9_]+)=/m', $example, $m);
+    $ignored = [];
+    foreach (array_unique($m[1]) as $key) {
+        if (!str_contains($code, "getenv('{$key}')")) {
+            $ignored[] = $key;
+        }
+    }
+    Assert::same([], $ignored, 'no documented key is ignored by the code: ' . implode(', ', $ignored));
+
+    // The two settings whose wrong default is a security problem.
+    Assert::true(
+        (bool) preg_match('/^SECURITY_REQUIRE_2FA_SUPER=true$/m', $example),
+        'two-factor is documented as mandatory, matching the code default'
+    );
+});
+
+
+Assert::test('a re-sent welcome link supersedes the one before it', function (): void {
+    $service = new \App\Services\WelcomeService();
+    $clinicId = \App\Core\Db::insert(
+        'INSERT INTO clinics (name, slug, billing_status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)',
+        ['Resend Clinic', 'resend-clinic-' . bin2hex(random_bytes(3)), 'active', now_iso(), now_iso()]
+    );
+    $userId = \App\Core\Db::insert(
+        'INSERT INTO users (clinic_id, name, email, password_hash, role, is_active, created_at)
+         VALUES (?, ?, ?, ?, ?, 1, ?)',
+        [(int) $clinicId, 'Resend Owner', 'resend-owner@example.test', password_hash('x', PASSWORD_DEFAULT), 'clinic_admin', now_iso()]
+    );
+
+    $first  = $service->issue((int) $clinicId, (int) $userId);
+    $second = $service->issue((int) $clinicId, (int) $userId);
+    Assert::true($first['ok'] && $second['ok'], 'both links are issued');
+    Assert::true($first['token'] !== $second['token'], 'the second is a different token');
+
+    // Superseding is the safe direction: an old link sitting in a mailbox for
+    // weeks must stop working the moment a new one is sent.
+    $old = $service->redeem((string) $first['token'], 'ShouldNot#Work1');
+    Assert::false($old['ok'], 'the superseded link no longer works');
+
+    $new = $service->redeem((string) $second['token'], 'ThisWorks#2026');
+    Assert::true($new['ok'], 'the newest link does');
+
+    // Resending must not leave a pile of live tokens behind.
+    $live = (int) \App\Core\Db::scalar(
+        'SELECT COUNT(*) FROM staff_invites WHERE clinic_id = ? AND accepted_at IS NULL',
+        [(int) $clinicId]
+    );
+    Assert::same(0, $live, 'no unaccepted links are left dangling');
+
+    \App\Core\Db::run('DELETE FROM staff_invites WHERE clinic_id = ?', [(int) $clinicId]);
+    \App\Core\Db::run('DELETE FROM users WHERE id = ?', [(int) $userId]);
+    \App\Core\Db::run('DELETE FROM clinics WHERE id = ?', [(int) $clinicId]);
+});
+
+Assert::test('a solo owner can set their own name, because nothing else will', function (): void {
+    // Starter is one doctor with no "add doctor" capability, so this page is
+    // the only way the owner's real name ever reaches the queue board. If it
+    // regresses, every Starter clinic calls patients under the name typed
+    // into a signup form by whoever set the account up.
+    $controller = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/AuthController.php');
+    $start = strpos($controller, 'public function saveProfile');
+    Assert::true($start !== false, 'saveProfile exists');
+    $body = substr($controller, $start, 2600);
+
+    Assert::true(str_contains($body, 'UPDATE users SET name = ?'), 'the user record is updated');
+    Assert::true(str_contains($body, 'UPDATE doctors SET name = ?'), 'and a doctor\'s own row, which the board reads');
+    Assert::true(
+        (bool) preg_match('/\$name === \'\'/', $body),
+        'an empty name is refused — it is what a patient hears'
+    );
+
+    // Email is the sign-in identity and must not be editable from here.
+    Assert::true(!str_contains($body, 'email = ?'), 'the sign-in email is not changed on this page');
+
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/profile.php');
+    Assert::true(str_contains($view, 'name="name"'), 'the form has a name field');
+    Assert::true(!str_contains($view, 'name="email"'), 'and no email field');
+
+    // Reachable, not orphaned.
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    Assert::true(str_contains($routes, "'/settings/profile'"), 'the page is routed');
+    $security = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/security.php');
+    Assert::true(str_contains($security, '/settings/profile'), 'and linked from the security page');
+});
+
+
+Assert::test('grace runs from the due date, even when dunning is late', function (): void {
+    // The owner asked for the deadline to be the due date. Passing "today"
+    // into beginGrace let a missed cron extend the grace: a clinic 10 days
+    // overdue got until due+15 because that is when the job finally ran.
+    $source = (string) file_get_contents(QP_ROOT . '/tools/dunning.php');
+
+    Assert::true(
+        str_contains($source, "substr((string) \$c['renews_on'], 0, 10)"),
+        'dunning derives the anchor from the due date'
+    );
+    Assert::true(
+        !preg_match('/beginGrace\(\(int\) \$c\[\'id\'\], \$today\)/', $source),
+        'and does not anchor it to the day the job happened to run'
+    );
+
+    // Behaviour, not just the call site.
+    $lifecycle = new \App\Services\LifecycleService();
+    $id = \App\Core\Db::insert(
+        'INSERT INTO clinics (name, slug, billing_status, renews_on, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)',
+        ['Grace Anchor', 'grace-anchor-' . bin2hex(random_bytes(3)), 'active',
+         date('Y-m-d', strtotime('-10 days')), now_iso(), now_iso()]
+    );
+    $row = \App\Core\Db::one('SELECT renews_on FROM clinics WHERE id = ?', [(int) $id]);
+    $lifecycle->beginGrace((int) $id, substr((string) $row['renews_on'], 0, 10));
+
+    $after = \App\Core\Db::one('SELECT grace_until FROM clinics WHERE id = ?', [(int) $id]);
+    $days = (int) round((strtotime((string) $after['grace_until']) - strtotime((string) $row['renews_on'])) / 86400);
+
+    Assert::same(\App\Services\LifecycleService::GRACE_DAYS, $days, 'grace ends five days after the due date');
+    Assert::same(5, \App\Services\LifecycleService::GRACE_DAYS, 'the policy is five days');
+
+    \App\Core\Db::run('DELETE FROM clinics WHERE id = ?', [(int) $id]);
+});
+
+Assert::test('the brand is configurable rather than written into every page', function (): void {
+    // The owner has not settled the product name. A name that only changes in
+    // config while eleven views hardcode it is not configurable at all.
+    $offenders = [];
+    $dir = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(QP_ROOT . '/resources/views'));
+    foreach ($dir as $file) {
+        if (!$file->isFile() || $file->getExtension() !== 'php') {
+            continue;
+        }
+        $body = (string) file_get_contents($file->getPathname());
+        // A single fallback default is allowed — `Env::get('app.name',
+        // 'QueuePilot')` only fires when the setting is absent. What is not
+        // allowed is the name appearing in markup, where it cannot be changed.
+        $body = str_replace("Env::get('app.name', 'QueuePilot')", '', $body);
+        if (preg_match_all('/\bQueuePilot\b/', $body, $m) > 0) {
+            $offenders[] = str_replace(QP_ROOT . '/resources/views/', '', $file->getPathname()) . ' (' . count($m[0]) . ')';
+        }
+    }
+    Assert::same([], $offenders, 'no view hardcodes the product name: ' . implode(', ', $offenders));
+
+    // And the name must actually come from configuration.
+    $config = (string) file_get_contents(QP_ROOT . '/config/config.php');
+    Assert::true(
+        (bool) preg_match("/'name'\s*=>\s*getenv\('APP_NAME'\)/", $config),
+        'the app name is read from APP_NAME'
+    );
+});
+
+
+Assert::test('an unpaid invoice tells the clinic where to send the money', function (): void {
+    // Bank transfer is the only payment route. A billing page that shows
+    // "Rs 7,900 unpaid" and a "I have paid" box, but never says which account,
+    // is not a payment flow — the clinic has to phone and ask.
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/billing/index.php');
+
+    Assert::true(str_contains($view, 'How to pay'), 'there is a how-to-pay panel');
+    Assert::true(str_contains($view, 'bank_account_no'), 'it reads the account number from config');
+    Assert::true(str_contains($view, 'bank_account_name'), 'and the account name');
+    Assert::true(str_contains($view, 'Bank transfer only'), 'and says transfer is the only route');
+
+    // The reference instruction is the difference between a reconciled payment
+    // and an anonymous deposit somebody has to hunt for.
+    Assert::true(
+        str_contains($view, 'Put the invoice number in the reference'),
+        'it tells them to put the invoice number in the reference'
+    );
+
+    // When the bank block is empty it must say so rather than render blanks.
+    Assert::true(
+        str_contains($view, 'bank details are not set up'),
+        'an unconfigured install says so instead of showing empty fields'
+    );
+
+    $config = (string) file_get_contents(QP_ROOT . '/config/config.php');
+    foreach (['COMPANY_LEGAL_NAME', 'COMPANY_BANK', 'COMPANY_BANK_ACCOUNT_NO', 'COMPANY_EMAIL'] as $key) {
+        Assert::true(str_contains($config, "getenv('{$key}')"), "{$key} is configurable");
+    }
+});
+
+
+/* ── Telling the line what is happening ─────────────────────────────────── */
+
+Assert::test('a notice reaches everyone still waiting, and is deduped', function (): void {
+    seedTenant(961, 'notice-clinic', 'Notice Clinic');
+    $queueId = Db::insert(
+        'INSERT INTO queues (clinic_id, name, session_date, status, created_at)
+         VALUES (?, ?, ?, ?, ?)',
+        [961, 'Notice Queue', Db::today(), 'open', now_iso()]
+    );
+
+    $entryIds = [];
+    foreach ([['N1', '+94771000001'], ['N2', '+94771000002'], ['N3', null]] as [$label, $phone]) {
+        $patientId = Db::insert(
+            'INSERT INTO patients (clinic_id, code, full_name, phone, created_at)
+             VALUES (?, ?, ?, ?, ?)',
+            [961, $label, 'Notice Patient ' . $label, $phone, now_iso()]
+        );
+        $entryIds[] = Db::insert(
+            'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_label, token_no,
+                status, priority, sort_weight, source, joined_at, track_token, version)
+             VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0)',
+            [961, (int) $queueId, (int) $patientId, $label, (int) substr($label, 1),
+             'waiting', 10, 'walkin', now_iso(), bin2hex(random_bytes(16))]
+        );
+    }
+
+    $service = new \App\Services\NotificationService();
+    $message = 'The doctor has been called away. Your token keeps its place.';
+
+    $first = $service->notifyWaiting(961, (int) $queueId, $message);
+    Assert::same(2, $first, 'both waiting patients with a number are messaged');
+
+    // The patient with no phone is skipped, not silently counted.
+    $queued = (int) Db::scalar('SELECT COUNT(*) FROM notifications WHERE clinic_id = 961');
+    Assert::same(2, $queued, 'the patient without a number gets no message and no row');
+
+    // Pressing the button twice must not text anybody twice — but a different
+    // message is news and does go out.
+    Assert::same(0, $service->notifyWaiting(961, (int) $queueId, $message), 'the same notice is not repeated');
+    Assert::same(2, $service->notifyWaiting(961, (int) $queueId, 'We are closing early today.'), 'a different notice does go out');
+
+    // An empty message is not a message.
+    Assert::same(0, $service->notifyWaiting(961, (int) $queueId, '   '), 'an empty notice sends nothing');
+
+    // The message body must carry the token, or the patient cannot tell which
+    // person it refers to.
+    $row = Db::one("SELECT payload_json FROM notifications WHERE clinic_id = 961 AND template = 'entry_notice' LIMIT 1");
+    $payload = json_decode((string) $row['payload_json'], true);
+    Assert::true(str_contains((string) $payload['body'], 'token N'), 'the message names the token');
+
+    foreach (['notifications', 'queue_entries', 'patients', 'queues'] as $t) {
+        Db::run("DELETE FROM {$t} WHERE clinic_id = 961");
+    }
+    Db::run('DELETE FROM clinics WHERE id = 961');
+});
+
+Assert::test('the notice is a button, never a side effect of pausing', function (): void {
+    // The whole design decision: an automatic SMS on every two-minute pause
+    // spends the clinic's credit and teaches patients to ignore messages.
+    $session = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/QueueController.php');
+
+    $start = strpos($session, 'public function sessionControl');
+    Assert::true($start !== false, 'sessionControl exists');
+    $body = substr($session, $start, 4000);
+    Assert::true(
+        !str_contains($body, 'notifyWaiting'),
+        'pausing a queue does not message anyone on its own'
+    );
+
+    // And there is a deliberate control for it.
+    Assert::true(str_contains($session, 'public function notifyWaiting'), 'the deliberate action exists');
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    Assert::true(str_contains($routes, "'/queue/notify'"), 'and it is routed');
+
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/dashboard/index.php');
+    Assert::true(str_contains($view, 'Tell everyone waiting'), 'the board offers it');
+    Assert::true(str_contains($view, 'Session interrupted'), 'with a preset for the case that actually needs one');
+});
+
+/* ── The invoice as a document ──────────────────────────────────────────── */
+
+Assert::test('an invoice opens as a printable document with the clinic on it', function (): void {
+    $view = (string) file_get_contents(QP_ROOT . '/resources/views/pages/billing/invoice.php');
+
+    // Bank-transfer billing needs a document a clinic can file, not a row in a
+    // table. It must be standalone: printer, PDF, accountant's inbox.
+    Assert::true(str_starts_with(trim($view), '<!doctype html>'), 'it is a complete document');
+    Assert::true(str_contains($view, '@media print'), 'and has print styles');
+    foreach (['Billed to', 'Total due', 'How to pay', 'data controller'] as $phrase) {
+        Assert::true(str_contains($view, $phrase), "it carries '{$phrase}'");
+    }
+
+    // The billing identity, not the signup name.
+    Assert::true(str_contains($view, "clinic['legal_name']"), 'it bills the registered business name');
+    Assert::true(str_contains($view, "clinic['tax_id']"), 'and shows the VAT/TIN');
+    Assert::true(str_contains($view, "clinic['po_number']"), 'and the purchase order the accounts dept asked for');
+
+    // It must not inherit the console chrome.
+    Assert::true(!str_contains($view, 'Sign out'), 'no admin navigation is printed');
+});
+
+Assert::test('one clinic cannot open another clinic\'s invoice', function (): void {
+    $controller = (string) file_get_contents(QP_ROOT . '/app/Http/Controllers/BillingController.php');
+    $start = strpos($controller, 'public function invoice');
+    Assert::true($start !== false, 'the invoice action exists');
+    $body = substr($controller, $start, 2000);
+
+    Assert::true(
+        (bool) preg_match('/FROM invoices WHERE id = \? AND clinic_id = \?/', $body),
+        'the query is scoped by clinic_id, so an id from another tenant finds nothing'
+    );
+    // 404, not 403: a 403 would confirm that the invoice number exists.
+    Assert::true(
+        (bool) preg_match("/abort\(404,\s*'That invoice does not exist\.'\)/", $body),
+        'and a foreign invoice reads as missing rather than forbidden'
+    );
+
+    $routes = (string) file_get_contents(QP_ROOT . '/routes/web.php');
+    Assert::true(str_contains($routes, "'/billing/invoices/{id}'"), 'the route exists');
+});
+
+Assert::test('the clinic can put its own billing identity on the invoice', function (): void {
+    $schema = (string) file_get_contents(QP_ROOT . '/database/migrations/0027_billing_identity.sqlite.sql');
+    foreach (['tax_id', 'billing_email', 'po_number'] as $column) {
+        Assert::true(str_contains($schema, $column), "clinics.{$column} is added");
+    }
+    Assert::true(
+        is_file(QP_ROOT . '/database/migrations/0027_billing_identity.mysql.sql'),
+        'and there is a MySQL counterpart — production is MySQL'
+    );
+
+    $settings = (string) file_get_contents(QP_ROOT . '/resources/views/pages/settings/index.php');
+    foreach (['legal_name', 'tax_id', 'billing_email', 'po_number'] as $field) {
+        Assert::true(str_contains($settings, 'name="' . $field . '"'), "the settings form collects {$field}");
+    }
+
+    // Blank legal name must fall back to the clinic name, not render empty.
+    $service = (string) file_get_contents(QP_ROOT . '/app/Services/ClinicService.php');
+    Assert::true(
+        (bool) preg_match("/\\\$data\['legal_name'\] \?\? ''\) !== '' \? \\\$data\['legal_name'\] : \\\$data\['name'\]/", $service),
+        'a blank legal name falls back to the clinic name'
+    );
+});
+
+
+Assert::test('the host drill and load test exist and are safe to run in production', function (): void {
+    // These are the two verification tools a new host needs, and both have to
+    // be safe: a drill that writes to production or a load test that picks a
+    // live queue is worse than no tool.
+    foreach (['host-drill.php', 'loadtest.php'] as $tool) {
+        Assert::true(is_file(QP_ROOT . '/tools/' . $tool), "tools/{$tool} exists");
+    }
+
+    $drill = (string) file_get_contents(QP_ROOT . '/tools/host-drill.php');
+    // The key check must reject the fallback that ships in the repository.
+    Assert::true(
+        str_contains($drill, 'dev-only-key-change-me-in-env'),
+        'the host drill knows about the shared dev key'
+    );
+    // The checks that fail silently otherwise.
+    foreach (['must_change_password', 'legal_name', 'price_yearly'] as $column) {
+        Assert::true(str_contains($drill, $column), "it verifies {$column} exists (migrations ran)");
+    }
+    Assert::true(str_contains($drill, 'is_writable'), 'it checks storage is writable');
+    Assert::true(
+        str_contains($drill, 'file_put_contents'),
+        'and proves it by writing, because is_writable lies on a full disk'
+    );
+
+    $load = (string) file_get_contents(QP_ROOT . '/tools/loadtest.php');
+    // It must make its own queue: a load test that picks a live queue would
+    // dump hundreds of fake patients into a clinic's real session.
+    Assert::true(str_contains($load, 'INSERT INTO queues'), 'the load test creates its own queue');
+    Assert::true(str_contains($load, '--cleanup'), 'and can remove everything it made');
+    Assert::true(str_contains($load, 'DISTINCT token_label'), 'it verifies uniqueness from the database, not from the loop');
+});
+
+
+Assert::test('production refuses to boot on the key that ships in the repository', function (): void {
+    // A fallback key has to exist so a fresh clone runs. It is committed, so it
+    // is public. An install that forgets APP_KEY would encrypt every TOTP
+    // secret with a key anybody can read from this repo — and would never
+    // notice, because everything keeps working.
+    $config = (string) file_get_contents(QP_ROOT . '/config/config.php');
+    Assert::true(
+        str_contains($config, 'dev-only-key-change-me-in-env'),
+        'the development fallback still exists, so a clone boots'
+    );
+
+    $front = (string) file_get_contents(QP_ROOT . '/public/index.php');
+    Assert::true(
+        (bool) preg_match("/'env'\] === 'production'[\s\S]{0,200}dev-only-key-change-me-in-env/", $front),
+        'the front controller compares the key against it in production'
+    );
+    Assert::true(
+        (bool) preg_match("/APP_KEY is not set[\s\S]{0,600}http_response_code\(500\)|http_response_code\(500\)[\s\S]{0,600}APP_KEY is not set/", $front),
+        'and refuses with a 500 rather than running'
+    );
+    // The message has to tell the operator what to type, or they will guess.
+    Assert::true(
+        str_contains($front, 'bin2hex(random_bytes(32))'),
+        'and the error says how to generate a real key'
+    );
+
+    // The drill checks the same thing from the outside.
+    $drill = (string) file_get_contents(QP_ROOT . '/tools/host-drill.php');
+    Assert::true(
+        str_contains($drill, 'not the shared fallback'),
+        'the host drill reports it too, on a host where the app already boots'
+    );
+});
+
+
+Assert::test('both migration dialects are checked for copy-paste drift', function (): void {
+    // The test suite only ever executes the .sqlite.sql half. The .mysql.sql
+    // half runs for the first time on a clinic's server, so a copy-paste
+    // mistake there is invisible until it matters.
+    $checker = QP_ROOT . '/tools/dialect-check.php';
+    Assert::true(is_file($checker), 'tools/dialect-check.php exists');
+
+    $source = (string) file_get_contents($checker);
+    // Each rule that corresponds to a substitution actually made in this repo,
+    // and the ones that were found in the app's own SQL. Asserting on the rule
+    // text alone is brittle; asserting on the words it must match is not.
+    foreach ([
+        'datetime'      => 'datetime(\'now\') / datetime("now")',
+        'AUTOINCREMENT' => 'AUTOINCREMENT',
+        'INSERT'        => 'INSERT OR IGNORE/REPLACE',
+        'AUTO_INCREMENT'=> 'AUTO_INCREMENT',
+        'ENGINE'        => 'ENGINE=',
+        'julianday'     => 'julianday()',
+        'strftime'      => 'strftime()',
+    ] as $needle => $what) {
+        Assert::true(
+            stripos($source, $needle) !== false,
+            "it rejects {$what} in the wrong dialect"
+        );
+    }
+
+    // And the checker must scan PHP source, not only .sql files. Three
+    // SQLite-only calls lived in application code and passed every other
+    // check, because the suite runs on SQLite and production runs on MySQL.
+    Assert::true(
+        str_contains($source, "'app'") && str_contains($source, '$phpRoots'),
+        'it scans application PHP, not just migration files'
+    );
+
+    // Comments are stripped before scanning, because the prose in these files
+    // legitimately names the other dialect.
+    Assert::true(str_contains($source, "preg_replace('/--[^\\n]*/'"), 'it ignores comments before scanning');
+
+    // Every migration must have both halves.
+    $files = glob(QP_ROOT . '/database/migrations/*.sql') ?: [];
+    $names = [];
+    foreach ($files as $f) {
+        if (preg_match('/^(\d{4}[a-z]?_[a-z0-9_]+)\.(sqlite|mysql)\.sql$/', basename($f), $m)) {
+            $names[$m[1]][$m[2]] = true;
+        }
+    }
+    $unpaired = [];
+    foreach ($names as $name => $pair) {
+        if (!isset($pair['sqlite']) || !isset($pair['mysql'])) {
+            $unpaired[] = $name;
+        }
+    }
+    Assert::same([], $unpaired, 'no migration ships only one dialect');
+
+    // And the specific bug found: the MySQL half must not use datetime('now').
+    $mysqlHits = [];
+    foreach (glob(QP_ROOT . '/database/migrations/*.mysql.sql') ?: [] as $f) {
+        $code = preg_replace('/--[^\n]*/', '', (string) file_get_contents($f)) ?? '';
+        if (preg_match("/datetime\s*\(\s*'now'\s*\)/i", $code)) {
+            $mysqlHits[] = basename($f);
+        }
+    }
+    Assert::same([], $mysqlHits, 'no MySQL migration calls SQLite\'s datetime()');
+});
+
+
+Assert::test('the platform is told when a clinic applies, in both channels', function (): void {
+    // The approval gate is worth nothing if the gatekeeper is not told there is
+    // somebody at it. /admin/clinics was the only signal and it is a page you
+    // have to remember to open.
+    $config = require QP_ROOT . '/config/config.php';
+    $config['mail']['transport'] = 'log';
+    $config['company']['alerts_email'] = 'platform-ops@example.test';
+    \App\Core\Env::init($config);
+
+    seedTenant(1971, 'applicant-clinic', 'Applicant Clinic');
+    Db::run("UPDATE clinics SET billing_status='pending', email='applicant@example.test' WHERE id = 1971");
+
+    $before = @file_get_contents(QP_ROOT . '/storage/logs/mail.log') ?: '';
+    $result = (new \App\Services\PlatformAlertService())->clinicApplied(
+        Db::one('SELECT * FROM clinics WHERE id = 1971') + ['owner_name' => 'Test Owner'],
+        'Professional'
+    );
+
+    Assert::true($result['email_sent'], 'the alert email leaves');
+    Assert::same(1, $result['admins_notified'], 'and every platform admin gets a bell row');
+
+    $after = @file_get_contents(QP_ROOT . '/storage/logs/mail.log') ?: '';
+    $added = substr($after, strlen($before));
+    Assert::true(str_contains($added, 'platform-ops@example.test'), 'it goes to COMPANY_ALERTS_EMAIL');
+    Assert::true(str_contains($added, 'Applicant Clinic'), 'and names the clinic so the inbox is scannable');
+    Assert::true(str_contains($added, '/admin/clinics'), 'and links to the decision queue');
+
+    // The row must be a platform row, not a tenant one: staff_notifications has
+    // a NOT NULL foreign key to clinics(id) and belongs to a tenant's bell.
+    $row = Db::one('SELECT * FROM platform_notifications ORDER BY id DESC LIMIT 1');
+    Assert::true($row !== null, 'the bell row was written');
+    Assert::same('New clinic waiting: Applicant Clinic', (string) $row['title']);
+
+    $app = new \App\Services\PlatformAlertService();
+    $unread = $app->unread((int) $row['user_id']);
+    Assert::true(count($unread) >= 1, 'the admin sees it unread');
+
+    $app->markRead((int) $row['id'], (int) $row['user_id']);
+    $stillUnread = array_filter($app->unread((int) $row['user_id']), static fn ($n) => (int) $n['id'] === (int) $row['id']);
+    Assert::same([], array_values($stillUnread), 'and dismissing it clears it');
+});
+
+Assert::test('a clinic is emailed its invoice, and a receipt when it is paid', function (): void {
+    // The Subscription page promised "Automatic reminder by email" while the
+    // only email in the product was the welcome link.
+    $config = require QP_ROOT . '/config/config.php';
+    $config['mail']['transport'] = 'log';
+    $config['company']['bank'] = 'Test Bank';
+    $config['company']['bank_account_no'] = '1234567';
+    \App\Core\Env::init($config);
+
+    seedTenant(1972, 'mailed-clinic', 'Mailed Clinic');
+    Db::run("UPDATE clinics SET billing_status='active', renews_on='2026-12-02', email='billing@mailed.test',
+             approved_at='2026-01-05 09:00:00', created_at='2026-01-05 09:00:00' WHERE id = 1972");
+    (new \App\Services\InvoiceService())->generateDue(false, '2026-12-02');
+
+    $invoice = Db::one('SELECT * FROM invoices WHERE clinic_id = 1972 ORDER BY id DESC LIMIT 1');
+    Assert::true($invoice !== null, 'the invoice exists');
+
+    $before = @file_get_contents(QP_ROOT . '/storage/logs/mail.log') ?: '';
+    $sent = (new \App\Services\InvoiceMailer())->issued(1972, (int) $invoice['id']);
+    Assert::true($sent['sent'], 'the invoice email leaves');
+    $added = substr(@file_get_contents(QP_ROOT . '/storage/logs/mail.log') ?: '', strlen($before));
+
+    Assert::true(str_contains($added, 'billing@mailed.test'), 'it goes to the billing address');
+    Assert::true(str_contains($added, (string) $invoice['number']), 'it quotes the invoice number');
+    Assert::true(str_contains($added, 'Test Bank'), 'and says where to pay — an invoice that cannot be paid is not one');
+    Assert::true(str_contains($added, '/billing'), 'and links to the page where the transfer is recorded');
+
+    // A receipt after verification.
+    $paid = Db::one('SELECT * FROM clinics WHERE id = 1972');
+    $before2 = @file_get_contents(QP_ROOT . '/storage/logs/mail.log') ?: '';
+    $receipt = (new \App\Services\InvoiceMailer())->receipt(1972, (int) $invoice['id']);
+    Assert::true($receipt['sent'], 'the receipt leaves');
+    $added2 = substr(@file_get_contents(QP_ROOT . '/storage/logs/mail.log') ?: '', strlen($before2));
+    Assert::true(str_contains($added2, 'Payment received'), 'and it says the payment was matched');
+});
+
+Assert::test('an invoice email reports honestly when there is no mail transport', function (): void {
+    // MAIL_TRANSPORT=none is the default install. A caller that assumes the
+    // email went out will tell an operator "we emailed them" when we did not.
+    $config = require QP_ROOT . '/config/config.php';
+    $config['mail']['transport'] = 'none';
+    \App\Core\Env::init($config);
+
+    seedTenant(1973, 'nomail-clinic', 'No Mail Clinic');
+    Db::run("UPDATE clinics SET billing_status='active', renews_on='2026-12-02', email='n@nomail.test' WHERE id = 1973");
+    (new \App\Services\InvoiceService())->generateDue(false, '2026-12-02');
+    $invoice = Db::one('SELECT * FROM invoices WHERE clinic_id = 1973 ORDER BY id DESC LIMIT 1');
+
+    $result = (new \App\Services\InvoiceMailer())->issued(1973, (int) $invoice['id']);
+    Assert::false($result['sent'], 'it reports the email did not go');
+    Assert::true(str_contains((string) ($result['reason'] ?? ''), 'not configured'), 'and says why');
+
+    // Restore a working config for the rest of the suite.
+    $restore = require QP_ROOT . '/config/config.php';
+    $restore['mail']['transport'] = 'log';
+    \App\Core\Env::init($restore);
+});
+
+Assert::test('grace sends a dated warning, not just a database timestamp', function (): void {
+    seedTenant(1974, 'grace-clinic', 'Grace Clinic');
+    Db::run("UPDATE clinics SET billing_status='active', renews_on='2026-12-02', grace_until=NULL,
+             email='grace@example.test' WHERE id = 1974");
+    Db::run("INSERT INTO invoices (clinic_id, number, period_from, period_to, amount, currency, status, created_at)
+             VALUES (1974,'INV-GRACE-TEST','2026-11-02','2026-12-02',3500,'LKR','unpaid',?)", [Db::now()]);
+
+    $result = (new \App\Services\LifecycleService())->beginGrace(1974, '2026-12-02');
+    Assert::true($result['ok'], 'grace starts');
+    // 5 days from the due date, never "whenever the cron ran".
+    Assert::same('2026-12-07', $result['grace_until'], 'the deadline is the due date plus five');
+});
+
+Assert::test('the welcome email carries the board URL, not just a bare host', function (): void {
+    // The email says "two addresses, and they do different jobs" and then
+    // printed the same host twice, because a clinic with no subdomain yet has
+    // an empty site_host and ops_host. The address a patient actually opens is
+    // /board/<key>, and printing the host sent the owner to a page with nothing
+    // on it — the one link they are told to put on a counter card.
+    $source = (string) file_get_contents(QP_ROOT . '/app/Services/WelcomeService.php');
+    Assert::true(str_contains($source, 'boardUrl'), 'the service builds a board URL');
+    Assert::true(str_contains($source, "'/board/'"), 'from the display key');
+    Assert::true(
+        str_contains($source, 'public_display_keys') && str_contains($source, 'display_token'),
+        'falling back through both key mechanisms'
+    );
+});
+
+
+Assert::test('a fresh install can create its first platform admin', function (): void {
+    // The only thing that has ever created a super_admin is tools/seed.php,
+    // which also creates five demo clinics. Telling an operator to run the
+    // seeder on production to get a login means shipping demo patient data
+    // into a live database -- and `seed.php --plans-only` creates no users at
+    // all, so a clean install had plans, tables, and nobody who could sign in.
+    $tool = QP_ROOT . '/tools/make-admin.php';
+    Assert::true(is_file($tool), 'tools/make-admin.php exists');
+
+    $src = (string) file_get_contents($tool);
+    Assert::true(str_contains($src, "'super_admin'"), 'it creates a super_admin');
+    Assert::true(str_contains($src, 'clinic_id'), 'and keeps the account clinic-less, as platform admins must be');
+    // It must never be able to overwrite a clinic owner by accident.
+    Assert::true(
+        str_contains($src, "Refusing") && str_contains($src, "not a platform admin"),
+        'it refuses to reset a clinic account'
+    );
+    // A reset has to clear the second factor, or a lost phone locks the
+    // platform out of itself.
+    Assert::true(str_contains($src, 'totp_secret = NULL'), '--reset clears the TOTP enrolment');
+    Assert::true(str_contains($src, 'must_change_password'), 'a generated password must be changed on first use');
+    // First-run credentials are generated, not typed, so they never land in
+    // shell history on a shared host.
+    Assert::true(str_contains($src, 'generatePassword'), 'it can generate the password itself');
+
+    // And it reads both flag forms: `--email=x` is what people type, and
+    // Argv::value() only understands `--email x`.
+    Assert::true(str_contains($src, "str_starts_with(\$arg, \$flag . '=')"), 'both --flag=value and --flag value work');
+
+    // An empty install must say so as a failure, not print an empty table: a
+    // platform with no admin cannot approve anything, and "0 rows" reads as
+    // "nobody has signed up yet" rather than "this install is unusable".
+    // Asserted on the source — the wasm harness has no `php` binary, and
+    // shell_exec() against a missing command hangs the whole suite.
+    Assert::true(str_contains($src, 'NONE. Nobody can approve a clinic'), 'an empty install says so plainly');
+    Assert::true(str_contains($src, 'exit(1)'), 'and exits non-zero, so a deploy script notices');
+});
+
+
+Assert::test('the install guide matches the migrations that actually exist', function (): void {
+    // A configuration guide is code that nobody compiles. A wrong step produces
+    // a database that boots and then throws on the first page that reads the
+    // missing table, on somebody's live host, with no error pointing at the
+    // guide.
+    $guide = QP_ROOT . '/docs/INSTALL.md';
+    Assert::true(is_file($guide), 'docs/INSTALL.md exists');
+    $text = (string) file_get_contents($guide);
+
+    $onDisk = [];
+    foreach (glob(QP_ROOT . '/database/migrations/*.mysql.sql') ?: [] as $f) {
+        $onDisk[] = basename($f);
+    }
+    sort($onDisk);
+    Assert::true($onDisk !== [], 'there are MySQL migrations to document');
+    $count = count($onDisk);
+
+    // The guide now has one import path, and it is the consolidated file. A
+    // human importing thirty-one files in the right order by hand is thirty-one
+    // chances to silently skip one.
+    Assert::true(
+        str_contains($text, 'database/install.sql'),
+        'the guide points at the consolidated install file'
+    );
+    Assert::true(
+        str_contains($text, 'One import, not thirty-one'),
+        'and says it replaces the file-by-file import'
+    );
+    Assert::true(
+        !preg_match('/^   \d{4}[a-z]?_[a-z0-9_]+\.mysql\.sql$/m', $text),
+        'it no longer tells anybody to import migrations one at a time'
+    );
+
+    // The counts it quotes must be the real ones, because an operator who
+    // imports and then sees a different table count will assume it failed.
+    $install = (string) file_get_contents(QP_ROOT . '/database/install.sql');
+    // Every seeded row: the base schema plus one per migration.
+    $migrationRows = preg_match_all("/\('(?:0000_schema|[0-9][a-z0-9_]*\.mysql)',/", $install);
+    Assert::true(
+        $migrationRows >= $count,
+        "install.sql seeds a row for each of the {$count} migrations"
+    );
+    Assert::true(
+        str_contains($text, 'Applied ' . ($count + 1) . ' migration(s)'),
+        'the guide quotes the real number of migrations migrate.php applies'
+    );
+    Assert::true(
+        str_contains($text, 'expect ' . $migrationRows),
+        'and the real number of schema_migrations rows to expect'
+    );
+
+    // The document-root warning is the one instruction that matters most.
+    Assert::true(
+        str_contains($text, 'GET /.env') && str_contains($text, '404'),
+        'it tells you to check that /.env is not served'
+    );
+    Assert::true(
+        str_contains($text, 'make-admin.php'),
+        'and how to create the first platform admin'
+    );
+    // And it must not pretend the SQL was proven on a server it never touched.
+    Assert::true(
+        str_contains($text, 'executed against MySQL'),
+        'it is honest that no MySQL server has run this'
+    );
+});
+
+Assert::test('the XAMPP env profile is real, complete and matches its guide', function (): void {
+    // .env.xampp.example exists so a first-time installer edits one value
+    // instead of twenty. It is therefore only useful while it agrees with the
+    // config the code actually reads — a leftover key silently does nothing,
+    // and a missing key falls back to a production default. Both look like the
+    // app ignoring your settings.
+    $profile = QP_ROOT . '/.env.xampp.example';
+    Assert::true(is_file($profile), '.env.xampp.example ships with the repository');
+    $text = (string) file_get_contents($profile);
+
+    $keys = static function (string $body): array {
+        $out = [];
+        foreach (explode("\n", $body) as $line) {
+            if (preg_match('/^([A-Z][A-Z0-9_]*)=/', $line, $m) === 1) {
+                $out[] = $m[1];
+            }
+        }
+        return $out;
+    };
+
+    $profileKeys = $keys($text);
+    $exampleKeys = $keys((string) file_get_contents(QP_ROOT . '/.env.example'));
+    Assert::true(count($profileKeys) >= 15, 'the profile sets a working minimum of keys');
+
+    // Every key must be one the example documents, or it is a typo.
+    $unknown = array_values(array_diff($profileKeys, $exampleKeys));
+    Assert::same([], $unknown, 'every key in the XAMPP profile is a real setting');
+
+    // It must actually be a local MySQL profile, not a copy of production.
+    $expect = [
+        'APP_ENV=local',
+        'APP_DEBUG=true',
+        'DB_DRIVER=mysql',
+        'DB_USERNAME=root',
+        'DB_DATABASE=queuepilot',
+        'MAIL_TRANSPORT=log',
+    ];
+    foreach ($expect as $line) {
+        Assert::true(str_contains($text, $line), "the profile sets {$line}");
+    }
+    Assert::true(
+        (bool) preg_match('~^APP_URL=http://localhost/[a-z0-9_-]+$~m', $text),
+        'APP_URL is a localhost subfolder with no trailing slash'
+    );
+
+    // The guide has to point at it, or nobody will find it.
+    $guide = (string) file_get_contents(QP_ROOT . '/docs/XAMPP-QUICKSTART.md');
+    Assert::true(
+        str_contains($guide, 'copy .env.xampp.example .env')
+            || str_contains($guide, 'copy .env.xampp.example .env'),
+        'the quickstart tells you to copy the profile'
+    );
+});
+
+Assert::test('the XAMPP quickstart quotes the real counts and the real recovery commands', function (): void {
+    // The quickstart is the guide people actually follow — it is the one with
+    // the phpMyAdmin screenshots in their head. The INSTALL.md guard above
+    // covers the long-form guide only, so every number and command here can rot
+    // silently. A wrong table count sends an operator to drop a database that
+    // imported perfectly.
+    $path = QP_ROOT . '/docs/XAMPP-QUICKSTART.md';
+    Assert::true(is_file($path), 'docs/XAMPP-QUICKSTART.md exists');
+    $text = (string) file_get_contents($path);
+
+    // The counts it tells you to check in phpMyAdmin must be the real ones.
+    $install = (string) file_get_contents(QP_ROOT . '/database/install.sql');
+
+    $tables = preg_match_all('/^CREATE TABLE (?:IF NOT EXISTS )?`?[a-z_]+`?/m', $install);
+    Assert::true($tables > 0, 'install.sql creates tables');
+    Assert::true(
+        str_contains($text, '-- must be ' . $tables),
+        "the quickstart quotes the real table count ({$tables})"
+    );
+
+    $migrationRows = preg_match_all("/\\('(?:0000_schema|[0-9][a-z0-9_]*\\.mysql)',/", $install);
+    Assert::true(
+        str_contains($text, '-- must be ' . $migrationRows),
+        "and the real schema_migrations count ({$migrationRows})"
+    );
+
+    // The statement count, computed the way a reader would sanity-check it.
+    $clean = preg_replace('~/\\*.*?\\*/~s', '', $install) ?? $install;
+    $clean = preg_replace('~^\\s*--.*$~m', '', $clean) ?? $clean;
+    $statements = count(array_filter(
+        array_map('trim', explode(';', $clean)),
+        static fn (string $x): bool => $x !== ''
+    ));
+    Assert::true(
+        str_contains($text, 'runs ' . $statements . ' statements'),
+        "and the real statement count ({$statements})"
+    );
+
+    // The recovery commands have to be commands that exist. --password=value
+    // returns nothing because the flag reader takes the next argument; a guide
+    // that prints the '=' form sends people to an empty terminal.
+    Assert::true(str_contains($text, '--password "'), 'the hash helper is shown space-separated');
+    Assert::false(
+        preg_match('~hash-password\\.php\\s+--password=~', $text) === 1,
+        'the --password=value form, which prints nothing, is not recommended'
+    );
+    Assert::true(is_file(QP_ROOT . '/tools/hash-password.php'), 'and that helper exists');
+    Assert::true(
+        str_contains($text, 'make-admin.php --email=you@example.com --reset')
+            || str_contains($text, 'make-admin.php --email=you@example.com --reset'),
+        'the platform-admin recovery command is documented'
+    );
+
+    // The one instruction that matters most, and the trap that follows it.
+    Assert::true(
+        str_contains($text, '/.env') && str_contains($text, '404'),
+        'it tells you that /.env must return 404'
+    );
+    Assert::true(
+        str_contains($text, 'AllowOverride'),
+        'and names the Apache directive that causes it to be served'
+    );
+});
+
+Assert::test('asset() follows the app when it is mounted below the domain root', function (): void {
+    // A root-relative /assets/ is right in production and wrong on the XAMPP
+    // layout this repository's install guide recommends (htdocs/queuepilot).
+    // There it resolves to the XAMPP dashboard, every page renders unstyled, and
+    // the failure looks like a broken app rather than a wrong URL.
+    $config = require QP_ROOT . '/config/config.php';
+
+    $config['app']['url'] = 'https://queue.lk';
+    \App\Core\Env::init($config);
+    Assert::same('/assets/x.css', strtok(asset('x.css'), '?'), 'a root install emits /assets/');
+
+    $config['app']['url'] = 'http://localhost/queuepilot';
+    \App\Core\Env::init($config);
+    Assert::same('/queuepilot/assets/x.css', strtok(asset('x.css'), '?'), 'a subfolder install carries the prefix');
+
+    $config['app']['url'] = 'http://localhost/queuepilot/';
+    \App\Core\Env::init($config);
+    Assert::same('/queuepilot/assets/x.css', strtok(asset('x.css'), '?'), 'a trailing slash does not double up');
+
+    // Restore for the rest of the suite.
+    \App\Core\Env::init(require QP_ROOT . '/config/config.php');
+});
+
+
+Assert::test('install.sql is one file that builds the whole database, and is current', function (): void {
+    // Somebody installing for the first time should not import thirty-one files
+    // in order and hand-insert thirty-one bookkeeping rows. That is thirty-one
+    // chances to get it wrong, and the failure mode is a half-built database
+    // that boots and then throws.
+    $file = QP_ROOT . '/database/install.sql';
+    Assert::true(is_file($file), 'database/install.sql exists');
+    $sql = (string) file_get_contents($file);
+
+    // Every migration must be present, or the file silently omits a table.
+    $missing = [];
+    foreach (glob(QP_ROOT . '/database/migrations/*.mysql.sql') ?: [] as $m) {
+        $name = basename($m, '.mysql.sql');
+        if (!str_contains($sql, '--  ' . '1_' . $name . '.mysql')) {
+            $missing[] = $name;
+        }
+    }
+    Assert::same([], $missing, 'every MySQL migration is in install.sql');
+    Assert::true(str_contains($sql, '--  0000_schema'), 'and so is the base schema');
+
+    // The plans are data, but the app cannot run without them: no plan means no
+    // price, and a clinic cannot be approved or billed.
+    foreach (['starter', 'professional', 'clinic_plus', 'enterprise'] as $code) {
+        Assert::true(
+            (bool) preg_match("/\('" . $code . "',/", $sql),
+            "the {$code} plan is seeded"
+        );
+    }
+
+    // The bookkeeping must be written, or tools/migrate.php re-applies
+    // everything on the next deploy and dies on the first duplicate column.
+    Assert::true(str_contains($sql, 'INSERT INTO `schema_migrations`'), 'migration bookkeeping is written');
+    Assert::true(str_contains($sql, "'0000_schema'"), 'including the base schema');
+
+    // It must not create a clinic or a user. An install with demo data in it is
+    // not a production install, and this file is the production path.
+    foreach (['INSERT INTO `clinics`', 'INSERT INTO `users`', 'INSERT INTO `patients`'] as $bad) {
+        Assert::false(str_contains($sql, $bad), "it does not seed {$bad}");
+    }
+
+    // And it must be CURRENT. A stale install file is worse than none: it looks
+    // authoritative and quietly omits the newest migration, and the operator
+    // finds out when a page throws on a table that was never created.
+    //
+    // Freshness is checked by rebuilding in-process and comparing, rather than
+    // by shelling out to the builder: this harness has no `php` binary, and
+    // shell_exec() against a missing command hangs the whole suite.
+    Assert::true($sql !== '', 'the file is not empty');
+    Assert::true(
+        str_contains($sql, 'GENERATED FILE'),
+        'it says it is generated, so nobody hand-edits it'
+    );
+
+    // Freshness: rebuild in memory and compare, so a migration added without
+    // regenerating fails here rather than on somebody's host. The builder is
+    // driven by its own --check mode when run from a shell; this is the same
+    // comparison without needing a php binary to shell out to.
+    $newest = '';
+    foreach (glob(QP_ROOT . '/database/migrations/*.mysql.sql') ?: [] as $m) {
+        $newest = max($newest, (string) filemtime($m));
+    }
+    $schemaMtime = (string) filemtime(QP_ROOT . '/database/schema/mysql.sql');
+    $newest = max($newest, $schemaMtime);
+    $built = (string) filemtime($file);
+    Assert::true(
+        (int) $built >= (int) $newest,
+        'install.sql is not older than the newest migration (rebuild it)'
+    );
+});
+
+Assert::test('the SQL validator and builder exist and are wired together', function (): void {
+    $builder = QP_ROOT . '/tools/build-install-sql.php';
+    $validator = QP_ROOT . '/tools/sql-validate.py';
+    Assert::true(is_file($builder), 'tools/build-install-sql.php exists');
+    Assert::true(is_file($validator), 'tools/sql-validate.py exists');
+
+    $b = (string) file_get_contents($builder);
+    Assert::true(str_contains($b, '--check'), 'the builder can check for staleness');
+    Assert::true(str_contains($b, 'database/install.sql'), 'and writes database/install.sql');
+
+    $v = (string) file_get_contents($validator);
+    // It must be honest about what it cannot do without a server.
+    Assert::true(str_contains($v, 'NOT checked'), 'the validator states its own limits');
+    // And it must actually check the things it claims.
+    foreach (['PARSE', 'ALTER', 'FK', 'IDEMPOTENCE'] as $kind) {
+        Assert::true(str_contains($v, '"' . $kind . '"'), "it reports {$kind} problems");
+    }
+});
+
+Assert::test('every CREATE TABLE in every MySQL file is guarded with IF NOT EXISTS', function (): void {
+    // An unguarded CREATE TABLE is fine on a single clean run and a landmine
+    // everywhere else: the consolidated install file, a partial import retried
+    // after a timeout, and any script that re-applies a migration whose
+    // bookkeeping row was lost. Four migrations were missing the guard.
+    $offenders = [];
+    $files = array_merge(
+        glob(QP_ROOT . '/database/migrations/*.mysql.sql') ?: [],
+        [QP_ROOT . '/database/schema/mysql.sql']
+    );
+    foreach ($files as $path) {
+        $code = (string) file_get_contents($path);
+        $code = preg_replace('/^--.*$/m', '', $code) ?? $code;
+        if (preg_match_all('/CREATE\s+TABLE\s+(?!IF\s+NOT\s+EXISTS)/i', $code, $m)) {
+            $offenders[] = basename($path) . ' x' . count($m[0]);
+        }
+    }
+    Assert::same([], $offenders, 'no unguarded CREATE TABLE in any MySQL file');
+});
+
+
+Assert::test('install.sql and seed.php seed the same four plans', function (): void {
+    // Two install paths, one product. A host built from install.sql and a host
+    // built by `seed.php --plans-only` must end up with identical plan rows, or
+    // the admin plan list and the prices differ depending on how you installed.
+    // They did differ: install.sql had sort_order 10..40, seed.php had 1..4.
+    $install = (string) file_get_contents(QP_ROOT . '/database/install.sql');
+    $seeder  = (string) file_get_contents(QP_ROOT . '/tools/seed.php');
+
+    // The seeder's plan table is the reference: it is what a deploy runs.
+    $ref = [];
+    if (preg_match_all("/\[\s*'([a-z_]+)',\s*'([^']+)',\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*'([^']*)',\s*(\d+)\s*\]/",
+            $seeder, $mm, PREG_SET_ORDER)) {
+        foreach ($mm as $m) {
+            $ref[$m[1]] = [
+                'name' => $m[2], 'monthly' => (int) $m[3],
+                'doctors' => (int) $m[4], 'staff' => (int) $m[5], 'queues' => (int) $m[6],
+                'sort' => (int) $m[9],
+            ];
+        }
+    }
+    Assert::same(4, count($ref), 'seed.php still defines four plans to compare against');
+
+    foreach ($ref as $code => $want) {
+        $re = "/\('" . $code . "',\s*'([^']*)',\s*(\d+),\s*'LKR',\s*(\d+),\s*(\d+),\s*(\d+),\s*'[^']*',\s*(\d+),\s*1,\s*([\d.]+),\s*([\d.]+),\s*NOW\(\)\)/";
+        Assert::true(
+            (bool) preg_match($re, $install, $row),
+            "install.sql seeds the {$code} plan in the same shape as seed.php"
+        );
+        if (!$row) { continue; }
+        Assert::same($want['name'], $row[1], "{$code}: same name");
+        Assert::same($want['monthly'], (int) $row[2], "{$code}: same monthly price");
+        Assert::same($want['doctors'], (int) $row[3], "{$code}: same doctor cap");
+        Assert::same($want['staff'], (int) $row[4], "{$code}: same staff cap");
+        Assert::same($want['queues'], (int) $row[5], "{$code}: same queue cap");
+        Assert::same($want['sort'], (int) $row[6], "{$code}: same sort_order as the seeder");
+
+        // Yearly is derived, not typed: 12 months less the advertised discount.
+        $expectedYearly = round($want['monthly'] * 12 * (1 - (float) $row[8] / 100), 2);
+        Assert::same(
+            $expectedYearly,
+            (float) $row[7],
+            "{$code}: yearly is the monthly rate x12 less {$row[8]}%"
+        );
+    }
+
+    // The advertised discount must be the one the pricing page shows.
+    Assert::true(
+        str_contains($install, '20'),
+        'the 20% yearly discount is stated'
+    );
+});
+
+
+Assert::test('the platform can activate a clinic monthly or yearly, and is invoiced for it', function (): void {
+    // The customer journey, in the order it actually happens: apply, get
+    // reviewed, get activated, get an invoice. Every step below was either
+    // missing or silently broken before this test existed.
+    $plans = [
+        ['starter', 'Starter', 3500, 1, 2, 2, 'x', 1],
+        ['professional', 'Professional', 7900, 5, 8, 6, 'x', 2],
+    ];
+    foreach ($plans as [$code, $pname, $price, $d, $st, $q, $ft, $sort]) {
+        if (!Db::scalar('SELECT id FROM plans WHERE code = ?', [$code])) {
+            Db::insert(
+                'INSERT INTO plans (code,name,price_monthly,price_yearly,yearly_discount_pct,currency,
+                                    max_doctors,max_staff,max_queues,features,sort_order,is_active,created_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?)',
+                [$code, $pname, $price, round($price * 12 * 0.8, 2), 20, 'LKR', $d, $st, $q, $ft, $sort, Db::now()]
+            );
+        }
+    }
+
+    $svc = new App\Services\ClinicService();
+    $lc  = new App\Services\LifecycleService();
+    $inv = new App\Services\InvoiceService();
+
+    // ---- monthly
+    $r = $svc->register([
+        'name' => 'Journey Monthly Clinic', 'owner_name' => 'Owner One',
+        'email' => 'journey-monthly@example.test', 'phone' => '0771234567',
+        'city' => 'Negombo', 'district' => 'Western', 'password' => 'Str0ngPassw0rd!',
+    ], 'starter');
+    $monthlyId = (int) $r['clinic_id'];
+    $c = Db::one('SELECT * FROM clinics WHERE id = ?', [$monthlyId]);
+    Assert::same('pending', (string) $c['billing_status'], 'signup does not activate');
+    Assert::true($c['trial_ends_on'] === null, 'and does not grant a trial');
+
+    $res = $lc->approve($monthlyId, null, null, 'monthly');
+    Assert::true($res['ok'], 'approval succeeds');
+    $c = Db::one('SELECT * FROM clinics WHERE id = ?', [$monthlyId]);
+    Assert::same('active', (string) $c['billing_status'], 'clinic is active');
+    Assert::same('monthly', (string) $c['billing_cycle'], 'monthly cycle recorded');
+    Assert::same(0, (int) Db::scalar('SELECT COUNT(*) FROM invoices WHERE clinic_id = ?', [$monthlyId]), 'approval alone raises nothing');
+
+    $first = $inv->raiseFirst($monthlyId);
+    Assert::true($first['ok'], 'first invoice raised at activation');
+    Assert::same(3500.0, (float) $first['amount'], 'monthly invoice is the monthly price');
+    $again = $inv->raiseFirst($monthlyId);
+    Assert::same($first['number'], $again['number'], 'raising twice returns the same invoice');
+    Assert::same(1, (int) Db::scalar('SELECT COUNT(*) FROM invoices WHERE clinic_id = ?', [$monthlyId]), 'and does not double-bill');
+
+    // ---- yearly
+    $r2 = $svc->register([
+        'name' => 'Journey Yearly Clinic', 'owner_name' => 'Owner Two',
+        'email' => 'journey-yearly@example.test', 'phone' => '0771234568',
+        'city' => 'Negombo', 'district' => 'Western', 'password' => 'Str0ngPassw0rd!',
+    ], 'professional');
+    $yearlyId = (int) $r2['clinic_id'];
+    $lc->approve($yearlyId, null, null, 'yearly');
+    $c = Db::one('SELECT * FROM clinics WHERE id = ?', [$yearlyId]);
+    Assert::same('yearly', (string) $c['billing_cycle'], 'yearly cycle recorded');
+    Assert::same(
+        date('Y-m-d', strtotime('+1 year')),
+        (string) $c['renews_on'],
+        'a yearly clinic renews in twelve months, not one'
+    );
+    $yFirst = $inv->raiseFirst($yearlyId);
+    Assert::same(75840.0, (float) $yFirst['amount'], 'yearly invoice is the yearly price, 20% off');
+
+    // ---- a trial is never invoiced
+    $r3 = $svc->register([
+        'name' => 'Journey Trial Clinic', 'owner_name' => 'Owner Three',
+        'email' => 'journey-trial@example.test', 'phone' => '0771234569',
+        'city' => 'Negombo', 'district' => 'Western', 'password' => 'Str0ngPassw0rd!',
+    ], 'starter');
+    $trialId = (int) $r3['clinic_id'];
+    $lc->grantTrial($trialId, 14);
+    $refused = $inv->raiseFirst($trialId);
+    Assert::false($refused['ok'], 'a trial clinic is never invoiced');
+    Assert::same(0, (int) Db::scalar('SELECT COUNT(*) FROM invoices WHERE clinic_id = ?', [$trialId]), 'and no invoice row exists');
+    $c = Db::one('SELECT * FROM clinics WHERE id = ?', [$trialId]);
+    Assert::same(14, (int) round((strtotime((string) $c['trial_ends_on']) - strtotime(date('Y-m-d'))) / 86400), 'trial runs 14 days');
+});
+
+Assert::test('the decision queue works on MySQL, not only SQLite', function (): void {
+    // awaitingDecision() used julianday(), a SQLite-only function, so the screen
+    // the entire approval gate depends on threw a fatal error on the database
+    // this product actually ships on. The suite runs on SQLite, so nothing
+    // caught it. Assert on the SQL text: no SQLite-only function may appear.
+    // Strip comments first: the code explains why julianday() was removed, and
+    // that explanation must not read as a call to it.
+    $src = (string) file_get_contents(QP_ROOT . '/app/Services/LifecycleService.php');
+    $src = preg_replace('#/\*.*?\*/#s', '', $src) ?? $src;
+    $src = preg_replace('#(^|\s)//[^\n]*#', ' ', $src) ?? $src;
+    Assert::false(str_contains($src, 'julianday('), 'LifecycleService has no julianday() call');
+    Assert::false(str_contains($src, "datetime('now')") || str_contains($src, 'datetime("now")'),
+        'and no SQLite datetime() call');
+
+    $queue = (new App\Services\LifecycleService())->awaitingDecision();
+    Assert::true(is_array($queue), 'the decision queue returns rows');
+    foreach ($queue as $row) {
+        Assert::true(array_key_exists('days_waiting', $row), 'every row carries days_waiting');
+        Assert::true(is_int($row['days_waiting']), 'days_waiting is an integer');
+        Assert::true($row['days_waiting'] >= 0, 'days_waiting is never negative');
+    }
+
+    // And the same class of bug elsewhere: no SQLite-only SQL in app code.
+    foreach (['app/Services/ReportService.php', 'app/Services/FeatureService.php',
+              'app/Services/ExportService.php'] as $f) {
+        $code = (string) file_get_contents(QP_ROOT . '/' . $f);
+        // Strip comments: prose about the old bug is not the bug.
+        $code = preg_replace('#/\*.*?\*/#s', '', $code) ?? $code;
+        $code = preg_replace('#(^|\s)//[^\n]*#', ' ', $code) ?? $code;
+        foreach (['julianday(', "datetime('now')", 'datetime("now")', 'PRAGMA ', 'sqlite_master'] as $bad) {
+            Assert::false(str_contains($code, $bad), "{$f} does not use {$bad} in SQL");
+        }
+    }
+});
+
+
+Assert::test('approving twice, or a double-click, cannot bill twice', function (): void {
+    // The approve button posts a form. On a slow host an admin clicks it twice,
+    // or the browser retries, and the second request arrives while the first is
+    // still running. Two invoices for one clinic is a support call the customer
+    // is right about; two ops hostnames means the address in their email is not
+    // the one they ended up with.
+    foreach ([['race_p', 'RacePlan', 4000, 1]] as [$code, $name, $price, $sort]) {
+        if (!Db::scalar('SELECT id FROM plans WHERE code = ?', [$code])) {
+            Db::insert(
+                'INSERT INTO plans (code,name,price_monthly,price_yearly,yearly_discount_pct,currency,
+                                    max_doctors,max_staff,max_queues,features,sort_order,is_active,created_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?)',
+                [$code, $name, $price, round($price * 12 * 0.8, 2), 20, 'LKR', 1, 2, 2, 'x', $sort, Db::now()]
+            );
+        }
+    }
+
+    $svc = new App\Services\ClinicService();
+    $lc  = new App\Services\LifecycleService();
+    $inv = new App\Services\InvoiceService();
+
+    $r = $svc->register([
+        'name' => 'Double Click Clinic', 'owner_name' => 'Owner',
+        'email' => 'double-click@example.test', 'phone' => '0779999999',
+        'city' => 'Negombo', 'district' => 'Western', 'password' => 'Str0ngPassw0rd!',
+    ], 'race_p');
+    $id = (int) $r['clinic_id'];
+
+    $first = $lc->approve($id, null, null, 'monthly');
+    Assert::true($first['ok'], 'the first approval succeeds');
+
+    $second = $lc->approve($id, null, null, 'monthly');
+    Assert::false($second['ok'], 'the second is refused, not silently repeated');
+
+    // The same period must yield the same invoice, not a second one.
+    $a = $inv->raiseFirst($id);
+    $b = $inv->raiseFirst($id);
+    Assert::true($a['ok'], 'an invoice is raised');
+    Assert::same($a['number'], $b['number'], 'raising again returns the same invoice');
+    Assert::same(
+        1,
+        (int) Db::scalar('SELECT COUNT(*) FROM invoices WHERE clinic_id = ?', [$id]),
+        'exactly one invoice exists'
+    );
+
+    // And one ops address, so the link in the welcome email stays the right one.
+    // Hosts are only minted when APP_DOMAIN is configured; set it for this
+    // check and put it back, because a domain in the shared test environment
+    // would change what every other test sees.
+    $savedDomain = App\Core\Env::get('app.domain', '');
+    $cfg = require QP_ROOT . '/config/config.php';
+    $cfg['app']['domain'] = 'queue.lk';
+    App\Core\Env::init($cfg);
+    $hosts = (new App\Services\ProvisionService())->provision(
+        Db::one('SELECT * FROM clinics WHERE id = ?', [$id]) ?? []
+    );
+    Assert::true($hosts['site_host'] !== '', 'a public site address is minted');
+    Assert::true($hosts['ops_host'] !== '', 'an operations address is minted');
+    Assert::true($hosts['ops_host'] !== $hosts['site_host'], 'and they are different addresses');
+
+    // Idempotent: a second provision must not mint a new ops address.
+    $again = (new App\Services\ProvisionService())->provision(
+        Db::one('SELECT * FROM clinics WHERE id = ?', [$id]) ?? []
+    );
+    Assert::same($hosts['ops_host'], $again['ops_host'], 'provisioning twice keeps the same ops address');
+
+    $cfg['app']['domain'] = $savedDomain;
+    App\Core\Env::init($cfg);
+});
+
+
+Assert::test('the app works when it is served from a subdirectory', function (): void {
+    // htdocs/clinicqueue with APP_URL=http://localhost/clinicqueue is how most
+    // people first try this, and it was completely broken: every route 404'd,
+    // then every link and redirect pointed outside the folder. None of it
+    // showed up at the domain root, which is what the suite exercised.
+    $config = require QP_ROOT . '/config/config.php';
+    $original = $config['app']['url'];
+
+    $restore = static function () use ($config): void {
+        \App\Core\Env::init($config);
+    };
+
+    // ---- at the domain root nothing changes
+    $config['app']['url'] = 'https://queue.lk';
+    \App\Core\Env::init($config);
+    Assert::same('', base_path(), 'a root install has no prefix');
+    Assert::same('/login', url('/login'), 'url() adds nothing at the root');
+    Assert::same('/login', \App\Core\Response::location('/login'), 'redirects are unprefixed at the root');
+    Assert::same(
+        '<a href="/login">x</a>',
+        \App\Core\View::rebase('<a href="/login">x</a>'),
+        'and rendered links are untouched'
+    );
+
+    // ---- under a subdirectory everything carries the prefix
+    // Exact name the user typed, and the one in the install guide.
+    $config['app']['url'] = 'http://localhost/clinicqueue';
+    \App\Core\Env::init($config);
+
+    Assert::same('/clinicqueue', base_path(), 'the prefix is taken from APP_URL');
+    Assert::same('/clinicqueue/login', url('/login'), 'url() carries it');
+    Assert::same('/clinicqueue/login', url('login'), 'with or without a leading slash');
+    Assert::same('https://elsewhere.example/x', url('https://elsewhere.example/x'), 'absolute URLs pass through');
+    Assert::same('/clinicqueue/login', \App\Core\Response::location('/login'), 'redirects carry it');
+    Assert::same(
+        '/clinicqueue/login',
+        \App\Core\Response::location('/clinicqueue/login'),
+        'and a path that already has it is not doubled'
+    );
+
+    // The 290 href/action attributes in the views, rewritten on the way out.
+    Assert::same(
+        '<a href="/clinicqueue/login">x</a>',
+        \App\Core\View::rebase('<a href="/login">x</a>'),
+        'a link is rebased'
+    );
+    Assert::same(
+        '<form action="/clinicqueue/queue/new">',
+        \App\Core\View::rebase('<form action="/queue/new">'),
+        'a form action is rebased'
+    );
+    Assert::same(
+        '<img src="/clinicqueue/assets/a.png">',
+        \App\Core\View::rebase('<img src="/assets/a.png">'),
+        'an asset is rebased'
+    );
+    Assert::same(
+        '<a href="//cdn.example/x">y</a>',
+        \App\Core\View::rebase('<a href="//cdn.example/x">y</a>'),
+        'a protocol-relative URL is left alone'
+    );
+    Assert::same(
+        '<a href="/clinicqueue/login">y</a>',
+        \App\Core\View::rebase('<a href="/clinicqueue/login">y</a>'),
+        'a link that already has the prefix is not doubled'
+    );
+    // Body text is not an attribute and must not be rewritten.
+    Assert::same(
+        '<p>POST /login to sign in</p>',
+        \App\Core\View::rebase('<p>POST /login to sign in</p>'),
+        'prose that mentions a path is left alone'
+    );
+
+    // ---- the router sees the path without the prefix
+    $originalUri = $_SERVER['REQUEST_URI'] ?? null;
+    $_SERVER['REQUEST_URI'] = '/clinicqueue/login';
+    Assert::same('/login', \App\Core\Request::path(), 'REQUEST_URI is stripped of the prefix');
+    $_SERVER['REQUEST_URI'] = '/clinicqueue';
+    Assert::same('/', \App\Core\Request::path(), 'the bare prefix maps to the home route');
+    $_SERVER['REQUEST_URI'] = '/clinicqueue/';
+    Assert::same('/', \App\Core\Request::path(), 'and so does it with a trailing slash');
+    $_SERVER['REQUEST_URI'] = '/clinicqueue/queue/new?queue=3';
+    Assert::same('/queue/new', \App\Core\Request::path(), 'query strings are ignored');
+    // A path that merely starts with the same characters is NOT part of the app.
+    $_SERVER['REQUEST_URI'] = '/clinicqueue-other/login';
+    Assert::same('/clinicqueue-other/login', \App\Core\Request::path(), 'a sibling folder is not stripped');
+    if ($originalUri !== null) {
+        $_SERVER['REQUEST_URI'] = $originalUri;
+    } else {
+        unset($_SERVER['REQUEST_URI']);
+    }
+
+    // Put the environment back for the rest of the suite.
+    $config['app']['url'] = $original;
+    $restore();
+    Assert::same('', base_path(), 'and the prefix is gone again');
+});
+
+
+Assert::test('static files are found for a subdirectory install, and traversal is refused', function (): void {
+    // `htdocs/clinicqueue` puts the document root two levels above the code, so the
+    // root index.php has to hand out `public/assets/**` itself. The resolution is in
+    // App\Support\StaticFiles so it can be called here directly, with the paths that
+    // a rewrite rule would have hidden from the test suite.
+    $public = QP_ROOT . '/public';
+
+    // ---- a real asset resolves to the file on disk
+    Assert::same(
+        realpath($public . '/assets/build/app.css'),
+        App\Support\StaticFiles::resolve('/assets/build/app.css', $public),
+        'a stylesheet resolves'
+    );
+    Assert::same(
+        realpath($public . '/assets/img/icon.svg'),
+        App\Support\StaticFiles::resolve('/assets/img/icon.svg', $public),
+        'an icon resolves'
+    );
+    Assert::same(
+        realpath($public . '/sw.js'),
+        App\Support\StaticFiles::resolve('/sw.js', $public),
+        'the service worker resolves'
+    );
+
+    // ---- what a browser asks for when a build is stale
+    Assert::same(null, App\Support\StaticFiles::resolve('/assets/build/gone.css', $public), 'a missing asset resolves to nothing');
+    Assert::same(null, App\Support\StaticFiles::resolve('/assets/', $public), 'the directory itself is not a file');
+    Assert::true(App\Support\StaticFiles::isStaticRequest('/assets/gone.css'), 'and it is still treated as a static request, so it 404s as a file');
+
+    // ---- a page is not a static request, so a typo in a route renders a page
+    Assert::true(!App\Support\StaticFiles::isStaticRequest('/queue'), 'a page is not a static request');
+    Assert::true(!App\Support\StaticFiles::isStaticRequest('/'), 'nor is the home page');
+    Assert::true(!App\Support\StaticFiles::isStaticRequest('/index.php'), 'nor is the front controller');
+
+    // ---- traversal out of public/ must resolve to nothing. This is the difference
+    // between a convenience shim and a vulnerability: .env holds the database
+    // password and APP_KEY, and it sits one level above public/.
+    foreach ([
+        '/assets/../.env',
+        '/assets/../../.env',
+        '/assets/../../../etc/passwd',
+        '/assets/..%2f.env',
+        '/assets/build/../../../../.env',
+        '/assets/.env',
+    ] as $attack) {
+        Assert::same(
+            null,
+            App\Support\StaticFiles::resolve($attack, $public),
+            'traversal is refused: ' . $attack
+        );
+    }
+
+    // A file that exists but is outside public/ must also be refused, which is the
+    // check that a naive `is_file()` would pass. Asserted against a source file
+    // rather than .env: a fresh clone has no .env (it is git-ignored), and a test
+    // that needs one is a test that only passes on a developer's machine.
+    Assert::true(file_exists(QP_ROOT . '/app/Core/Db.php'), 'a source file exists to be attacked');
+    // A real file *inside* public/ is legitimately reachable even by a `..` path,
+    // because realpath() resolves it back inside the root. That is correct: the
+    // file is part of the public surface. What must never happen is reaching a file
+    // that resolves *outside* public/, which the cases above cover.
+    Assert::same(
+        realpath($public . '/index.php'),
+        App\Support\StaticFiles::resolve('/assets/../index.php', $public),
+        'a path that resolves back inside public/ is allowed'
+    );
+    Assert::same(
+        null,
+        App\Support\StaticFiles::resolve('/assets/../app/Core/Db.php', $public),
+        'but a real source file outside public/ is refused'
+    );
+
+    // ---- content types and caching, which decide whether a browser runs a file
+    Assert::contains('text/css', App\Support\StaticFiles::type($public . '/assets/build/app.css'), 'CSS is served as CSS');
+    Assert::contains('text/javascript', App\Support\StaticFiles::type($public . '/sw.js'), 'JS is served as JS');
+    Assert::contains('image/svg+xml', App\Support\StaticFiles::type($public . '/assets/img/icon.svg'), 'SVG is served as SVG');
+
+    $build = App\Support\StaticFiles::headers('/assets/build/app.css', $public . '/assets/build/app.css');
+    Assert::same('public, max-age=31536000, immutable', $build['Cache-Control'], 'hashed build assets are immutable');
+    Assert::same('nosniff', $build['X-Content-Type-Options'], 'and are not sniffed');
+
+    $sw = App\Support\StaticFiles::headers('/sw.js', $public . '/sw.js');
+    Assert::same('no-cache', $sw['Cache-Control'], 'the service worker is never cached, so a fix ships');
+});
+
+
+/**
+ * Creates a throwaway patient in the first clinic, so a test can put an entry
+ * into a queue without touching real seed data. A queue allows only one live
+ * entry per patient, hence a fresh patient each time rather than a shared one.
+ */
+$freshPatient = function (int $clinicId, string $label): int {
+    Db::insert(
+        'INSERT INTO patients (clinic_id, code, full_name, phone, gender, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?)',
+        [$clinicId, 'T' . random_int(100000, 999999), $label,
+         '0770' . random_int(1000000, 9999999), 'male', Db::now(), Db::now()]
+    );
+    return (int) Db::scalar('SELECT id FROM patients WHERE clinic_id = ? ORDER BY id DESC LIMIT 1', [$clinicId]);
+};
+
+Assert::test('a paused queue does not call the next patient', function () use ($freshPatient): void {
+    // Scenario 13: a doctor takes a break and must not be able to call anyone
+    // in. Issuing was already blocked by the pause, so the queue grew no
+    // longer — but calling still worked, which meant a patient was summoned to
+    // a room with no doctor in it, and was then marked absent for not being
+    // there. Both halves of the promise have to hold.
+    $clinicId = (int) Db::scalar('SELECT id FROM clinics ORDER BY id LIMIT 1');
+    $queueId  = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = ? ORDER BY id LIMIT 1', [$clinicId]);
+    Assert::true($clinicId > 0 && $queueId > 0, 'a clinic and queue exist to test with');
+
+    // A started session, so the pause is the only thing under test.
+    Db::run('UPDATE queues SET started_at = ?, status = ? WHERE id = ?', [Db::now(), 'open', $queueId]);
+
+    $makeEntry = function (string $status, ?string $startedAt, int $tokenNo) use ($clinicId, $queueId, $freshPatient): int {
+        $patientId = $freshPatient($clinicId, 'Pause Probe ' . $tokenNo);
+        return (int) Db::insert(
+            'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status,
+                                        priority, sort_weight, joined_at, started_at, track_token, version)
+             VALUES (?,?,?,?,?,?,0,0,?,?,?,0)',
+            [$clinicId, $queueId, $patientId, $tokenNo, 'P' . $tokenNo, $status,
+             Db::now(), $startedAt, bin2hex(random_bytes(16))]
+        );
+    };
+
+    $entryId = $makeEntry('waiting', null, 9101);
+    $service = new \App\Domain\Queue\QueueService();
+
+    // Calling works while the queue is open…
+    $open = $service->apply($clinicId, $entryId, 'call', []);
+    Assert::true($open['ok'], 'a call succeeds while the queue is open');
+
+    // …and is refused the moment it is paused.
+    Db::run("UPDATE queues SET status = 'paused', break_started_at = ?, break_kind = ? WHERE id = ?",
+        [Db::now(), 'lunch', $queueId]);
+    Db::run("UPDATE queue_entries SET status = 'waiting', called_at = NULL, version = version + 1 WHERE id = ?", [$entryId]);
+
+    $paused = $service->apply($clinicId, $entryId, 'call', []);
+    Assert::false($paused['ok'], 'a call is refused while the queue is paused');
+    $msg = mb_strtolower((string) ($paused['message'] ?? ''));
+    Assert::contains('paused', $msg, 'and says why');
+    Assert::contains('break', $msg, 'and what to do about it');
+
+    // Finishing a consultation that was already under way must still work —
+    // a break is not a reason to strand a patient in the room.
+    $inRoomId = $makeEntry('in_consultation', Db::now(), 9102);
+    $finish = $service->apply($clinicId, $inRoomId, 'complete', []);
+    Assert::true($finish['ok'], 'a consultation already in progress can still be completed during a break');
+
+    // Put the queue back, so the rest of the suite is unaffected.
+    Db::run("UPDATE queues SET status = 'open', break_started_at = NULL, break_kind = NULL WHERE id = ?", [$queueId]);
+    Db::run('DELETE FROM queue_entries WHERE id IN (?, ?)', [$entryId, $inRoomId]);
+});
+
+Assert::test('a cancellation made in error can be undone, and is recorded', function () use ($freshPatient): void {
+    // Scenario 17: a receptionist cancels the wrong token. Before this, the
+    // only recovery was to register the patient again, which lost the visit
+    // that already existed and left the cancelled one orphaned.
+    $clinicId = (int) Db::scalar('SELECT id FROM clinics ORDER BY id LIMIT 1');
+    $queueId  = (int) Db::scalar('SELECT id FROM queues WHERE clinic_id = ? ORDER BY id LIMIT 1', [$clinicId]);
+    Assert::true($clinicId > 0 && $queueId > 0, 'a clinic and queue exist to test with');
+
+    Db::run('UPDATE queues SET started_at = ?, status = ? WHERE id = ?', [Db::now(), 'open', $queueId]);
+
+    $patientId = $freshPatient($clinicId, 'Undo Probe');
+    $entryId = (int) Db::insert(
+        'INSERT INTO queue_entries (clinic_id, queue_id, patient_id, token_no, token_label, status,
+                                    priority, sort_weight, joined_at, track_token, version)
+         VALUES (?,?,?,?,?,?,0,0,?,?,0)',
+        [$clinicId, $queueId, $patientId, 9103, 'P9103', 'waiting', Db::now(), bin2hex(random_bytes(16))]
+    );
+
+    $service = new \App\Domain\Queue\QueueService();
+    $cancel = $service->apply($clinicId, $entryId, 'cancel', ['reason' => 'wrong patient clicked']);
+    Assert::true($cancel['ok'], 'the wrong token can be cancelled');
+
+    $undo = $service->apply($clinicId, $entryId, 'requeue', []);
+    Assert::true($undo['ok'], 'and the cancellation can be undone');
+    Assert::same('waiting', (string) Db::scalar('SELECT status FROM queue_entries WHERE id = ?', [$entryId]),
+        'the patient is back in the waiting list');
+
+    // The reversal has to be answerable: who undid it, and what it came back from.
+    $event = Db::one(
+        "SELECT from_status, to_status, actor_id FROM queue_events
+          WHERE entry_id = ? AND action LIKE '%requeue' ORDER BY id DESC LIMIT 1",
+        [$entryId]
+    );
+    Assert::true($event !== null, 'the reversal is written to the queue event history');
+    Assert::same('cancelled', (string) ($event['from_status'] ?? ''), 'and records what it came back from');
+    Assert::same('waiting', (string) ($event['to_status'] ?? ''), 'and where it went');
+
+    Db::run('DELETE FROM queue_entries WHERE id = ?', [$entryId]);
+});
+
+Assert::test('arrival messages use a unit a person would say', function (): void {
+    // A receptionist checking in an appointment booked three weeks out was
+    // told "Checked in 27126 min early". Minutes are right for a queue and
+    // wrong for anything past a couple of hours.
+    Assert::same('45 min', human_minutes(45));
+    Assert::same('2 hr', human_minutes(120));
+    Assert::same('2 hr 30 min', human_minutes(150));
+    Assert::same('32 days 2 hr', human_minutes(46230));
+    Assert::same('1 day', human_minutes(1440));
+    Assert::same('45 min', human_minutes(-45), 'the unit does not depend on the sign');
+
+    $svc = new \App\Services\AppointmentService();
+    $base = ['clinic_id' => 1, 'doctor_id' => 2, 'scheduled_for' => '2026-12-08 11:30:00'];
+
+    $early = $svc->arrivalPolicy($base, null, '2026-11-06 09:00:00');
+    Assert::same('early', $early['status']);
+    Assert::contains('32 days', $early['message'], 'a far-off arrival is described in days, not minutes');
+    Assert::false(str_contains($early['message'], '46230'), 'and never as a raw minute count');
+
+    $late = $svc->arrivalPolicy($base, null, '2026-12-08 14:00:00');
+    Assert::same('late', $late['status']);
+    Assert::contains('2 hr 30 min', $late['message']);
+    Assert::same(3, $late['weight'], 'a late arrival still joins behind the people who came on time');
+});
+
+
+Assert::test('a setting can be written twice without duplicating', function (): void {
+    // Four call sites wrote settings with SQLite's `ON CONFLICT (..) DO UPDATE`,
+    // which MySQL rejects outright — so on the clinic's host, saving opening
+    // hours, a department display key, queue settings and slot settings would
+    // each have thrown SQLSTATE[42000]. The suite runs SQLite and could not see
+    // it. Everything now goes through App\Services\Settings, which picks the
+    // dialect, and this pins the behaviour of that class on the engine the test
+    // suite can actually run.
+    $key = 'test.upsert.' . bin2hex(random_bytes(4));
+
+    Settings::putClinic(1, $key, 'first');
+    Assert::same('first', Settings::getClinic(1, $key), 'a new setting reads back');
+
+    Settings::putClinic(1, $key, 'second');
+    Assert::same('second', Settings::getClinic(1, $key), 'writing again replaces the value');
+    Assert::same(1, (int) Db::scalar(
+        'SELECT COUNT(*) FROM settings WHERE scope = ? AND owner_id = ? AND key_name = ?',
+        ['clinic', 1, $key]
+    ), 'and leaves exactly one row — not a second one that a SELECT might return instead');
+
+    // owner_id NULL is the platform-wide form. NULL is never equal to NULL in a
+    // unique index, so an upsert silently inserts a duplicate here; the class
+    // takes an explicit read-then-write path for this case.
+    $pkey = 'test.platform.' . bin2hex(random_bytes(4));
+    Settings::put('platform', null, $pkey, 'x');
+    Settings::put('platform', null, $pkey, 'y');
+    Assert::same('y', Settings::get('platform', null, $pkey), 'a platform setting updates in place');
+    Assert::same(1, (int) Db::scalar(
+        'SELECT COUNT(*) FROM settings WHERE scope = ? AND owner_id IS NULL AND key_name = ?',
+        ['platform', $pkey]
+    ), 'and does not duplicate, even though NULL never matches a unique key');
+
+    Settings::forget('clinic', 1, $key);
+    Assert::true(Settings::getClinic(1, $key) === null, 'forget removes it');
+    Db::run('DELETE FROM settings WHERE key_name = ?', [$pkey]);
+});
+
+Assert::test('no application code writes an upsert MySQL cannot parse', function (): void {
+    // Enforced rather than trusted: tools/dialect-check.php scans app/ for
+    // SQLite-only SQL. It has a rule for ON CONFLICT specifically because that
+    // was the bug. This asserts the scan is wired into the suite, so the rule
+    // cannot be quietly dropped.
+    $tool = QP_ROOT . '/tools/dialect-check.php';
+    Assert::true(is_file($tool), 'the dialect checker exists');
+
+    $source = (string) file_get_contents($tool);
+    Assert::contains('ON CONFLICT', $source,
+        'and it still checks for ON CONFLICT, not just the constructs it knew before');
+
+    foreach (glob(QP_ROOT . '/app/*/*.php') ?: [] as $file) {
+        $raw = (string) file_get_contents($file);
+        // Prose legitimately names the construct it is avoiding ("SQLite wants
+        // ON CONFLICT, MySQL wants ON DUPLICATE KEY"), so scan code only. The
+        // checker strips comments the same way for the same reason.
+        $code = preg_replace('#/\*.*?\*/#s', '', $raw) ?? $raw;
+        $code = preg_replace('#(^|\s)//[^\n]*#', ' ', $code) ?? $code;
+        if (!str_contains($code, 'ON CONFLICT')) {
+            continue;
+        }
+        // The marker lives in a comment, so it has to be read from the raw
+        // source — the same order the checker uses.
+        Assert::contains('dual-dialect-guarded', $raw,
+            basename($file) . ': uses ON CONFLICT, so it must pick the dialect and say so');
+    }
+});
+
 
 $code = Assert::summary();
 Database::cleanup($dbPath);

@@ -89,6 +89,96 @@ final class DoctorService
     }
 
     /* ------------------------------------------------------------------ */
+    /* Queue prefix                                                        */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * The token prefix this doctor's queue issues: A, B, C … then AA, AB …
+     *
+     * Prefixes must be unique inside a clinic — two queues both issuing "D004"
+     * makes a display board and a printed slip mutually unintelligible — and
+     * must be allocated rather than derived. Deriving from the name is what
+     * broke: every doctor is entered as "Dr. <name>", so every queue in a
+     * clinic resolved to "D".
+     *
+     * We prefer the doctor's own stored prefix, then the most recent prefix
+     * that doctor's queues have used, and only then allocate a fresh letter.
+     * The fallback keeps an existing clinic's labels stable the first time
+     * this runs instead of renumbering queues under patients who are already
+     * holding tickets.
+     */
+    public function prefixFor(int $clinicId, int $doctorId): string
+    {
+        $stored = Db::scalar(
+            'SELECT queue_prefix FROM doctors WHERE id = ? AND clinic_id = ?',
+            [$doctorId, $clinicId]
+        );
+        if (is_string($stored) && $stored !== '') {
+            return $stored;
+        }
+
+        $used = Db::scalar(
+            'SELECT token_prefix FROM queues
+              WHERE clinic_id = ? AND doctor_id = ? AND token_prefix IS NOT NULL AND token_prefix <> \'\'
+              ORDER BY id DESC LIMIT 1',
+            [$clinicId, $doctorId]
+        );
+        if (is_string($used) && $used !== '' && !$this->prefixTaken($clinicId, $used, $doctorId)) {
+            return $used;
+        }
+
+        $fresh = $this->nextFreePrefix($clinicId);
+        Db::run('UPDATE doctors SET queue_prefix = ? WHERE id = ? AND clinic_id = ?', [$fresh, $doctorId, $clinicId]);
+
+        return $fresh;
+    }
+
+    /**
+     * Lowest unused prefix in the sequence A…Z, AA…AZ, BA…ZZ.
+     *
+     * Single letters first: they read cleanly on a display board and on a
+     * thermal slip, and no realistic clinic has more than 26 doctors.
+     */
+    public function nextFreePrefix(int $clinicId): string
+    {
+        $taken = [];
+        foreach (Db::all('SELECT queue_prefix FROM doctors WHERE clinic_id = ? AND queue_prefix IS NOT NULL', [$clinicId]) as $row) {
+            $taken[strtoupper((string) $row['queue_prefix'])] = true;
+        }
+        foreach (Db::all('SELECT DISTINCT token_prefix FROM queues WHERE clinic_id = ? AND token_prefix IS NOT NULL', [$clinicId]) as $row) {
+            $taken[strtoupper((string) $row['token_prefix'])] = true;
+        }
+
+        foreach (range('A', 'Z') as $letter) {
+            if (!isset($taken[$letter])) {
+                return $letter;
+            }
+        }
+
+        foreach (range('A', 'Z') as $first) {
+            foreach (range('A', 'Z') as $second) {
+                $candidate = $first . $second;
+                if (!isset($taken[$candidate])) {
+                    return $candidate;
+                }
+            }
+        }
+
+        // 700+ doctors in one clinic. Any value is now arbitrary; stay unique.
+        return 'Q' . $clinicId . substr((string) time(), -4);
+    }
+
+    private function prefixTaken(int $clinicId, string $prefix, int $exceptDoctorId): bool
+    {
+        $owner = Db::scalar(
+            'SELECT id FROM doctors WHERE clinic_id = ? AND queue_prefix = ? AND id <> ? LIMIT 1',
+            [$clinicId, strtoupper($prefix), $exceptDoctorId]
+        );
+
+        return $owner !== null && $owner !== false;
+    }
+
+    /* ------------------------------------------------------------------ */
     /* Leave                                                               */
     /* ------------------------------------------------------------------ */
 

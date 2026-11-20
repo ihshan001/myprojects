@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+// SQLite PRAGMAs here validate a SQLite scratch copy of a SQLite database;
+// they are unreachable when the live database is MySQL.
+// @dialect-check: dual-dialect-guarded
+
+
 /**
  * Backup tool — the executable half of docs/BACKUPS.md.
  *
@@ -31,17 +36,17 @@ use App\Core\Env;
 
 $root = dirname(__DIR__);
 $backupDir = $root . '/storage/backups';
-$argvList = $GLOBALS['argv'] ?? [];
-$verify = in_array('--verify', $argvList, true);
-$keep = 14;
-foreach ($argvList as $i => $arg) {
-    if ($arg === '--keep' && isset($argvList[$i + 1])) {
-        $keep = max(1, (int) $argvList[$i + 1]);
-    }
-}
+// App\Support\Argv, not $GLOBALS['argv']. The php-wasm harness does not
+// populate $argv, so `--verify` and `--keep` were silently ignored: the
+// restore drill always ran as a fresh backup instead of verifying the last
+// one, which is the one thing this tool exists to do. A backup tool that
+// quietly does something else is worse than one that errors.
+$verify = App\Support\Argv::has('--verify');
+$keepArg = App\Support\Argv::value('--keep');
+$keep = $keepArg !== null ? max(1, (int) $keepArg) : 14;
 
 if (!is_dir($backupDir) && !@mkdir($backupDir, 0770, true) && !is_dir($backupDir)) {
-    fwrite(defined('STDERR') ? STDERR : fopen('php://stderr', 'w'), "Cannot create {$backupDir}\n");
+    err("Cannot create {$backupDir}\n");
     exit(1);
 }
 
@@ -66,7 +71,7 @@ if ($verify) {
 } elseif ($driver === 'sqlite') {
     $source = (string) Env::get('db.sqlite');
     if (!is_file($source)) {
-        fwrite(STDERR, "SQLite database not found at {$source}\n");
+        err("SQLite database not found at {$source}\n");
         exit(1);
     }
     $file = $backupDir . '/queuepilot-' . $stamp . '.sqlite';
@@ -79,7 +84,7 @@ if ($verify) {
         // Older SQLite builds lack VACUUM INTO; fall back to the online backup
         // API, which has been available since 3.7.
         if (!copy($source, $file)) {
-            fwrite(STDERR, 'Backup failed: ' . $e->getMessage() . "\n");
+            err('Backup failed: ' . $e->getMessage() . "\n");
             exit(1);
         }
     }
@@ -92,7 +97,7 @@ if ($verify) {
     $dumps = glob($backupDir . '/*.sql.gz') ?: [];
     rsort($dumps);
     if ($dumps === []) {
-        fwrite(STDERR, "No MySQL dump found. The nightly job in docs/BACKUPS.md has not run.\n");
+        err("No MySQL dump found. The nightly job in docs/BACKUPS.md has not run.\n");
         exit(1);
     }
     $file = $dumps[0];

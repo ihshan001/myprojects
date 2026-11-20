@@ -59,8 +59,20 @@ final class NotificationService
             return; // already enqueued for this event
         }
 
-        $link = rtrim((string) Env::get('app.url', ''), '/') . '/t/' . (string) Db::scalar(
-            'SELECT track_token FROM queue_entries WHERE id = ?', [$entryId]
+        // The patient's own clinic address, not the platform root. A tracking
+        // link is the one URL a patient is most likely to open hours later
+        // from a message that has travelled; it has to land on the clinic that
+        // issued it.
+        // Named $trackRow, not $entry: $entry already holds the token, queue
+        // and clinic data this method renders from. Shadowing it here emptied
+        // every placeholder in every SMS — a bug that would have shipped as
+        // "the messages are blank" and been traced to the template engine.
+        $trackRow = Db::one(
+            'SELECT track_token, clinic_id FROM queue_entries WHERE id = ?', [$entryId]
+        );
+        $link = clinic_url(
+            (int) ($trackRow['clinic_id'] ?? $clinicId),
+            '/t/' . (string) ($trackRow['track_token'] ?? '')
         );
 
         // The clinic's own wording if it has any, otherwise the shipped copy.
@@ -205,8 +217,10 @@ final class NotificationService
             // the confirmation page. A one-off 40-character signature makes the
             // message two parts; that cost buys a reschedule that never needs a
             // phone call, which is the thing patients actually complain about.
-            $link = rtrim((string) Env::get('app.url', 'http://localhost:8080'), '/')
-                . \App\Services\AppointmentService::manageUrl((int) $a['id'], (string) $a['scheduled_for']);
+            $link = clinic_url(
+                (int) $a['clinic_id'],
+                \App\Services\AppointmentService::manageUrl((int) $a['id'], (string) $a['scheduled_for'])
+            );
             $body = strtr((new TemplateService())->body((int) $a['clinic_id'], 'appointment_reminder'), [
                 '{clinic}' => (string) $a['clinic_name'],
                 '{when}'   => $when,
@@ -264,6 +278,94 @@ final class NotificationService
      *
      * @return int how many messages were newly queued
      */
+    /**
+     * Tell everyone still waiting what is happening, deliberately.
+     *
+     * A pause is not a delay with a number: the doctor has stepped out, or the
+     * session was abandoned, and the line has no idea how long. Silence is
+     * what makes a patient walk to the desk and then leave; telling them "we
+     * will call you" is worth more than a precise guess we cannot make.
+     *
+     * This is only ever called from an explicit button. An automatic message
+     * on every two-minute pause would be worse than silence — it trains
+     * patients to ignore the messages that matter.
+     *
+     * Deduped on the announcement text, so pressing the button twice does not
+     * text anybody twice, while a *different* announcement does reach them.
+     *
+     * @return int number of messages queued
+     */
+    public function notifyWaiting(int $clinicId, int $queueId, string $message): int
+    {
+        $message = trim($message);
+        if ($message === '') {
+            return 0;
+        }
+
+        $queue = Db::one(
+            'SELECT q.id, q.name, c.name AS clinic_name
+               FROM queues q JOIN clinics c ON c.id = q.clinic_id
+              WHERE q.id = ? AND q.clinic_id = ?',
+            [$queueId, $clinicId]
+        );
+        if (!$queue) {
+            return 0;
+        }
+
+        $waiting = Db::all(
+            "SELECT e.id, e.token_label, p.phone
+               FROM queue_entries e JOIN patients p ON p.id = e.patient_id
+              WHERE e.clinic_id = ? AND e.queue_id = ? AND e.status IN ('waiting','on_hold')
+                AND p.phone IS NOT NULL AND p.phone <> ''
+              ORDER BY e.sort_weight, e.id",
+            [$clinicId, $queueId]
+        );
+
+        $queued = 0;
+        foreach ($waiting as $entry) {
+            // Keyed on the announcement itself: a repeat is noise, a change of
+            // message is news.
+            $dedupe = 'notice:' . $queueId . ':' . sha1($message) . ':' . (int) $entry['id'];
+            if (Db::scalar('SELECT id FROM notifications WHERE dedupe_key = ?', [$dedupe]) !== null) {
+                continue;
+            }
+
+            $body = sprintf(
+                '%s — token %s. %s',
+                (string) $queue['clinic_name'],
+                (string) $entry['token_label'],
+                $message
+            );
+
+            try {
+                Db::insert(
+                    'INSERT INTO notifications (clinic_id, entry_id, channel, template, to_number, payload_json,
+                        dedupe_key, status, attempts, scheduled_at, created_at)
+                     VALUES (?,?,?,?,?,?,?,?,0,?,?)',
+                    [
+                        $clinicId, (int) $entry['id'], 'sms', 'entry_notice',
+                        self::mask((string) $entry['phone']),
+                        json_encode(['body' => $body, 'to' => (string) $entry['phone'], 'notice' => $message], JSON_UNESCAPED_UNICODE),
+                        $dedupe, 'queued', Db::now(), Db::now(),
+                    ]
+                );
+                $queued++;
+            } catch (\PDOException $e) {
+                if (!str_contains($e->getMessage(), 'UNIQUE') && !str_contains($e->getMessage(), 'Duplicate')) {
+                    throw $e;
+                }
+            }
+        }
+
+        if ($queued > 0) {
+            Log::info('notification.notice_queued', [
+                'clinic' => $clinicId, 'queue' => $queueId, 'count' => $queued,
+            ]);
+        }
+
+        return $queued;
+    }
+
     public function notifyDelay(int $clinicId, int $queueId, int $minutes, string $note = ''): int
     {
         if ($minutes <= 0) {
@@ -331,6 +433,44 @@ final class NotificationService
         return $queued;
     }
 
+    /**
+     * Append one row per delivery attempt.
+     *
+     * The outbox row is updated in place on every retry, so without this the
+     * earlier attempts are simply gone. This table is never updated and never
+     * deleted mid-life: it is the record the clinic reads when a patient says
+     * they never got the message.
+     *
+     * Written inside the same call as the outbox update rather than in a
+     * transaction, on purpose — a failure to record history must not fail the
+     * send, and a failed send must not lose its history.
+     */
+    private function recordAttempt(array $job, int $attempt, string $outcome, ?string $error): void
+    {
+        try {
+            Db::insert(
+                'INSERT INTO notification_logs (clinic_id, notification_id, attempt, channel, outcome, error, created_at)
+                 VALUES (?,?,?,?,?,?,?)',
+                [
+                    (int) $job['clinic_id'],
+                    (int) $job['id'],
+                    $attempt,
+                    (string) $job['channel'],
+                    $outcome,
+                    $error,
+                    Db::now(),
+                ]
+            );
+        } catch (\Throwable $e) {
+            // Losing history is bad; stopping the queue because we could not
+            // write history would be worse. The notification failure rules
+            // exist precisely so a notification problem never blocks a clinic.
+            Log::error('notification.log_failed', [
+                'id' => $job['id'], 'outcome' => $outcome, 'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
     public function processDue(int $limit = 50): array
     {
         $due = Db::all(
@@ -358,6 +498,7 @@ final class NotificationService
                          $this->withoutNumber($job['payload_json']), $job['id']]
                     );
                     $logged++;
+                    $this->recordAttempt($job, $attempts, 'gated', 'feature not enabled for this clinic — contact the platform operator');
                     Log::info('notification.feature_gated', [
                         'id' => $job['id'], 'channel' => $job['channel'], 'clinic_id' => $job['clinic_id'],
                     ]);
@@ -386,12 +527,15 @@ final class NotificationService
                          $this->withoutNumber($job['payload_json']), $job['id']]
                     );
                     $logged++;
+                    $this->recordAttempt($job, $attempts, 'logged', 'recorded by the log transport — not sent to the patient');
                     continue;
                 }
                 Db::run(
                     "UPDATE notifications SET status='sent', attempts=?, sent_at=?, last_error=NULL, payload_json=? WHERE id=?",
                     [$attempts, Db::now(), $this->withoutNumber($job['payload_json']), $job['id']]
                 );
+                $this->recordAttempt($job, $attempts, 'sent', null);
+
                 // Meter every SMS that actually left the building so the
                 // operator can bill for it (0.64 LKR per message via text.lk).
                 if ($job['channel'] === 'sms') {
@@ -407,6 +551,7 @@ final class NotificationService
                      $attempts >= 3 ? $this->withoutNumber($job['payload_json']) : $job['payload_json'], $job['id']]
                 );
                 $failed++;
+                $this->recordAttempt($job, $attempts, $status === 'abandoned' ? 'abandoned' : 'failed', mb_substr($e->getMessage(), 0, 290));
                 Log::warn('notification.send.failed', ['id' => $job['id'], 'error' => $e->getMessage()]);
             }
         }

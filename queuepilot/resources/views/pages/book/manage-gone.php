@@ -16,7 +16,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
-  <title><?= e($title) ?> · QueuePilot</title>
+  <title><?= e($title) ?> · <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?></title>
   <link rel="stylesheet" href="<?= e(asset('build/app.css')) ?>">
 </head>
 <body class="flex min-h-full items-center justify-center bg-slate-100 px-5">

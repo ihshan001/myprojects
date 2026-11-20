@@ -6,6 +6,30 @@
   <span class="badge-violet">Super admin</span>
 </div>
 
+<?php if (($notices ?? []) !== []): ?>
+  <div class="mt-5 rounded-xl border border-brand-300 bg-brand-50 px-4 py-3">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <p class="text-xs font-bold text-brand-900">
+        <?= count($notices) ?> thing<?= count($notices) === 1 ? '' : 's' ?> waiting on you
+      </p>
+      <span class="text-[10px] font-semibold uppercase tracking-wider text-brand-700">Needs a decision</span>
+    </div>
+    <ul class="mt-2 space-y-1.5">
+      <?php foreach ($notices as $n): ?>
+        <li class="text-[11px] leading-relaxed text-brand-900">
+          <a href="<?= e((string) ($n['link'] ?? '/admin')) ?>" class="font-bold underline decoration-brand-400 underline-offset-2">
+            <?= e((string) $n['title']) ?>
+          </a>
+          <?php if ((string) ($n['body'] ?? '') !== ''): ?>
+            <span class="text-brand-800"> — <?= e((string) $n['body']) ?></span>
+          <?php endif; ?>
+          <span class="text-[10px] opacity-70">(<?= e(ago((string) $n['created_at'])) ?>)</span>
+        </li>
+      <?php endforeach; ?>
+    </ul>
+  </div>
+<?php endif; ?>
+
 <?php if (($health['status'] ?? 'ok') !== 'ok' || ($alerts ?? []) !== []): ?>
   <div class="mt-5 rounded-xl border <?= ($health['status'] ?? 'ok') === 'critical' ? 'border-rose-300 bg-rose-50' : 'border-amber-300 bg-amber-50' ?> px-4 py-3">
     <div class="flex flex-wrap items-center justify-between gap-2">

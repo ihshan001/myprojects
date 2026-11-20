@@ -125,7 +125,7 @@ final class ClinicController
             "INSERT INTO queues (clinic_id, doctor_id, name, kind, status, session_date, token_prefix, last_token_no, token_padding, created_at)
              VALUES (?,?,?,'consultation','open',?,?,0,3,?)",
             [$clinicId, $id, 'OPD — ' . $name, Db::today(),
-             strtoupper(substr(Auth::clinic()['token_prefix'] ?: $name, 0, 1)) ?: 'A', Db::now()]
+             (new DoctorService())->prefixFor($clinicId, $id), Db::now()]
         );
 
         (new AuditService())->log($clinicId, 'doctor.created', 'doctor', $id, ['name' => $name]);
@@ -161,6 +161,7 @@ final class ClinicController
 
         view('settings/index', [
             'title' => 'Settings',
+            'activeTab' => Request::string('tab', 'clinic'),
             'clinicRecord' => $clinic,
             'staff' => Db::all(
                 'SELECT id, name, email, role, is_active, last_login_at FROM users WHERE clinic_id = ? ORDER BY role, name',
@@ -215,6 +216,10 @@ final class ClinicController
             // unchecked box sends nothing, which is the safe default.
             'notify_approach' => Request::input('notify_approach') ? 1 : 0,
             'approach_threshold' => max(1, min(10, Request::int('approach_threshold', 2))),
+            'legal_name' => mb_substr(trim(Request::string('legal_name')), 0, 160),
+            'tax_id' => mb_substr(trim(Request::string('tax_id')), 0, 64),
+            'billing_email' => mb_substr(trim(Request::string('billing_email')), 0, 160),
+            'po_number' => mb_substr(trim(Request::string('po_number')), 0, 64),
         ]);
 
         (new AuditService())->log($clinicId, 'clinic.settings_updated', 'clinic', $clinicId, ['name' => $name]);
@@ -266,11 +271,7 @@ final class ClinicController
         (new \App\Services\SlotService())->saveHours($clinicId, $week);
 
         $horizon = max(1, min(180, Request::int('horizon_days', 30)));
-        Db::run(
-            "INSERT INTO settings (scope, owner_id, key_name, value) VALUES ('clinic', ?, 'booking.horizon_days', ?)
-             ON CONFLICT (scope, owner_id, key_name) DO UPDATE SET value = excluded.value",
-            [$clinicId, (string) $horizon]
-        );
+        \App\Services\Settings::putClinic($clinicId, 'booking.horizon_days', (string) $horizon);
 
         (new AuditService())->log($clinicId, 'clinic.hours_updated', 'clinic', $clinicId, ['week' => $week]);
         flash('success', 'Opening hours saved. The booking page now uses them.');
@@ -366,6 +367,62 @@ final class ClinicController
             ? 'Back to the default wording.'
             : 'That message was already using the default.');
         redirect('/settings/templates');
+    }
+
+    /**
+     * The integrations a clinic can connect.
+     *
+     * "Configured on this server" and "switched on by this clinic" are
+     * different facts, and the screen shows both: they are different
+     * problems with different fixes, and an owner who cannot tell them
+     * apart will file the wrong support ticket.
+     */
+    public function integrations(): void
+    {
+        $clinicId = $this->clinicId();
+        view('settings/integrations', [
+            'title'        => 'Integrations',
+            'integrations' => (new \App\Services\IntegrationService())->listFor($clinicId),
+        ]);
+    }
+
+    /** Switch an integration on for this clinic. */
+    public function connectIntegration(): void
+    {
+        $clinicId = $this->clinicId();
+        if (!Auth::can('clinic.manage')) {
+            abort(403, 'Only a clinic owner can connect an integration.');
+            return;
+        }
+
+        $provider = Request::string('provider');
+        $service  = new \App\Services\IntegrationService();
+        if (!$service->connect($clinicId, $provider, is_array(Request::input('config')) ? Request::input('config') : [])) {
+            flash('error', 'That integration is not available.');
+            redirect('/settings/integrations');
+            return;
+        }
+
+        (new AuditService())->log($clinicId, 'integration.connected', 'integration', null, ['provider' => $provider]);
+        flash('success', 'Integration connected.');
+        redirect('/settings/integrations');
+    }
+
+    /** Switch an integration off, keeping its settings for later. */
+    public function disconnectIntegration(): void
+    {
+        $clinicId = $this->clinicId();
+        if (!Auth::can('clinic.manage')) {
+            abort(403, 'Only a clinic owner can disconnect an integration.');
+            return;
+        }
+
+        $provider = Request::string('provider');
+        (new \App\Services\IntegrationService())->disconnect($clinicId, $provider);
+
+        (new AuditService())->log($clinicId, 'integration.disconnected', 'integration', null, ['provider' => $provider]);
+        flash('success', 'Integration switched off. Its settings are kept, so reconnecting is one click.');
+        redirect('/settings/integrations');
     }
 
     public function branches(): void
@@ -571,7 +628,7 @@ final class ClinicController
         }
 
         if ($result['delivered']) {
-            flash('success', 'Invitation emailed to ' . $result['email'] . '. It expires ' . ago($result['expires_at']) . ' from now.');
+            flash('success', 'Invitation emailed to ' . $result['email'] . '. The link expires ' . in_time($result['expires_at']) . '.');
         } else {
             // No transport configured: say so, and hand over the link. This is
             // the honest version of "we sent an email".

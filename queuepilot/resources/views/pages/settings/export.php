@@ -125,7 +125,7 @@ if ($lastExport !== null) {
     once and deleted.
   </p>
   <p class="mt-2 text-xs leading-relaxed text-slate-600">
-    <b>Leaving QueuePilot?</b> Take this export before the account closes. Closing a clinic starts a countdown to
+    <b>Leaving <?= e($appName ?? \App\Core\Env::get('app.name', 'QueuePilot')) ?>?</b> Take this export before the account closes. Closing a clinic starts a countdown to
     permanent deletion, and after that day the records are gone — the archive is the copy you keep.
   </p>
 </div>

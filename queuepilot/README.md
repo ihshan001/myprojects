@@ -91,7 +91,10 @@ npm run worker       # drain the notification outbox once
 
 The dev server (`tools/serve.mjs`) mounts the host filesystem into the WASM
 runtime and translates HTTP requests into PHP superglobals, so the same code
-runs under nginx/php-fpm unchanged.
+runs under nginx/php-fpm unchanged. PHP's implicit `text/html` never appears
+in `headers_list()`, so the server defaults a missing `Content-Type` before
+replying — with `X-Content-Type-Options: nosniff` set by `Response`, a browser
+would otherwise refuse to guess and print every page as escaped source.
 
 ## Demo accounts
 
@@ -256,6 +259,30 @@ so it never touches demo data.
 This is enforced by `QueueService` and the router, not by hiding buttons: a
 receptionist with `curl` and a receptionist with a mouse hit the same wall.
 
+## Installing it
+
+**`docs/INSTALL.md`** is the step-by-step configuration guide, in two halves:
+
+* **Part A — cPanel.** The document root must be `public/`, so the app lives
+  beside `public_html` and the site root holds only a front door. Covers the
+  database with its account prefix, `.env`, `APP_KEY`, migrations (by CLI, or by
+  phpMyAdmin when there is no SSH), creating the first platform admin, cron, and
+  the places cPanel silently breaks this app.
+* **Part B — XAMPP on your own PC.** MySQL, phpMyAdmin, an import order that
+  actually produces the 52 tables, and `MAIL_TRANSPORT=log` so you can read every
+  email the app sends without an SMTP account.
+
+Both end the same way: `/login` answers, and you have an account that can approve
+a clinic. The guide's migration list is checked against the files on disk by a
+test — a configuration document nobody compiles is where a missing file hides.
+
+**`docs/XAMPP-QUICKSTART.md`** is the same local install condensed into the order
+it is actually performed: drop the folder in `htdocs`, import `install.sql` in
+phpMyAdmin, write `.env`, create an admin, verify four URLs. It exists because the
+two failures that account for most broken installs — `APP_URL` without the
+subfolder path, and `AllowOverride None` letting `/.env` download — each deserve a
+heading of their own rather than a footnote three sections down.
+
 ## When things go wrong
 
 Two operational documents, written to be followed under pressure rather than
@@ -278,6 +305,13 @@ exactly what happened while a clinic was on paper.
 means, the cron lines, what a stalled worker looks like, how to close an
 abandoned day, and the two settings (`APP_KEY`, `SESSION_PATH`) that break
 sign-in if changed carelessly.
+
+**`docs/RUNBOOK.md`** covers the duties that have a person on the other end:
+setting up an uptime monitor against `/api/health`, wiring Google's free SMTP
+tier and its real limits, and the procedure for a clinic that has stopped
+using the system. That last one is a policy, not a timer — nothing is ever
+deleted on a schedule. A human emails, then phones, then decides, and the
+decision is recorded with a note before `tools/purge.php` will act on it.
 
 ## Honest status
 

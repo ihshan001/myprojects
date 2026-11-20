@@ -83,6 +83,45 @@
       <?php $title = 'No patient messages'; $message = 'Nothing has been queued yet. A message is created only when a clinic enables SMS and an entry reaches the trigger.'; $icon = 'mail'; ?>
       <div class="p-4"><?php include QP_ROOT . '/resources/views/components/empty.php'; ?></div>
     <?php else: ?>
+      <?php if (($notice ?? null) !== null): ?>
+        <div class="border-b border-slate-100 bg-slate-50/70 px-4 py-3">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p class="text-sm font-semibold text-slate-800">Delivery history</p>
+              <p class="mt-0.5 text-xs text-slate-500">
+                <?= e($notice['template']) ?>
+                <?php if (!empty($notice['token_label'])): ?> · token <?= e($notice['token_label']) ?><?php endif; ?>
+                <?php if (!empty($notice['full_name'])): ?> · <?= e($notice['full_name']) ?><?php endif; ?>
+                · to <?= e($notice['to_number'] ?? '—') ?>
+              </p>
+            </div>
+            <a class="act-mute" href="/notifications?tab=patients">Close</a>
+          </div>
+
+          <?php if ($attempts === []): ?>
+            <p class="mt-3 text-xs text-slate-500">
+              No attempt has been recorded yet — this message is still waiting for the next worker run.
+            </p>
+          <?php else: ?>
+            <ol class="mt-3 space-y-1.5">
+              <?php foreach ($attempts as $a): ?>
+                <li class="flex flex-wrap items-baseline gap-2 text-xs">
+                  <span class="font-semibold text-slate-700">#<?= (int) $a['attempt'] ?></span>
+                  <span class="<?= match ((string) $a['outcome']) {
+                      'sent' => 'badge-emerald', 'logged' => 'badge-amber',
+                      'gated' => 'badge-slate', 'abandoned' => 'badge-rose',
+                      default => 'badge-rose',
+                  } ?>"><?= e($a['outcome']) ?></span>
+                  <span class="text-slate-400"><?= e(fmt_time($a['created_at'], 'j M g:i:s A')) ?></span>
+                  <?php if (!empty($a['error'])): ?>
+                    <span class="text-slate-500">— <?= e($a['error']) ?></span>
+                  <?php endif; ?>
+                </li>
+              <?php endforeach; ?>
+            </ol>
+          <?php endif; ?>
+        </div>
+      <?php endif; ?>
       <div class="overflow-x-auto">
         <table class="table">
           <thead>
@@ -94,7 +133,10 @@
           <tbody>
             <?php foreach ($patientNotices as $n): ?>
               <tr>
-                <td class="whitespace-nowrap text-xs text-slate-500"><?= e(ago($n['created_at'])) ?></td>
+                <td class="whitespace-nowrap text-xs text-slate-500">
+                  <a class="underline decoration-slate-300 underline-offset-2 hover:text-slate-700"
+                     href="/notifications?tab=patients&notice=<?= (int) $n['id'] ?>"><?= e(ago($n['created_at'])) ?></a>
+                </td>
                 <td class="font-mono text-xs text-slate-700"><?= e($n['to_number'] ?? '—') ?></td>
                 <td class="hidden sm:table-cell text-xs text-slate-600"><?= e($n['template']) ?></td>
                 <td class="text-xs text-slate-600"><?= e($n['token_label'] ?? '—') ?></td>

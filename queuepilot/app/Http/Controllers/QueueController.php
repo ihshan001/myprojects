@@ -164,7 +164,7 @@ final class QueueController
             'result' => $result,
             'patient' => $patient,
             'queue' => $queue,
-            'fullLink' => rtrim((string) \App\Core\Env::get('app.url', ''), '/') . $result['track_url'],
+            'fullLink' => clinic_url((int) ($result['clinic_id'] ?? Auth::clinicId() ?? 0), (string) $result['track_url']),
             'position' => (new QueueService())->positionFor($entry, $clinicId),
         ]);
     }
@@ -237,7 +237,7 @@ final class QueueController
             'doctor' => (string) ($entry['doctor_name'] ?? ''),
             'room' => (string) ($entry['room_name'] ?? ''),
             'issued_at' => date('j M Y, g:i A', strtotime((string) $entry['joined_at'])),
-            'url' => rtrim((string) \App\Core\Env::get('app.url', ''), '/') . '/t/' . (string) $entry['track_token'],
+            'url' => clinic_url((int) $entry['clinic_id'], '/t/' . (string) $entry['track_token']),
             'qr_url' => '/queue/' . (int) $entry['id'] . '/qr.png',
         ];
     }
@@ -442,6 +442,92 @@ final class QueueController
             ));
         }
         back('/app');
+    }
+
+    /**
+     * Tell everyone still waiting, on purpose.
+     *
+     * Deliberately a button and not a side effect of pausing. A pause is
+     * usually two minutes and everybody can see the doctor step out; texting
+     * the whole line every time would spend the clinic's SMS credit and train
+     * patients to ignore messages that matter. The cases that need a message
+     * are the ones a person recognises: the doctor has been called away, the
+     * session is abandoned, we are running very late.
+     *
+     * The message is capped and the staff may not send an empty one, because
+     * an SMS with no content is a charge with no information.
+     */
+    public function notifyWaiting(): void
+    {
+        $clinicId = $this->guard();
+        $queueId = Request::int('queue_id');
+
+        $queue = Db::one('SELECT id, name FROM queues WHERE id = ? AND clinic_id = ?', [$queueId, $clinicId]);
+        if (!$queue) {
+            abort(404, 'Queue not found.');
+            return;
+        }
+
+        $preset = Request::string('preset');
+        $custom = trim(Request::string('message'));
+
+        // Presets exist so the common case is one tap, and so the wording is
+        // the clinic's, not whatever someone types under pressure.
+        $presets = [
+            'called_away' => 'The doctor has been called away. Your token keeps its place — please stay nearby and we will call you.',
+            'delayed'     => 'We are running late today. Your token keeps its place — there is no need to ask at the desk.',
+            'abandoned'   => 'This clinic session has been interrupted. Please speak to the desk about rebooking — you will not lose your place in the line.',
+        ];
+        $message = $presets[$preset] ?? $custom;
+        $message = mb_substr($message, 0, 320);
+
+        if ($message === '') {
+            flash('error', 'Write the message you want patients to receive.');
+            back('/app');
+            return;
+        }
+
+        $queued = 0;
+        try {
+            $queued = (new \App\Services\NotificationService())->notifyWaiting($clinicId, $queueId, $message);
+        } catch (\Throwable $e) {
+            \App\Core\Log::warn('queue.notice_failed', ['queue_id' => $queueId, 'error' => $e->getMessage()]);
+        }
+
+        (new AuditService())->log($clinicId, 'queue.notice_sent', 'queue', $queueId, [
+            'queued' => $queued, 'message' => $message,
+        ]);
+
+        if ($queued === 0) {
+            // Two very different situations, and guessing wrong wastes the
+            // staff's time: nobody has a phone number, or everybody already
+            // got this exact message.
+            $withPhone = (int) Db::scalar(
+                "SELECT COUNT(*) FROM queue_entries e JOIN patients p ON p.id = e.patient_id
+                  WHERE e.clinic_id = ? AND e.queue_id = ? AND e.status IN ('waiting','on_hold')
+                    AND p.phone IS NOT NULL AND p.phone <> ''",
+                [$clinicId, $queueId]
+            );
+            flash('warn', $withPhone === 0
+                ? 'Nobody currently waiting has a phone number on file, so no message could be sent. The board still shows the delay.'
+                : 'Everyone waiting has already received this message.');
+        } else {
+            flash('success', sprintf(
+                '%d patient%s in %s told by message.%s',
+                $queued,
+                $queued === 1 ? '' : 's',
+                $queue['name'],
+                $this->smsSilent() ? ' They will go out once an SMS provider is configured.' : ''
+            ));
+        }
+
+        back('/app');
+    }
+
+    /** True when no SMS route is configured, so the flash can say so. */
+    private function smsSilent(): bool
+    {
+        return (string) \App\Core\Env::get('sms.gateway', 'log') === 'log';
     }
 
     /** Open / pause / close a session for today. */

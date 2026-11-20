@@ -31,7 +31,13 @@
     <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Renews</p>
     <p class="mt-1 text-xl font-bold text-slate-900"><?= e($c['renews_on'] ? date('j M Y', strtotime((string) $c['renews_on'])) : '—') ?></p>
     <p class="text-xs text-slate-500">
-      <?= $c['billing_status'] === 'trial' ? 'Trial ends ' . e((string) $c['trial_ends_on']) : 'Automatic reminder by email' ?>
+      <?php if ($c['billing_status'] === 'trial'): ?>
+        Trial ends <?= e((string) $c['trial_ends_on']) ?> — we will email you before it does
+      <?php elseif ($c['billing_status'] === 'active'): ?>
+        We email an invoice on this date, and again before anything stops
+      <?php else: ?>
+        Not billing yet
+      <?php endif; ?>
     </p>
   </div>
   <div class="card card-pad">
@@ -82,7 +88,10 @@
           <tbody>
             <?php foreach ($invoices as $inv): ?>
               <tr>
-                <td class="font-mono text-[11px]"><?= e((string) $inv['number']) ?></td>
+                <td class="font-mono text-[11px]">
+                  <a class="text-teal-700 underline decoration-dotted hover:decoration-solid"
+                     href="/billing/invoices/<?= (int) $inv['id'] ?>"><?= e((string) $inv['number']) ?></a>
+                </td>
                 <td class="hidden sm:table-cell text-[11px] text-slate-500"><?= e((string) $inv['period_from']) ?> → <?= e((string) $inv['period_to']) ?></td>
                 <td class="numeric text-xs"><?= e(money((float) $inv['amount'])) ?></td>
                 <td>
@@ -122,6 +131,65 @@
             <?php endforeach; ?>
           </tbody>
         </table>
+      <?php endif; ?>
+
+      <?php
+      // Bank transfer is the only way to pay, so this panel is the actual
+      // payment flow — an invoice that lists an amount without saying who to
+      // pay and where is not something a clinic's accountant can act on.
+      $company = (array) \App\Core\Env::get('company', []);
+      $hasBank = ($company['bank_account_no'] ?? '') !== '';
+      $owed = array_filter(
+          $invoices ?? [],
+          static fn (array $i): bool => in_array((string) $i['status'], ['unpaid', 'rejected'], true)
+      );
+      ?>
+      <?php if ($owed !== []): ?>
+        <div class="border-t border-slate-200 px-4 py-4">
+          <h3 class="text-xs font-bold text-slate-900">How to pay</h3>
+          <p class="mt-1 text-[11px] leading-relaxed text-slate-600">
+            Bank transfer only. Pay the exact amount, then come back and record the
+            transfer reference below — we check it by hand, usually within one working day.
+          </p>
+
+          <?php if ($hasBank): ?>
+            <dl class="mt-3 grid gap-x-4 gap-y-1.5 text-[11px] sm:grid-cols-[8rem_1fr]">
+              <dt class="font-semibold text-slate-500">Account name</dt>
+              <dd class="font-mono text-slate-900"><?= e((string) ($company['bank_account_name'] ?: '—')) ?></dd>
+              <dt class="font-semibold text-slate-500">Bank</dt>
+              <dd class="text-slate-900"><?= e((string) $company['bank']) ?></dd>
+              <?php if (($company['bank_branch'] ?? '') !== ''): ?>
+                <dt class="font-semibold text-slate-500">Branch</dt>
+                <dd class="text-slate-900"><?= e((string) $company['bank_branch']) ?></dd>
+              <?php endif; ?>
+              <dt class="font-semibold text-slate-500">Account no.</dt>
+              <dd class="font-mono font-bold text-slate-900"><?= e((string) $company['bank_account_no']) ?></dd>
+              <?php if (($company['bank_swift'] ?? '') !== ''): ?>
+                <dt class="font-semibold text-slate-500">SWIFT</dt>
+                <dd class="font-mono text-slate-900"><?= e((string) $company['bank_swift']) ?></dd>
+              <?php endif; ?>
+            </dl>
+            <p class="mt-3 text-[11px] leading-relaxed text-slate-600">
+              <strong class="text-slate-800">Put the invoice number in the reference.</strong>
+              Without it the transfer cannot be matched to your clinic and will sit unreconciled.
+            </p>
+          <?php else: ?>
+            <div class="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5">
+              <p class="text-[11px] font-semibold text-amber-900">
+                Our bank details are not set up on this installation yet.
+              </p>
+              <p class="mt-1 text-[11px] leading-relaxed text-amber-800">
+                <?php if (($company['email'] ?? '') !== ''): ?>
+                  Email <a class="underline" href="mailto:<?= e((string) $company['email']) ?>"><?= e((string) $company['email']) ?></a>
+                  and we will send them to you.
+                <?php else: ?>
+                  Contact us and we will send them to you. Do not send money to an
+                  account you were given in a message — confirm it with us first.
+                <?php endif; ?>
+              </p>
+            </div>
+          <?php endif; ?>
+        </div>
       <?php endif; ?>
     </div>
 
@@ -168,4 +236,77 @@
       </div>
     <?php endforeach; ?>
   </div>
+</div>
+
+
+<!-- ── Payment history ──────────────────────────────────────────────── -->
+<div class="card overflow-hidden">
+  <div class="border-b border-slate-100 px-4 py-3">
+    <h2 class="text-sm font-bold text-slate-900">Payment history</h2>
+    <p class="mt-0.5 text-xs text-slate-500">
+      Every payment you have submitted. A rejected submission stays listed — if a reference did not match,
+      this is the record that you paid and what happened next.
+    </p>
+  </div>
+  <?php if (($payments ?? []) === []): ?>
+    <p class="px-4 py-8 text-center text-sm text-slate-500">No payments submitted yet.</p>
+  <?php else: ?>
+    <div class="overflow-x-auto">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Submitted</th><th>Invoice</th><th>Amount</th>
+            <th>Reference</th><th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php foreach ($payments as $pay): ?>
+            <tr>
+              <td class="whitespace-nowrap text-xs text-slate-500"><?= e(fmt_time($pay['submitted_at'], 'j M Y, g:i A')) ?></td>
+              <td class="text-xs text-slate-600"><?= e($pay['invoice_number'] ?? '') ?></td>
+              <td class="whitespace-nowrap text-xs font-medium text-slate-800"><?= e(money((float) $pay['amount'], (string) $pay['currency'])) ?></td>
+              <td class="font-mono text-xs text-slate-600"><?= e($pay['reference'] ?? '—') ?></td>
+              <td>
+                <span class="<?= match ((string) $pay['status']) {
+                    'verified' => 'badge-emerald',
+                    'claimed'  => 'badge-amber',
+                    default    => 'badge-rose',
+                } ?>"><?= e($pay['status'] === 'claimed' ? 'with us for checking' : $pay['status']) ?></span>
+                <?php if (!empty($pay['decision_note'])): ?>
+                  <p class="mt-1 text-[11px] text-slate-500"><?= e($pay['decision_note']) ?></p>
+                <?php endif; ?>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+  <?php endif; ?>
+</div>
+
+<!-- ── Plan history ─────────────────────────────────────────────────── -->
+<div class="card overflow-hidden">
+  <div class="border-b border-slate-100 px-4 py-3">
+    <h2 class="text-sm font-bold text-slate-900">Plan history</h2>
+    <p class="mt-0.5 text-xs text-slate-500">Every plan this clinic has been on, most recent first.</p>
+  </div>
+  <?php if (($planHistory ?? []) === []): ?>
+    <p class="px-4 py-8 text-center text-sm text-slate-500">No plan changes recorded yet.</p>
+  <?php else: ?>
+    <ul class="divide-y divide-slate-100">
+      <?php foreach ($planHistory as $sub): ?>
+        <li class="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-3">
+          <span class="text-sm font-medium text-slate-800"><?= e($sub['plan_name'] ?? 'No plan') ?></span>
+          <span class="badge-slate"><?= e($sub['status']) ?></span>
+          <span class="text-xs text-slate-500">
+            from <?= e(fmt_time($sub['started_at'], 'j M Y')) ?>
+            <?php if ($sub['ended_at'] !== null): ?> · until <?= e(fmt_time($sub['ended_at'], 'j M Y')) ?><?php endif; ?>
+          </span>
+          <?php if (!empty($sub['note'])): ?>
+            <span class="text-xs text-slate-400">· <?= e($sub['note']) ?></span>
+          <?php endif; ?>
+        </li>
+      <?php endforeach; ?>
+    </ul>
+  <?php endif; ?>
 </div>

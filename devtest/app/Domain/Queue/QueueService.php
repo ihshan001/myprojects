@@ -201,6 +201,17 @@ final class QueueService
             // nobody typed is still explainable afterwards. A priority passed
             // explicitly by staff always wins — the rule engine fills a gap,
             // it does not overrule a clinician standing at the desk.
+            // An optional reading taken at the desk. Reject nonsense rather
+            // than storing it: a mistyped 390 must not become a triage fact.
+            $tempTenths = \App\Services\PriorityRuleService::tempToTenths($opts['temperature'] ?? null);
+            if ($tempTenths === false) {
+                throw new \RuntimeException(sprintf(
+                    'That temperature is not a readable value. Enter %s to %s °C, or leave it blank.',
+                    number_format(\App\Services\PriorityRuleService::TEMP_MIN_C, 1),
+                    number_format(\App\Services\PriorityRuleService::TEMP_MAX_C, 1)
+                ));
+            }
+
             $ruleId = null;
             $ruleReason = null;
             if (array_key_exists('priority', $opts) && $opts['priority'] !== null) {
@@ -214,6 +225,7 @@ final class QueueService
                     'source'    => $source,
                     'age'       => $this->priorityRules->ageOf($birthYear !== null ? (int) $birthYear : null),
                     'hour'      => (int) date('G'),
+                    'temp_c_x10' => $tempTenths,
                 ]);
                 $priority = $matched['priority'];
                 $ruleId = $matched['rule_id'];
@@ -246,8 +258,8 @@ final class QueueService
                 'INSERT INTO queue_entries
                    (clinic_id, queue_id, patient_id, appointment_id, token_no, token_label, status,
                     priority, priority_reason, priority_rule_id, sort_weight, source, joined_at,
-                    note, created_by, track_token, track_expires_at, version)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)',
+                    note, created_by, track_token, track_expires_at, temp_c_x10, version)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)',
                 [
                     $clinicId, $queueId, $patientId,
                     $opts['appointment_id'] ?? null,
@@ -255,7 +267,7 @@ final class QueueService
                     $priority, $opts['priority_reason'] ?? $ruleReason, $ruleId,
                     $weight, $source, Db::now(),
                     $opts['note'] ?? null, Auth::id(),
-                    $token, $expires,
+                    $token, $expires, $tempTenths,
                 ]
             );
 

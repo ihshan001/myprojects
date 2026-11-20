@@ -16,6 +16,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BillingController;
 use App\Http\Controllers\ClinicController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DoctorController;
 use App\Http\Controllers\DisplayController;
 use App\Http\Controllers\EmailVerificationController;
 use App\Http\Controllers\MonitorController;
@@ -33,6 +34,9 @@ use App\Http\Controllers\AppointmentPolicyController;
 use App\Http\Controllers\BreakController;
 use App\Http\Controllers\IncidentController;
 use App\Http\Controllers\OnboardingController;
+use App\Http\Controllers\LegalController;
+use App\Http\Controllers\WelcomeController;
+use App\Http\Controllers\OnboardingStatusController;
 use App\Http\Controllers\PriorityRuleController;
 use App\Http\Controllers\WorkflowController;
 use App\Http\Controllers\QueueConfigController;
@@ -42,6 +46,20 @@ use App\Http\Controllers\RoomController;
 Router::get('/', [PublicController::class, 'landing']);
 Router::get('/features', [PublicController::class, 'features']);
 Router::get('/pricing', [PublicController::class, 'pricing']);
+/* ----------------------------------------------------------- welcome */
+// The link an approved clinic receives. Public because the owner is not signed
+// in yet, and the token in the URL is the credential.
+Router::get('/welcome/{token}', [WelcomeController::class, 'show']);
+Router::post('/welcome/{token}', [WelcomeController::class, 'accept']);
+
+/* ------------------------------------------------------------- legal */
+// Public and unauthenticated on purpose: a privacy notice that needs a login
+// is not a notice. These are the pages the PDPA requires to be reachable at
+// the point where data is collected.
+Router::get('/privacy', [LegalController::class, 'privacy']);
+Router::get('/terms', [LegalController::class, 'terms']);
+Router::get('/dpa', [LegalController::class, 'dpa']);
+
 Router::get('/register', [PublicController::class, 'registerForm']);
 Router::post('/register', [PublicController::class, 'register']);
 Router::get('/t/{token}', [PublicController::class, 'track'], ['csrf' => false]);
@@ -52,7 +70,9 @@ Router::post('/t/{token}/reschedule', [PublicController::class, 'rescheduleTrack
 Router::post('/t/{token}/rate', [PublicController::class, 'rateVisit']);
 Router::get('/demo/board', [PublicController::class, 'demoBoard']);
 Router::get('/manifest.webmanifest', [PublicController::class, 'manifest']);
-Router::get('/sw.js', [PublicController::class, 'serviceWorker']);
+// /sw.js is a real file in public/. The route that used to be here served a
+// stale qp-v1 copy that .htaccess never reached (Apache sends existing files
+// straight to disk), so the tests were green against code no browser ran.
 
 /* ----------------------------------------------------------------- auth */
 Router::get('/login', [AuthController::class, 'showLogin']);
@@ -78,6 +98,13 @@ Router::get('/invite/{token}', [AuthController::class, 'showInvite'], ['csrf' =>
 Router::post('/invite/{token}', [AuthController::class, 'acceptInvite']);
 // Account security (2FA enrolment) — any signed-in user
 Router::get('/settings/security', [AuthController::class, 'security'], ['auth' => true]);
+// Your own details. The only place a solo owner can put their own name in,
+// since the Starter plan has no "add doctor" flow to do it for them.
+Router::get('/settings/profile', [AuthController::class, 'showProfile'], ['auth' => true]);
+Router::post('/settings/profile', [AuthController::class, 'saveProfile'], ['auth' => true]);
+// Your own password. Also the landing page for a temporary one.
+Router::get('/settings/password', [AuthController::class, 'showChangePassword'], ['auth' => true]);
+Router::post('/settings/password', [AuthController::class, 'changePassword'], ['auth' => true]);
 Router::post('/settings/security/2fa/begin', [AuthController::class, 'beginTwoFactor'], ['auth' => true]);
 Router::post('/settings/security/2fa/confirm', [AuthController::class, 'confirmTwoFactor'], ['auth' => true]);
 Router::post('/settings/security/2fa/disable', [AuthController::class, 'disableTwoFactor'], ['auth' => true]);
@@ -86,6 +113,14 @@ Router::post('/locale', [AuthController::class, 'locale']);
 
 /* ------------------------------------------------------------ reception */
 Router::get('/app', [DashboardController::class, 'index'], ['auth' => true, 'ability' => 'queue.operate']);
+
+/* The doctor workspace. Kept separate from the reception dashboard on
+   purpose: the PDF asks for a dedicated, minimal doctor experience with its
+   own navigation, not the clinic board with a few links hidden. */
+Router::get('/doctor', [DoctorController::class, 'today'], ['auth' => true, 'ability' => 'queue.consult']);
+Router::get('/doctor/schedule', [DoctorController::class, 'schedule'], ['auth' => true, 'ability' => 'queue.consult']);
+Router::get('/doctor/patients', [DoctorController::class, 'patients'], ['auth' => true, 'ability' => 'queue.consult']);
+Router::get('/doctor/profile', [DoctorController::class, 'profile'], ['auth' => true, 'ability' => 'queue.consult']);
 Router::get('/queue/new', [QueueController::class, 'newPatient'], ['auth' => true, 'ability' => 'queue.issue']);
 Router::post('/queue/new', [QueueController::class, 'createEntry'], ['auth' => true, 'ability' => 'queue.issue']);
 Router::get('/queue', [QueueController::class, 'show'], ['auth' => true, 'ability' => 'queue.operate']);
@@ -102,14 +137,22 @@ Router::post('/queue/action', [QueueController::class, 'action'], ['auth' => tru
 Router::post('/queue/step', [QueueController::class, 'markStep'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/session/start', [QueueController::class, 'startSession'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/session', [QueueController::class, 'sessionControl'], ['auth' => true, 'ability' => 'queue.operate']);
+// Tell the line what is happening. A deliberate button, never automatic: an
+// SMS on every two-minute pause spends the clinic's credit and teaches
+// patients to ignore the messages that matter.
+Router::post('/queue/notify', [QueueController::class, 'notifyWaiting'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::post('/queue/delay', [QueueController::class, 'announceDelay'], ['auth' => true, 'ability' => 'queue.operate']);
 Router::get('/display', [DisplayController::class, 'screen'], ['auth' => true]);
+Router::get('/settings/displays', [DisplayController::class, 'displays'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/display/rotate', [DisplayController::class, 'rotate'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/display/keys', [DisplayController::class, 'issueKey'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/display/keys/{id}/revoke', [DisplayController::class, 'revokeKey'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/display/kiosk', [DisplayController::class, 'kioskIssuing'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/display/kiosk/off', [DisplayController::class, 'kioskRevoke'], ['auth' => true, 'ability' => 'clinic.manage']);
 
 /* ------------------------------------------------------- patients, appts */
 Router::get('/patients', [PatientController::class, 'index'], ['auth' => true, 'ability' => 'patient.manage']);
+Router::post('/patients', [PatientController::class, 'store'], ['auth' => true, 'ability' => 'patient.manage']);
 Router::get('/patients/{id}', [PatientController::class, 'show'], ['auth' => true, 'ability' => 'patient.manage']);
 Router::post('/patients/{id}', [PatientController::class, 'update'], ['auth' => true, 'ability' => 'patient.manage']);
 
@@ -138,6 +181,10 @@ Router::post('/queues/{id}/rename', [QueueConfigController::class, 'rename'], ['
 Router::get('/queues/priority-rules', [PriorityRuleController::class, 'index'], ['auth' => true]);
 Router::post('/queues/priority-rules', [PriorityRuleController::class, 'save'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/queues/priority-rules/{id}/toggle', [PriorityRuleController::class, 'toggle'], ['auth' => true, 'ability' => 'clinic.manage']);
+// The list is the clinic's ranked policy, so its order is editable data.
+// POST /reorder takes the whole list; POST /{id}/move is the keyboard path.
+Router::post('/queues/priority-rules/reorder', [PriorityRuleController::class, 'reorder'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/queues/priority-rules/{id}/move', [PriorityRuleController::class, 'move'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/queues/priority-rules/{id}/delete', [PriorityRuleController::class, 'delete'], ['auth' => true, 'ability' => 'clinic.manage']);
 
 // Service workflows — the steps a visit must pass before it is complete.
@@ -146,6 +193,9 @@ Router::post('/queues/workflows', [WorkflowController::class, 'save'], ['auth' =
 Router::post('/queues/workflows/{id}/delete', [WorkflowController::class, 'delete'], ['auth' => true, 'ability' => 'clinic.manage']);
 
 // Getting started — a checklist measured from clinic data, not ticks.
+// Reachable in every clinic state, including pending and declined: it is the
+// one page the front-controller gate lets an unapproved clinic open.
+Router::get('/onboarding-status', [OnboardingStatusController::class, 'index'], ['auth' => true]);
 Router::get('/getting-started', [OnboardingController::class, 'index'], ['auth' => true]);
 Router::get('/getting-started/display', [OnboardingController::class, 'seenDisplay'], ['auth' => true]);
 
@@ -211,6 +261,9 @@ Router::post('/settings/staff', [ClinicController::class, 'storeStaff'], ['auth'
 Router::post('/settings/invites', [ClinicController::class, 'inviteStaff'], ['auth' => true, 'ability' => 'staff.manage']);
 Router::post('/settings/invites/{id}/revoke', [ClinicController::class, 'revokeInvite'], ['auth' => true, 'ability' => 'staff.manage']);
 Router::get('/settings/templates', [ClinicController::class, 'templates'], ['auth' => true]);
+Router::get('/settings/integrations', [ClinicController::class, 'integrations'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/settings/integrations/connect', [ClinicController::class, 'connectIntegration'], ['auth' => true, 'ability' => 'clinic.manage']);
+Router::post('/settings/integrations/disconnect', [ClinicController::class, 'disconnectIntegration'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/settings/templates', [ClinicController::class, 'saveTemplate'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/settings/templates/reset', [ClinicController::class, 'resetTemplate'], ['auth' => true, 'ability' => 'clinic.manage']);
 
@@ -234,6 +287,9 @@ Router::get('/audit', [ReportController::class, 'audit'], ['auth' => true, 'abil
 
 /* -------------------------------------------------------------- billing */
 Router::get('/billing', [BillingController::class, 'index'], ['auth' => true]);
+// The printable document. Bank-transfer billing needs an invoice a clinic can
+// actually file, not just a row in a table.
+Router::get('/billing/invoices/{id}', [BillingController::class, 'invoice'], ['auth' => true]);
 Router::post('/billing/plan', [BillingController::class, 'changePlan'], ['auth' => true, 'ability' => 'clinic.manage']);
 Router::post('/billing/pay', [BillingController::class, 'pay'], ['auth' => true, 'ability' => 'billing.view']);
 Router::post('/billing/withdraw-claim', [BillingController::class, 'withdrawClaim'], ['auth' => true, 'ability' => 'billing.view']);
@@ -243,6 +299,10 @@ Router::get('/admin', [AdminController::class, 'index'], ['auth' => true, 'roles
 Router::get('/admin/clinics', [AdminController::class, 'clinics'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/admin/clinics/{id}', [AdminController::class, 'updateClinic'], ['auth' => true, 'roles' => ['super_admin']]);
 // Suspension stops new tokens without deleting anything or signing staff out.
+// Re-send the owner's welcome link when the first did not arrive.
+Router::post('/admin/clinics/{id}/resend-welcome', [AdminController::class, 'resendWelcome'], ['auth' => true, 'roles' => ['super_admin']]);
+// Recording that a closed clinic's data may be deleted. Not the deletion.
+Router::post('/admin/clinics/{id}/purge-approval', [AdminController::class, 'purgeApproval'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/admin/clinics/{id}/suspend', [AdminController::class, 'suspendClinic'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/admin/clinics/{id}/reinstate', [AdminController::class, 'reinstateClinic'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::get('/admin/plans', [AdminController::class, 'plans'], ['auth' => true, 'roles' => ['super_admin']]);
@@ -267,8 +327,15 @@ Router::post('/admin/support/{id}/status', [SupportController::class, 'setStatus
 Router::post('/admin/billing/{id}/verify', [AdminBillingController::class, 'verify'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::post('/admin/billing/{id}/reject', [AdminBillingController::class, 'reject'], ['auth' => true, 'roles' => ['super_admin']]);
 Router::get('/admin/features', [AdminController::class, 'features'], ['auth' => true, 'roles' => ['super_admin']]);
-Router::post('/admin/features/{clinicId}', [AdminController::class, 'saveFeature'], ['auth' => true, 'roles' => ['super_admin'], 'csrf' => false]);
-Router::post('/admin/features/{clinicId}/unset', [AdminController::class, 'unsetFeature'], ['auth' => true, 'roles' => ['super_admin'], 'csrf' => false]);
+// The same checks /api/health returns, laid out for a person. Super admin
+// only: the checks name tenants, queue depth and staff.
+Router::get('/admin/monitor', [AdminController::class, 'monitor'], ['auth' => true, 'roles' => ['super_admin']]);
+// CSRF is ON. These two were the only authenticated POSTs in the file with it
+// turned off, and nothing replaced it — the forms already send csrf_field(), so
+// the token was being generated, rendered and then ignored. A page on another
+// site could toggle a feature for any clinic while a super admin was signed in.
+Router::post('/admin/features/{clinicId}', [AdminController::class, 'saveFeature'], ['auth' => true, 'roles' => ['super_admin']]);
+Router::post('/admin/features/{clinicId}/unset', [AdminController::class, 'unsetFeature'], ['auth' => true, 'roles' => ['super_admin']]);
 
 /* ------------------------------------------------------------- JSON API */
 Router::get('/api/queue/board', [ApiController::class, 'board'], ['auth' => true, 'ability' => 'queue.operate']);
@@ -283,6 +350,10 @@ Router::get('/settings/offline', [ClinicController::class, 'offline'], ['auth' =
 Router::get('/api/track/{token}', [ApiController::class, 'track']);
 Router::get('/api/display/{key}', [ApiController::class, 'display']);
 Router::get('/board/{key}', [DisplayController::class, 'publicScreen']);
+// Read-only "where do I stand?" for one patient. Keyed like the board so it
+// needs no sign-in and inherits the same revocation, and declared next to it
+// so nothing broader can shadow the {key} segment.
+Router::get('/board/{key}/position', [DisplayController::class, 'position']);
 Router::get('/live/{key}', [DisplayController::class, 'live']);
 
 // Online booking: 404 for clinics that have not opted in (see PublicController).

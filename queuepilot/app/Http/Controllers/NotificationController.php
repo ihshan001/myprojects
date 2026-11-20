@@ -39,9 +39,37 @@ final class NotificationController
 
         $tab = Request::string('tab', 'staff');
 
+        // The outbox row only remembers the last attempt. When a patient says
+        // they never got the message, what matters is every attempt — hence
+        // the drill-down against the append-only log.
+        $noticeId = Request::int('notice');
+        $attempts = [];
+        $notice = null;
+        if ($noticeId > 0) {
+            $notice = Db::one(
+                'SELECT n.*, e.token_label, p.full_name
+                   FROM notifications n
+                   LEFT JOIN queue_entries e ON e.id = n.entry_id
+                   LEFT JOIN patients p ON p.id = e.patient_id
+                  WHERE n.id = ? AND n.clinic_id = ?',
+                [$noticeId, $clinicId]
+            );
+            if ($notice !== null) {
+                $attempts = Db::all(
+                    'SELECT attempt, channel, outcome, error, created_at
+                       FROM notification_logs
+                      WHERE notification_id = ? AND clinic_id = ?
+                      ORDER BY attempt',
+                    [$noticeId, $clinicId]
+                );
+            }
+        }
+
         view('notifications/index', [
             'title' => 'Notifications',
             'tab' => $tab === 'patients' ? 'patients' : 'staff',
+            'notice' => $notice,
+            'attempts' => $attempts,
             'staffNotices' => $service->inbox($clinicId, $userId, 100),
             'unread' => $service->unreadCount($clinicId, $userId),
             'patientNotices' => Db::all(

@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 use App\Core\Auth;
 use App\Core\Db;
 use App\Core\Request;
+use App\Core\Session;
 use App\Services\AuditService;
 use App\Services\FeatureService;
 use App\Services\LifecycleService;
@@ -42,6 +43,11 @@ final class AdminController
             // worker died or a backup is stale.
             'alerts' => (new \App\Services\MonitorService())->openAlerts(),
             'health' => (new \App\Services\MonitorService())->run(),
+            // Work waiting on a human, shown above the tenant table. A clinic
+            // that applied on Friday and is still pending on Tuesday was not
+            // declined, it was missed — and until an admin opens /admin/clinics
+            // this is the only place that says so.
+            'notices' => (new \App\Services\PlatformAlertService())->unread((int) (Auth::id() ?? 0)),
             'totals' => [
                 'clinics' => count($clinics),
                 'active' => count(array_filter($clinics, fn ($c) => $c['billing_status'] === 'active')),
@@ -52,6 +58,72 @@ final class AdminController
                 ),
             ],
         ]);
+    }
+
+    /**
+     * Platform health, as a page.
+     *
+     * Every other admin screen answers "is the business OK"; this one answers
+     * "is the software OK" — the same checks /api/health returns, readable by
+     * a person instead of a probe.
+     *
+     * Two reasons to look at it here rather than curl the endpoint. A human
+     * can judge whether 340 ms of database latency is actually a problem
+     * right now, and a probe cannot. And a failing check can be read next to
+     * the incident the team already opened about it, instead of in
+     * isolation — which is why the recent incidents are on the same screen.
+     *
+     * Super admin only: these checks name tenants, queue depth and staff.
+     */
+    public function monitor(): void
+    {
+        $service = new \App\Services\MonitorService();
+
+        // ?clinic=<id> narrows the same checks to one tenant, which is the
+        // view to open when a single branch reports trouble.
+        $clinicId = Request::int('clinic');
+        $scoped   = null;
+        $result   = $service->run();
+        if ($clinicId > 0) {
+            $clinic = Db::one('SELECT id, name FROM clinics WHERE id = ?', [$clinicId]);
+            if ($clinic !== null) {
+                $scoped = $clinic;
+                $result = $service->run($clinicId);
+            }
+        }
+
+        view('admin/monitor', [
+            'title'     => 'Platform health',
+            'status'    => $result['status'],
+            'checks'    => $result['checks'],
+            'generated' => $result['generated_at'] ?? null,
+            'scoped'    => $scoped,
+            'alerts'    => $service->openAlerts(),
+            'incidents' => $this->recentIncidents(),
+            'clinics'   => Db::all('SELECT id, name FROM clinics ORDER BY name'),
+        ]);
+    }
+
+    /**
+     * The eight most recent incidents, whatever state they are in.
+     *
+     * Guarded because a health page that 500s on a database missing the
+     * incidents table is worse than one that simply shows none: health
+     * tooling is exactly what gets opened while the platform is already
+     * unwell.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function recentIncidents(): array
+    {
+        try {
+            return Db::all(
+                'SELECT id, reference, title, severity, status, clinic_id, detected_at
+                   FROM incidents ORDER BY detected_at DESC LIMIT 8'
+            );
+        } catch (\Throwable $e) {
+            return [];
+        }
     }
 
     public function clinics(): void
@@ -75,6 +147,10 @@ final class AdminController
             'title' => 'Clinics',
             'clinics' => $clinics,
             'plans' => Db::all('SELECT * FROM plans ORDER BY sort_order'),
+            // The decision queue, oldest first. A separate list rather than a
+            // filter on the table above: work to be done should not be mixed
+            // in with the record of work already done.
+            'awaiting' => (new LifecycleService())->awaitingDecision(),
         ]);
     }
 
@@ -88,6 +164,81 @@ final class AdminController
         }
 
         $action = Request::string('action');
+
+        // Approval and refusal. These are the only way a clinic leaves
+        // 'pending', so they are handled before the edit actions below — an
+        // unapproved clinic has nothing worth editing yet.
+        if (in_array($action, ['approve', 'trial', 'decline'], true)) {
+            $lifecycle = new LifecycleService();
+            $result = match ($action) {
+                'approve' => $lifecycle->approve(
+                    $clinicId,
+                    Auth::id(),
+                    null,
+                    Request::string('billing_cycle') !== '' ? Request::string('billing_cycle') : null
+                ),
+                'trial'   => $lifecycle->grantTrial($clinicId, (int) Request::input('trial_days', 14), Auth::id()),
+                'decline' => $lifecycle->decline($clinicId, (string) Request::input('reason', ''), Auth::id()),
+            };
+            $message = $result['ok']
+                ? match ($action) {
+                    'approve' => $clinic['name'] . ' is approved and live on '
+                        . ($result['billing_cycle'] === 'yearly' ? 'a yearly' : 'a monthly') . ' plan.',
+                    'trial'   => $clinic['name'] . ' is on a trial until ' . ($result['trial_ends_on'] ?? '') . '.',
+                    'decline' => $clinic['name'] . ' was declined. They can see the reason you gave.',
+                }
+                : $result['error'];
+
+            // Sending the owner their addresses and a password link is the
+            // last step of approval, and the one that is easiest to forget —
+            // an approved clinic nobody told about is a support call tomorrow.
+            // Reported honestly: if mail is not configured the clinic is still
+            // approved, and the operator needs to know the email never left so
+            // they can pass the link on by hand.
+            // A paid activation owes money from the day it goes live. Raising
+            // the invoice here — and emailing it — is what makes "activate the
+            // monthly package" produce the invoice the customer is meant to pay.
+            // The cron run cannot do it: it only bills clinics whose renewal
+            // date has passed, and a clinic approved today renews in a month. A
+            // trial is deliberately skipped; a trial has no invoice.
+            if ($result['ok'] && $action === 'approve') {
+                try {
+                    $invoice = (new \App\Services\InvoiceService())->raiseFirst($clinicId);
+                    if ($invoice['ok']) {
+                        $message .= ' Invoice ' . $invoice['number'] . ' for '
+                            . money((float) $invoice['amount']) . ' raised and emailed.';
+                    } else {
+                        $message .= ' No invoice raised: ' . $invoice['error'];
+                    }
+                } catch (\Throwable $e) {
+                    \App\Core\Log::warn('billing.activation_invoice_failed', [
+                        'clinic' => $clinicId, 'error' => $e->getMessage(),
+                    ]);
+                    $message .= ' The clinic is live, but the first invoice could not be raised — see the log.';
+                }
+            }
+
+            if ($result['ok'] && in_array($action, ['approve', 'trial'], true)) {
+                $welcome = new \App\Services\WelcomeService();
+                $issued = $welcome->issue($clinicId, Auth::id());
+                if ($issued['ok']) {
+                    $sent = $welcome->send(
+                        Db::one('SELECT * FROM clinics WHERE id = ?', [$clinicId]) ?? $clinic,
+                        (string) $issued['token'],
+                        (string) $issued['email'],
+                        (string) $issued['name']
+                    );
+                    $message .= $sent['sent']
+                        ? ' A welcome email with both addresses has been sent.'
+                        : ' Mail is not configured, so no welcome email was sent — copy the link from the clinic page.';
+                }
+            }
+
+            flash($result['ok'] ? 'success' : 'error', $message);
+            redirect('/admin/clinics');
+            return;
+        }
+
         if ($action === 'suspend' || $action === 'activate') {
             $status = $action === 'suspend' ? 'suspended' : 'active';
             // Data is preserved in both directions — suspension is a billing
@@ -122,6 +273,96 @@ final class AdminController
      * not delete anything and does not sign staff out, because a billing
      * dispute should not cost a clinic its day's work.
      */
+    /**
+     * Send the owner a fresh welcome link.
+     *
+     * Needed whenever the first one did not arrive: mail was not configured
+     * yet, it landed in spam, or it expired before they got to it. Issuing a
+     * new link supersedes the old one, which is the safe direction — a link
+     * that was sitting in a mailbox for three weeks stops working when a new
+     * one is sent.
+     */
+    public function resendWelcome(string $id): void
+    {
+        $clinicId = (int) $id;
+        $clinic = Db::one('SELECT * FROM clinics WHERE id = ?', [$clinicId]);
+        if ($clinic === null) {
+            abort(404, 'That clinic does not exist.');
+            return;
+        }
+        if (($clinic['approved_at'] ?? null) === null && ($clinic['trial_ends_on'] ?? null) === null) {
+            flash('error', 'That clinic has not been approved yet, so there is no account to set up.');
+            redirect('/admin/clinics');
+        }
+
+        $welcome = new \App\Services\WelcomeService();
+        $issued = $welcome->issue($clinicId, Auth::id());
+        if (!$issued['ok']) {
+            flash('error', $issued['error']);
+            redirect('/admin/clinics');
+        }
+
+        $sent = $welcome->send($clinic, (string) $issued['token'], (string) $issued['email'], (string) $issued['name']);
+        if (!$sent['sent']) {
+            // The token is only ever returned once, so it is shown here rather
+            // than lost. The operator can pass it on by phone.
+            $ops = \App\Core\Tenant::opsUrl($clinic);
+            Session::flash('welcome_link', rtrim($ops, '/') . '/welcome/' . $issued['token']);
+            flash('error', 'Mail is not configured, so nothing was sent. Copy the link below and pass it on.');
+            redirect('/admin/clinics');
+        }
+
+        flash('success', 'A new welcome link has been emailed to ' . $issued['email'] . '. The previous one no longer works.');
+        redirect('/admin/clinics');
+    }
+
+    /**
+     * Record, or take back, a decision to delete a closed clinic's data.
+     *
+     * Deliberately a decision and not an action: this writes a flag. The
+     * deletion is a separate command run by an operator, because it cannot be
+     * undone from a web page and the wrong click here destroys a clinic's
+     * entire patient history.
+     */
+    public function purgeApproval(string $id): void
+    {
+        $clinicId = (int) $id;
+        $clinic = Db::one('SELECT * FROM clinics WHERE id = ?', [$clinicId]);
+        if ($clinic === null) {
+            abort(404, 'That clinic does not exist.');
+            return;
+        }
+
+        $lifecycle = new \App\Services\LifecycleService();
+        $decision = (string) Request::input('decision', '');
+
+        if ($decision === 'revoke') {
+            $result = $lifecycle->revokePurgeApproval($clinicId, Auth::id());
+            flash('success', $clinic['name'] . ' is no longer marked for deletion. Nothing was removed.');
+            redirect('/admin/clinics');
+        }
+
+        // The note is the audit trail. Refuse a blank one here rather than
+        // letting the service reject it, so the message appears next to the
+        // field the operator was looking at.
+        $note = trim((string) Request::input('note', ''));
+        if (mb_strlen($note) < 10) {
+            flash('error', 'Record how you contacted them and what they said — at least a sentence. '
+                . 'It is the only record of why this clinic\'s data was deleted.');
+            redirect('/admin/clinics');
+        }
+
+        $result = $lifecycle->approvePurge($clinicId, $note, Auth::id());
+        if (!$result['ok']) {
+            flash('error', $result['error']);
+            redirect('/admin/clinics');
+        }
+
+        flash('success', $clinic['name'] . ' is marked for deletion. Nothing is removed until an operator '
+            . 'runs the purge tool, and it can be reversed until then.');
+        redirect('/admin/clinics');
+    }
+
     public function suspendClinic(string $id): void
     {
         $result = (new LifecycleService())->suspend(

@@ -110,6 +110,27 @@ final class QueueRepository
         );
     }
 
+    /**
+     * The next patient who should be called, using the same ordering the
+     * board renders (priority, then weight, then who joined first).
+     *
+     * $exceptId keeps a "complete & call next" from calling the very entry it
+     * just completed when the row still matches the ordering.
+     */
+    public function nextWaitingForCall(int $clinicId, int $queueId, int $exceptId = 0): ?array
+    {
+        return Db::one(
+            "SELECT e.*, p.full_name
+               FROM queue_entries e
+               JOIN patients p ON p.id = e.patient_id
+              WHERE e.clinic_id = ? AND e.queue_id = ? AND e.status = 'waiting'
+                AND e.id <> ?
+              ORDER BY e.priority DESC, e.sort_weight ASC, e.id ASC
+              LIMIT 1",
+            [$clinicId, $queueId, $exceptId]
+        );
+    }
+
     /** Row lock for mutation. SQLite ignores FOR UPDATE; MySQL takes it. */
     public function lockEntry(int $clinicId, int $entryId): ?array
     {
@@ -139,6 +160,34 @@ final class QueueRepository
     }
 
     /** Public tracking: token + clinic scope, no tenant information in the URL. */
+    /**
+     * Find today's entry by the token printed on the patient's slip.
+     *
+     * Read-only, and scoped to one clinic and one session: the label alone
+     * is public (it is shouted across a waiting room), so it must only ever
+     * resolve inside the queue it was issued in. Compare entryByToken(),
+     * which takes the private track token and can cross sessions.
+     */
+    public function entryByLabel(int $clinicId, int $queueId, string $label): ?array
+    {
+        return Db::one(
+            "SELECT e.*, q.name AS queue_name, q.status AS queue_status, q.doctor_id,
+                    d.name AS doctor_name, d.avg_consult_minutes, s.name AS specialty,
+                    r.name AS room_name, c.name AS clinic_name, c.phone AS clinic_phone,
+                    c.brand_color, c.locale
+               FROM queue_entries e
+               JOIN queues q ON q.id = e.queue_id
+               JOIN clinics c ON c.id = e.clinic_id
+               LEFT JOIN doctors d ON d.id = q.doctor_id
+               LEFT JOIN specialties s ON s.id = d.specialty_id
+               LEFT JOIN rooms r ON r.id = d.room_id
+              WHERE e.clinic_id = ? AND e.queue_id = ? AND q.session_date = ?
+                AND UPPER(e.token_label) = UPPER(?)
+              ORDER BY e.id DESC LIMIT 1",
+            [$clinicId, $queueId, Db::today(), trim($label)]
+        );
+    }
+
     public function entryByToken(string $token): ?array
     {
         return Db::one(

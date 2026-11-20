@@ -16,7 +16,7 @@
   <div class="flex flex-wrap gap-2">
     <?php if (count($queues) > 1): ?>
       <form method="get" action="/queue">
-        <select class="select !py-2 text-xs" name="queue_id" onchange="this.form.submit()">
+        <select class="select !py-2 text-xs" name="queue_id" data-submit-on-change>
           <?php foreach ($queues as $q): ?>
             <option value="<?= (int) $q['id'] ?>" <?= (int) $q['id'] === (int) $queue['id'] ? 'selected' : '' ?>>
               <?= e($q['name']) ?> (<?= (int) $q['waiting_count'] ?>)
