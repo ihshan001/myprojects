@@ -8139,6 +8139,60 @@ Assert::test('the install guide matches the migrations that actually exist', fun
     );
 });
 
+Assert::test('the XAMPP env profile is real, complete and matches its guide', function (): void {
+    // .env.xampp.example exists so a first-time installer edits one value
+    // instead of twenty. It is therefore only useful while it agrees with the
+    // config the code actually reads — a leftover key silently does nothing,
+    // and a missing key falls back to a production default. Both look like the
+    // app ignoring your settings.
+    $profile = QP_ROOT . '/.env.xampp.example';
+    Assert::true(is_file($profile), '.env.xampp.example ships with the repository');
+    $text = (string) file_get_contents($profile);
+
+    $keys = static function (string $body): array {
+        $out = [];
+        foreach (explode("\n", $body) as $line) {
+            if (preg_match('/^([A-Z][A-Z0-9_]*)=/', $line, $m) === 1) {
+                $out[] = $m[1];
+            }
+        }
+        return $out;
+    };
+
+    $profileKeys = $keys($text);
+    $exampleKeys = $keys((string) file_get_contents(QP_ROOT . '/.env.example'));
+    Assert::true(count($profileKeys) >= 15, 'the profile sets a working minimum of keys');
+
+    // Every key must be one the example documents, or it is a typo.
+    $unknown = array_values(array_diff($profileKeys, $exampleKeys));
+    Assert::same([], $unknown, 'every key in the XAMPP profile is a real setting');
+
+    // It must actually be a local MySQL profile, not a copy of production.
+    $expect = [
+        'APP_ENV=local',
+        'APP_DEBUG=true',
+        'DB_DRIVER=mysql',
+        'DB_USERNAME=root',
+        'DB_DATABASE=queuepilot',
+        'MAIL_TRANSPORT=log',
+    ];
+    foreach ($expect as $line) {
+        Assert::true(str_contains($text, $line), "the profile sets {$line}");
+    }
+    Assert::true(
+        (bool) preg_match('~^APP_URL=http://localhost/[a-z0-9_-]+$~m', $text),
+        'APP_URL is a localhost subfolder with no trailing slash'
+    );
+
+    // The guide has to point at it, or nobody will find it.
+    $guide = (string) file_get_contents(QP_ROOT . '/docs/XAMPP-QUICKSTART.md');
+    Assert::true(
+        str_contains($guide, 'copy .env.xampp.example .env')
+            || str_contains($guide, 'copy .env.xampp.example .env'),
+        'the quickstart tells you to copy the profile'
+    );
+});
+
 Assert::test('the XAMPP quickstart quotes the real counts and the real recovery commands', function (): void {
     // The quickstart is the guide people actually follow — it is the one with
     // the phpMyAdmin screenshots in their head. The INSTALL.md guard above

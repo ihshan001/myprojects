@@ -127,7 +127,22 @@ any time.
 
 ## 4. Create `.env`
 
-Copy `.env.example` to `.env` in the app folder and edit it. On Windows:
+**The fast path.** This repository ships a profile already set up for this exact
+layout — Apache on port 80, MySQL on `127.0.0.1:3306`, `root` with a blank
+password, the app in `htdocs\clinicqueue`:
+
+```cmd
+cd C:\xampp\htdocs\clinicqueue
+copy .env.xampp.example .env
+```
+
+Then set **one** value, `APP_KEY`, as described below. That is the whole step. The
+rest of this section explains what is in that file and what to change if your
+folder is not called `clinicqueue`.
+
+### Or build it by hand
+
+Copy `.env.example` to `.env` and edit it:
 
 ```cmd
 cd C:\xampp\htdocs\clinicqueue
